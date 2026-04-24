@@ -1,0 +1,11 @@
+node_modules/
+client/node_modules/
+client/build/
+data/
+.env
+*.db
+*.db-shm
+*.db-wal
+*.lock
+.DS_Store
+{server,client

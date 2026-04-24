@@ -1,0 +1,113 @@
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+/* ── Dark theme (default) ──────────────────────────────── */
+:root,[data-theme="dark"]{
+  --bg:#0d1117;
+  --bg2:#161c2a;
+  --bg3:#1c2336;
+  --bg4:#222b42;
+  --bg5:#2a3450;
+  --border:rgba(255,255,255,0.06);
+  --border2:rgba(255,255,255,0.11);
+  --border3:rgba(255,255,255,0.18);
+  --text:#e4eaf6;
+  --text2:#8898bb;
+  --text3:#6b7da8;
+  --accent:#3b82f6;
+  --accent-dim:rgba(59,130,246,0.15);
+  --accent2:#8b5cf6;
+  --teal:#14b8a6;
+  --success:#10b981;
+  --warn:#f59e0b;
+  --danger:#ef4444;
+  --sidebar-w:248px;
+  --sidebar-collapsed:60px;
+  --topbar-h:56px;
+  --font-head:'Manrope',sans-serif;
+  --font-body:'Manrope',sans-serif;
+  --font-mono:'DM Mono',monospace;
+  --radius:8px;
+  --radius-lg:12px;
+  --shadow:0 4px 24px rgba(0,0,0,0.4);
+  --shadow-sm:0 2px 8px rgba(0,0,0,0.25);
+  color-scheme: dark;
+
+  /* Highlight row colors */
+  --hl-yellow: rgba(245,158,11,0.18);
+  --hl-green:  rgba(16,185,129,0.18);
+  --hl-red:    rgba(239,68,68,0.18);
+  --hl-blue:   rgba(59,130,246,0.18);
+}
+
+/* ── Light theme ───────────────────────────────────────── */
+[data-theme="light"]{
+  --bg:#f0f3fa;
+  --bg2:#ffffff;
+  --bg3:#f7f9fe;
+  --bg4:#ebeef8;
+  --bg5:#e0e5f5;
+  --border:rgba(0,0,0,0.07);
+  --border2:rgba(0,0,0,0.11);
+  --border3:rgba(0,0,0,0.18);
+  --text:#0d1117;
+  --text2:#3d4f6e;
+  --text3:#6b7a99;
+  --accent:#2563eb;
+  --accent-dim:rgba(37,99,235,0.1);
+  --accent2:#7c3aed;
+  --teal:#0d9488;
+  --success:#059669;
+  --warn:#d97706;
+  --danger:#dc2626;
+  --shadow:0 4px 24px rgba(0,0,0,0.08);
+  --shadow-sm:0 2px 8px rgba(0,0,0,0.06);
+  color-scheme: light;
+
+  /* Highlight row colors */
+  --hl-yellow: rgba(245,158,11,0.15);
+  --hl-green:  rgba(5,150,105,0.15);
+  --hl-red:    rgba(220,38,38,0.12);
+  --hl-blue:   rgba(37,99,235,0.12);
+}
+
+/* ── Base ──────────────────────────────────────────────── */
+html,body,#root{height:100%}
+body{
+  font-family:var(--font-body);
+  background:var(--bg);
+  color:var(--text);
+  font-size:14px;
+  line-height:1.6;
+  -webkit-font-smoothing:antialiased;
+}
+
+/* ── Scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border2);border-radius:4px}
+::-webkit-scrollbar-thumb:hover{background:var(--border3)}
+
+/* ── Interactive ───────────────────────────────────────── */
+button,input,select,textarea{font-family:var(--font-body);cursor:pointer}
+input,select,textarea{cursor:text}
+a{color:var(--accent);text-decoration:none}
+
+/* ── Chart grid color token ────────────────────────────── */
+:root,[data-theme="dark"]  { --chart-grid: rgba(255,255,255,0.06); }
+[data-theme="light"]       { --chart-grid: rgba(0,0,0,0.07); }
+
+/* ── Recharts light-mode fixes ─────────────────────────── */
+[data-theme="light"] .recharts-cartesian-grid-horizontal line,
+[data-theme="light"] .recharts-cartesian-grid-vertical line {
+  stroke: var(--chart-grid) !important;
+}
+[data-theme="light"] .recharts-text { fill: var(--text3) !important; }
+
+/* ── Utility ───────────────────────────────────────────── */
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+.font-mono{font-family:var(--font-mono)}
+
+/* ── Keyframes ─────────────────────────────────────────── */
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes fadein{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes pulse-ring{0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,.4)}50%{box-shadow:0 0 0 5px transparent}}
