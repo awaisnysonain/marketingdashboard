@@ -9,6 +9,15 @@ export const getDriveSheets = () => fetch(`${B}/api/drive/sheets`).then(r=>r.jso
 export const getSpreadsheet = () => fetch(`${B}/api/spreadsheet`).then(r=>r.json());
 export const selectSpreadsheet = (id) => fetch(`${B}/api/spreadsheet/select`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({spreadsheetId:id})}).then(r=>r.json());
 
+export const aiChat = (messages, context='', tab='') =>
+  fetch(`${B}/api/ai/chat`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages,context,tab})}).then(r=>r.json());
+
+export const aiInsights = (tab, headers, rows) =>
+  fetch(`${B}/api/ai/insights`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tab,headers,rows})}).then(r=>r.json());
+
+export const aiFieldHelp = (tab, field, currentValue, allFields) =>
+  fetch(`${B}/api/ai/field-help`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({tab,field,currentValue,allFields})}).then(r=>r.json());
+
 export const addAnnotation = body => fetch(`${B}/api/annotations`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 export const updateAnnotation = (id,body) => fetch(`${B}/api/annotations/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 export const deleteAnnotation = id => fetch(`${B}/api/annotations/${id}`,{method:'DELETE'}).then(r=>r.json());

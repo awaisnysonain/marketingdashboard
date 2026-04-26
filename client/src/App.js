@@ -3,6 +3,7 @@ import {getStatus,refreshSheets,getDriveSheets,getSpreadsheet,selectSpreadsheet}
 import TopBar from './components/TopBar';
 import TabBar from './components/TabBar';
 import {Icons} from './components/Icons';
+import AiAssistant from './components/AiAssistant';
 
 import SummaryPage from './pages/SummaryPage';
 import DailyInputPage from './pages/DailyInputPage';
@@ -190,6 +191,7 @@ export default function App(){
       </main>
 
       {toast&&<Toast {...toast}/>}
+      {auth?.authenticated&&<AiAssistant activeTab={activeTab}/>}
       <style>{`.hide-scrollbar::-webkit-scrollbar{display:none}`}</style>
     </div>
   );

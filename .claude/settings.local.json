@@ -72,7 +72,17 @@
       "PowerShell($r = Invoke-WebRequest -Uri \"http://localhost:3001/api/sheets/refresh\" -UseBasicParsing; $r.Content)",
       "PowerShell($tabs=@\\(\"Summary\",\"Daily%20Input\",\"Trial%20to%20Paid\",\"By%20Channel\",\"FB%20Campaigns\",\"Trial%20to%20Paid%20Daily%20break%20down\",\"Data%20Map\"\\); foreach\\($t in $tabs\\){ try{ $r=Invoke-WebRequest -Uri \"http://localhost:3001/api/sheets/$t\" -UseBasicParsing -ErrorAction Stop; $j=$r.Content|ConvertFrom-Json; \"[$t] rows=$\\($j.rows.Count\\) cols=$\\($j.headers.Count\\)\" }catch{ \"[$t] ERROR: $\\($_.Exception.Message\\)\" } })",
       "PowerShell(cd E:\\\\nobl-dashboard\\\\client; $env:CI=\"false\"; npm run build 2>&1 | Select-String \"Warning|Error|error|warning\" | Where-Object { $_ -notmatch \"node_modules\" } | Select-Object -First 40)",
-      "PowerShell($tabs=@\\(\"Summary\",\"Daily%20Input\",\"Trial%20to%20Paid\",\"Daily%20Trend\",\"Day%20of%20Week\",\"Weekly%20Trends\",\"Cohort%20Analysis\",\"By%20Product\",\"Product%20x%20Color\",\"Variant%20Activation\",\"By%20Channel\",\"Channel%20Funnel\",\"Tier%20x%20Channel\",\"FB%20Campaigns\",\"FB%20Adsets\",\"Revenue%20Forcast\",\"Trial%20to%20Paid%20Daily%20break%20down\",\"Data%20Map\"\\); foreach\\($t in $tabs\\){ $r=Invoke-WebRequest -Uri \"http://localhost:3001/api/sheets/$t\" -UseBasicParsing -ErrorAction SilentlyContinue; if\\($r\\){ $j=$r.Content|ConvertFrom-Json; $h=\\($j.headers|Where-Object{$_ -notmatch \"^_\"}\\)-join\", \"; \"[$t]: $h\" } })"
+      "PowerShell($tabs=@\\(\"Summary\",\"Daily%20Input\",\"Trial%20to%20Paid\",\"Daily%20Trend\",\"Day%20of%20Week\",\"Weekly%20Trends\",\"Cohort%20Analysis\",\"By%20Product\",\"Product%20x%20Color\",\"Variant%20Activation\",\"By%20Channel\",\"Channel%20Funnel\",\"Tier%20x%20Channel\",\"FB%20Campaigns\",\"FB%20Adsets\",\"Revenue%20Forcast\",\"Trial%20to%20Paid%20Daily%20break%20down\",\"Data%20Map\"\\); foreach\\($t in $tabs\\){ $r=Invoke-WebRequest -Uri \"http://localhost:3001/api/sheets/$t\" -UseBasicParsing -ErrorAction SilentlyContinue; if\\($r\\){ $j=$r.Content|ConvertFrom-Json; $h=\\($j.headers|Where-Object{$_ -notmatch \"^_\"}\\)-join\", \"; \"[$t]: $h\" } })",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no ec2-user@54.172.115.118 ' *)",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=10 ec2-user@54.172.115.118 \"mkdir -p /var/www/html/marketingdashboard && echo done\")",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=10 ec2-user@54.172.115.118 \"cd /var/www/html/marketingdashboard && git clone https://github.com/awaisnysonain/marketingdashboard.git . 2>&1\")",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=10 ec2-user@54.172.115.118 \"ls /var/www/html/marketingdashboard/\")",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=30 ec2-user@54.172.115.118 \"cd /var/www/html/marketingdashboard && npm install 2>&1 | tail -5\")",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=30 ec2-user@54.172.115.118 \"cd /var/www/html/marketingdashboard/client && npm install 2>&1 | tail -5\")",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=30 ec2-user@54.172.115.118 \"cd /var/www/html/marketingdashboard/client && npm run build 2>&1 | tail -10\")",
+      "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=10 ec2-user@54.172.115.118 ' *)",
+      "Bash(ssh -i *)",
+      "Bash(nslookup marketing-dashboard.nysonik.com 8.8.8.8)"
     ]
   }
 }

@@ -1,5 +1,7 @@
-import React,{useState,useEffect,useMemo} from 'react';
+import React,{useState,useEffect,useMemo,useCallback} from 'react';
 import {getTab,fmt$,fmtPct,fmtNum,fmtDate} from '../utils/api';
+import AiInsights from '../components/AiInsights';
+import SelectionBar from '../components/SelectionBar';
 import {
   AreaChart,Area,BarChart,Bar,LineChart,Line,
   XAxis,YAxis,CartesianGrid,Tooltip,Legend,
@@ -128,13 +130,22 @@ export default function GenericSheetPage({tabName}){
   const [search,setSearch]=useState('');
   const [page,setPage]=useState(0);
   const [selCols,setSelCols]=useState(null);
+  const [selectedRows,setSelectedRows]=useState([]);
   const PER_PAGE=100;
 
   useEffect(()=>{
     setLoading(true);
-    setSearch(''); setPage(0); setSelCols(null);
+    setSearch(''); setPage(0); setSelCols(null); setSelectedRows([]);
     getTab(tabName).then(d=>setRawData(d)).catch(()=>setRawData(null)).finally(()=>setLoading(false));
   },[tabName]);
+
+  const toggleRow=useCallback((row)=>{
+    setSelectedRows(prev=>prev.includes(row)?prev.filter(r=>r!==row):[...prev,row]);
+  },[]);
+
+  const toggleAll=useCallback((rows)=>{
+    setSelectedRows(prev=>prev.length===rows.length?[]:rows);
+  },[]);
 
   // ── ALL hooks must be unconditional — no early returns before this block ──
   const shape=useMemo(()=>rawData?detectShape(rawData.headers||[],rawData.rows||[]):null,[rawData]);
@@ -202,6 +213,9 @@ export default function GenericSheetPage({tabName}){
           onFocus={e=>e.target.style.borderColor='var(--accent)'}
           onBlur={e=>e.target.style.borderColor='var(--border2)'}/>
       </div>
+
+      {/* ── AI Insights ──────────────────────────────────────────── */}
+      <AiInsights tab={tabName} headers={rawData?.headers||[]} rows={rawData?.rows||[]}/>
 
       {/* ── KPI Cards ────────────────────────────────────────────── */}
       {kpiCols.length>0&&kpiSource&&(
@@ -284,12 +298,19 @@ export default function GenericSheetPage({tabName}){
       )}
 
       {/* ── Data Table ───────────────────────────────────────────── */}
-      <Section title="Data">
+      <Section title={`Data${selectedRows.length>0?` · ${selectedRows.length} selected`:''}`}>
         <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,overflow:'hidden'}}>
           <div style={{overflowX:'auto',maxHeight:560,overflowY:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
               <thead style={{position:'sticky',top:0,zIndex:2}}>
                 <tr style={{background:'var(--bg4)',borderBottom:'2px solid var(--border2)'}}>
+                  {/* Select-all checkbox */}
+                  <th style={{padding:'9px 10px 9px 14px',width:32,borderRight:'1px solid rgba(255,255,255,.04)'}}>
+                    <input type="checkbox"
+                      checked={pageRows.length>0&&pageRows.every(r=>selectedRows.includes(r))}
+                      onChange={()=>toggleAll(pageRows)}
+                      style={{cursor:'pointer',accentColor:'var(--accent)',width:14,height:14}}/>
+                  </th>
                   {vis.map(h=>{
                     const t=colType(h);
                     const isNum=t==='pct'||t==='$'||t==='num';
@@ -308,13 +329,19 @@ export default function GenericSheetPage({tabName}){
               <tbody>
                 {pageRows.map((r,i)=>{
                   const isTotal=isTotalRow(r,vis);
+                  const isSel=selectedRows.includes(r);
                   return(
                     <tr key={i}
                       style={{borderBottom:'1px solid var(--border)',
-                        background:isTotal?'rgba(59,130,246,.07)':i%2===1?'rgba(255,255,255,.016)':'transparent',
-                        transition:'background .1s',fontWeight:isTotal?700:400}}
-                      onMouseEnter={e=>{if(!isTotal)e.currentTarget.style.background='var(--accent-dim)';}}
-                      onMouseLeave={e=>{e.currentTarget.style.background=isTotal?'rgba(59,130,246,.07)':i%2===1?'rgba(255,255,255,.016)':'transparent';}}>
+                        background:isSel?'rgba(59,130,246,.12)':isTotal?'rgba(59,130,246,.07)':i%2===1?'rgba(255,255,255,.016)':'transparent',
+                        transition:'background .1s',fontWeight:isTotal?700:400,
+                        outline:isSel?'1px solid rgba(59,130,246,.3)':undefined}}
+                      onMouseEnter={e=>{if(!isTotal&&!isSel)e.currentTarget.style.background='var(--accent-dim)';}}
+                      onMouseLeave={e=>{e.currentTarget.style.background=isSel?'rgba(59,130,246,.12)':isTotal?'rgba(59,130,246,.07)':i%2===1?'rgba(255,255,255,.016)':'transparent';}}>
+                      <td style={{padding:'7px 10px 7px 14px',width:32,borderRight:'1px solid rgba(255,255,255,.03)'}}>
+                        {!isTotal&&<input type="checkbox" checked={isSel} onChange={()=>toggleRow(r)}
+                          style={{cursor:'pointer',accentColor:'var(--accent)',width:14,height:14}}/>}
+                      </td>
                       {vis.map(h=>{
                         const v=r[h];
                         const t=colType(h);
@@ -384,6 +411,9 @@ export default function GenericSheetPage({tabName}){
           )}
         </div>
       </Section>
+
+      {/* ── Selection Calculator ─────────────────────────────────── */}
+      <SelectionBar selectedRows={selectedRows} headers={vis} onClear={()=>setSelectedRows([])}/>
     </div>
   );
 }

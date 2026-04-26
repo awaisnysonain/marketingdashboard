@@ -18,6 +18,42 @@ const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
+const OpenAI = require('openai').default;
+
+// ── OpenAI setup ────────────────────────────────────────────────
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+const AI_SYSTEM_PROMPT = `You are an expert analytics assistant embedded inside the NOBL Air & Pilates Flo executive dashboard. You have deep knowledge of both companies:
+
+NOBL AIR (nobltravel.com):
+- Sells AirTag holders, travel accessories, and luggage products via Shopify
+- Key business model: customers buy products AND optionally subscribe to "Air" subscription
+- Critical KPIs: Orders, Air Orders, Attach Rate (% of orders with subscription), Trial-to-Paid (TTP) conversion rate, New Subscribers, Rebill Revenue, Tag Revenue
+- Price tiers: $79, $99, $119, $129, $139, $149 per year
+- Channels: Facebook Ads, organic, email, referral
+- Important metrics: Cohort retention, weekly trends, product mix, channel attribution
+
+PILATES FLO (pilatesflo.com):
+- Pilates studio and fitness business
+- Tracks class attendance, memberships, revenue
+
+YOUR EXPERTISE:
+- E-commerce analytics & Shopify metrics
+- Subscription SaaS/DTC business KPIs and benchmarks
+- Facebook/Meta advertising performance analysis
+- Financial forecasting and revenue modeling
+- Cohort analysis and customer retention
+- Product performance and inventory analysis
+- Marketing attribution and ROAS analysis
+- General business strategy for DTC brands
+
+BEHAVIOR:
+- Be concise, direct, and actionable — this is used by finance, marketing, and management
+- Highlight anomalies, trends, and opportunities immediately
+- Use bullet points for lists, be specific with numbers
+- When you don't have enough data, say so and suggest what to look at
+- Proactively notice problems or opportunities in the data
+- Format currency as $X,XXX and percentages clearly`;
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -345,6 +381,92 @@ app.post('/api/highlights', requireAuth, (req, res) => {
 app.delete('/api/highlights', requireAuth, (req, res) => {
   db.prepare('DELETE FROM highlights WHERE tab=? AND row_key=?').run(req.body.tab, req.body.row_key);
   res.json({ ok:true });
+});
+
+// ── AI Chat ─────────────────────────────────────────────────────
+app.post('/api/ai/chat', requireAuth, async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
+  try {
+    const { messages = [], context = '', tab = '' } = req.body;
+    const tabData = tab && cache.data[tab] ? cache.data[tab] : null;
+    let contextBlock = context || '';
+    if (tabData) {
+      const sample = (tabData.rows || []).slice(0, 30);
+      contextBlock += `\n\nUser is currently viewing tab: "${tab}"\nHeaders: ${JSON.stringify(tabData.headers)}\nSample data (first 30 rows): ${JSON.stringify(sample)}`;
+    }
+    const systemContent = contextBlock
+      ? `${AI_SYSTEM_PROMPT}\n\n--- CURRENT DASHBOARD CONTEXT ---\n${contextBlock}`
+      : AI_SYSTEM_PROMPT;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'system', content: systemContent }, ...messages],
+      max_tokens: 1200,
+      temperature: 0.7,
+    });
+    res.json({ reply: response.choices[0].message.content });
+  } catch(e) {
+    console.error('[AI Chat]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── AI Insights (per-tab analysis) ──────────────────────────────
+app.post('/api/ai/insights', requireAuth, async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
+  try {
+    const { tab, headers, rows } = req.body;
+    const sample = (rows || []).slice(0, 40);
+    const prompt = `Analyze this dashboard data tab named "${tab}" and give 3-4 sharp business insights.
+Headers: ${JSON.stringify(headers)}
+Data (${rows.length} rows, showing first 40): ${JSON.stringify(sample)}
+
+Respond ONLY with valid JSON, no markdown, no code blocks:
+{"insights":[{"type":"positive|negative|neutral|warning","title":"Short title max 6 words","text":"1-2 sentence insight with specific numbers"}],"summary":"One sentence executive summary"}`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: AI_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 700,
+      temperature: 0.3,
+    });
+    let content = response.choices[0].message.content.trim();
+    content = content.replace(/```json\n?|\n?```/g, '').trim();
+    res.json(JSON.parse(content));
+  } catch(e) {
+    console.error('[AI Insights]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── AI Field Helper (for data entry) ────────────────────────────
+app.post('/api/ai/field-help', requireAuth, async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
+  try {
+    const { tab, field, currentValue, allFields } = req.body;
+    const prompt = `The user is entering data in the "${tab}" tab of the NOBL Air dashboard.
+They are filling in the field: "${field}"
+Current value: ${currentValue || '(empty)'}
+All fields in this form: ${JSON.stringify(allFields)}
+
+In 2-3 sentences, explain: what this field means, what a good value looks like, and any tips for entering it correctly. Be specific to NOBL Air's business.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: AI_SYSTEM_PROMPT },
+        { role: 'user', content: prompt }
+      ],
+      max_tokens: 200,
+      temperature: 0.4,
+    });
+    res.json({ help: response.choices[0].message.content });
+  } catch(e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Cron ────────────────────────────────────────────────────────
