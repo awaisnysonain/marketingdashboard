@@ -220,7 +220,8 @@ async function refreshCache(newSid) {
 // ── Middleware ──────────────────────────────────────────────────
 app.use(compression());
 app.use(helmet({ contentSecurityPolicy: false }));
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cors({ origin: true, credentials: true }));
 app.use(session({
   store: new FileStore({ path: path.join(__dirname,'../data/sessions'), ttl: 30*24*60*60, retries: 0, logFn: ()=>{} }),
@@ -416,7 +417,7 @@ app.post('/api/ai/insights', requireAuth, async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
   try {
     const { tab, headers, rows } = req.body;
-    const sample = (rows || []).slice(0, 40);
+    const sample = (rows || []).slice(0, 50);
     const prompt = `Analyze this dashboard data tab named "${tab}" and give 3-4 sharp business insights.
 Headers: ${JSON.stringify(headers)}
 Data (${rows.length} rows, showing first 40): ${JSON.stringify(sample)}
