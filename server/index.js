@@ -59,6 +59,12 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // ── SQLite setup ────────────────────────────────────────────────
+// Auto-clean stale lock file left by crashed previous process
+const fs = require('fs');
+const dbLockPath = path.join(__dirname, '../data/nobl.db.lock');
+if (fs.existsSync(dbLockPath)) {
+  try { fs.rmSync(dbLockPath, { recursive: true, force: true }); console.log('[DB] Removed stale lock file'); } catch(e) {}
+}
 const db = new Database(path.join(__dirname, '../data/nobl.db'));
 db.exec(`
   CREATE TABLE IF NOT EXISTS annotations (
