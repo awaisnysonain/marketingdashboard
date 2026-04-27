@@ -83,7 +83,9 @@
       "Bash(ssh -i /tmp/ssh-access/nysonik.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=10 ec2-user@54.172.115.118 ' *)",
       "Bash(ssh -i *)",
       "Bash(nslookup marketing-dashboard.nysonik.com 8.8.8.8)",
-      "Bash(node -e \"const OpenAI = require\\('openai'\\); console.log\\('openai OK - version', require\\('./node_modules/openai/package.json'\\).version\\)\")"
+      "Bash(node -e \"const OpenAI = require\\('openai'\\); console.log\\('openai OK - version', require\\('./node_modules/openai/package.json'\\).version\\)\")",
+      "Bash(Start-Process -NoNewWindow node -ArgumentList \"server/index.js\")",
+      "Bash(curl -s -X POST http://localhost:3001/api/ai/chat -H 'Content-Type: application/json' -d '{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}],\"context\":\"\",\"tab\":\"\"}')"
     ]
   }
 }
