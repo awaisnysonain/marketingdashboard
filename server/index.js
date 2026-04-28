@@ -11,56 +11,68 @@ process.on('unhandledRejection', (reason) => {
 const express = require('express');
 const session = require('express-session');
 const FileStore = require('session-file-store')(session);
-const { google } = require('googleapis');
 const { Database } = require('node-sqlite3-wasm');
-const cron = require('node-cron');
 const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const OpenAI = require('openai').default;
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
+const fs = require('fs');
+
+const { pgRun } = require('./db/postgres');
+const analyticsRouter = require('./routes/analytics');
+const { router: dashRouter, SCHEMA_CONTEXT, getClarifyPrompt } = require('./routes/aiDashboards');
+const syncStatusRouter = require('./routes/syncStatus');
+const syncEngine = require('./etl/syncEngine');
+const twRouter   = require('./routes/triplewhale');
 
 // ── OpenAI setup ────────────────────────────────────────────────
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
-const AI_SYSTEM_PROMPT = `You are an expert analytics assistant embedded inside the NOBL Air & Pilates Flo executive dashboard. You have deep knowledge of both companies:
+const AI_SYSTEM_PROMPT = `You are an expert analytics assistant embedded inside the NOBL Air & Pilates FLO executive dashboard. You have deep knowledge of both companies and their PostgreSQL analytics database.
 
 NOBL AIR (nobltravel.com):
 - Sells AirTag holders, travel accessories, and luggage products via Shopify
 - Key business model: customers buy products AND optionally subscribe to "Air" subscription
-- Critical KPIs: Orders, Air Orders, Attach Rate (% of orders with subscription), Trial-to-Paid (TTP) conversion rate, New Subscribers, Rebill Revenue, Tag Revenue
-- Price tiers: $79, $99, $119, $129, $139, $149 per year
-- Channels: Facebook Ads, organic, email, referral
-- Important metrics: Cohort retention, weekly trends, product mix, channel attribution
+- Critical KPIs: Revenue, Spend, MER (Marketing Efficiency Ratio = Revenue/Spend), ROAS, CAC, New Customer Orders, Subscription Revenue
+- Channels: META, GOOGLE, TIKTOK, SNAPCHAT, PINTEREST, APPLOVIN, BING, X
+- Regions: US, CA, AUS, DUBAI, EU
 
 PILATES FLO (pilatesflo.com):
-- Pilates studio and fitness business
-- Tracks class attendance, memberships, revenue
+- Sells Pilates equipment: Portable Reformers, Wooden Reformers, Metal Reformers
+- Tracks product-line performance, channel attribution, geographic revenue
+- Product lines: portable, wooden, metal
+
+DATA SOURCE:
+${SCHEMA_CONTEXT}
 
 YOUR EXPERTISE:
-- E-commerce analytics & Shopify metrics
-- Subscription SaaS/DTC business KPIs and benchmarks
-- Facebook/Meta advertising performance analysis
-- Financial forecasting and revenue modeling
-- Cohort analysis and customer retention
-- Product performance and inventory analysis
-- Marketing attribution and ROAS analysis
-- General business strategy for DTC brands
+- E-commerce analytics & DTC business KPIs
+- Marketing channel performance analysis and ROAS benchmarking
+- Subscription business metrics
+- Geographic revenue analysis
+- Product-line attribution
+- MER (Marketing Efficiency Ratio) analysis
 
 BEHAVIOR:
-- Be concise, direct, and actionable — this is used by finance, marketing, and management
+- Be concise, direct, and actionable — used by finance, marketing, and management
 - Highlight anomalies, trends, and opportunities immediately
 - Use bullet points for lists, be specific with numbers
 - When you don't have enough data, say so and suggest what to look at
 - Proactively notice problems or opportunities in the data
 - Format currency as $X,XXX and percentages clearly`;
 
+// DASHBOARD_SYSTEM_PROMPT is now dynamically generated per-request via getClarifyPrompt(today)
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Trust proxy so express-rate-limit works correctly behind the React dev server / nginx
+app.set('trust proxy', 1);
+
 // ── SQLite setup ────────────────────────────────────────────────
-// Auto-clean stale lock file left by crashed previous process
-const fs = require('fs');
 const dbLockPath = path.join(__dirname, '../data/nobl.db.lock');
 if (fs.existsSync(dbLockPath)) {
   try { fs.rmSync(dbLockPath, { recursive: true, force: true }); console.log('[DB] Removed stale lock file'); } catch(e) {}
@@ -85,142 +97,92 @@ db.exec(`
   );
   CREATE UNIQUE INDEX IF NOT EXISTS idx_hl_key ON highlights(tab, row_key);
 
-  CREATE TABLE IF NOT EXISTS oauth_tokens (
-    id INTEGER PRIMARY KEY CHECK(id=1),
-    tokens TEXT NOT NULL,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
   CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT DEFAULT 'viewer',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_login DATETIME
+  );
 `);
 
-// ── Settings helpers ────────────────────────────────────────────
-function getSetting(key, fallback='') {
-  const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
-  return r ? r.value : fallback;
-}
-function setSetting(key, value) {
-  const v = String(value == null ? '' : value);
+// ── PostgreSQL table init ────────────────────────────────────────
+async function initPostgresTables() {
   try {
-    db.prepare('UPDATE settings SET value=?,updated_at=CURRENT_TIMESTAMP WHERE key=?').run(v, key);
-    const r = db.prepare('SELECT value FROM settings WHERE key=?').get(key);
-    if (!r) db.prepare('INSERT INTO settings(key,value) VALUES(?,?)').run(key, v);
-  } catch(e) {
-    console.error('[Settings] setSetting error:', e.message);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS ai_dashboards (
+        id SERIAL PRIMARY KEY,
+        user_id INT,
+        name TEXT,
+        description TEXT,
+        config JSONB,
+        is_public BOOLEAN DEFAULT false,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS ai_conversations (
+        id SERIAL PRIMARY KEY,
+        dashboard_id INT REFERENCES ai_dashboards(id) ON DELETE CASCADE,
+        user_id INT,
+        role TEXT,
+        content TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS visitors_cvr (
+        id SERIAL PRIMARY KEY,
+        date DATE,
+        brand TEXT,
+        region TEXT,
+        visitors INT,
+        purchases INT,
+        cvr DECIMAL(8,4),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(date, brand, region)
+      )
+    `);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS klaviyo_daily (
+        id SERIAL PRIMARY KEY,
+        date DATE,
+        brand TEXT,
+        emails_sent INT,
+        emails_opened INT,
+        emails_clicked INT,
+        open_rate DECIMAL(8,4),
+        click_rate DECIMAL(8,4),
+        revenue DECIMAL(12,2),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(date, brand)
+      )
+    `);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS data_overrides (
+        id SERIAL PRIMARY KEY,
+        table_name TEXT,
+        record_id TEXT,
+        field_name TEXT,
+        original_value TEXT,
+        override_value TEXT,
+        override_by INT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    console.log('[PG] Tables initialized');
+  } catch (e) {
+    console.error('[PG] Table init failed:', e.message);
   }
-}
-function getActiveSpreadsheetId() {
-  return getSetting('spreadsheet_id', process.env.SPREADSHEET_ID || '');
-}
-
-// ── Cache ───────────────────────────────────────────────────────
-const cache = {
-  data: {},
-  spreadsheetId: null,
-  spreadsheetTitle: null,
-  tabNames: [],
-  lastFetched: null,
-  ttl: (parseInt(process.env.CACHE_TTL_SECONDS) || 300) * 1000,
-  isStale() { return !this.lastFetched || Date.now() - this.lastFetched > this.ttl; }
-};
-
-// ── OAuth2 client ───────────────────────────────────────────────
-const oauth2Client = new google.auth.OAuth2(
-  process.env.GOOGLE_CLIENT_ID,
-  process.env.GOOGLE_CLIENT_SECRET,
-  process.env.GOOGLE_REDIRECT_URI
-);
-
-function saveTokens(t) {
-  db.prepare(`INSERT INTO oauth_tokens(id,tokens) VALUES(1,?)
-    ON CONFLICT(id) DO UPDATE SET tokens=excluded.tokens,updated_at=CURRENT_TIMESTAMP`)
-    .run(JSON.stringify(t));
-}
-function loadTokens() {
-  const r = db.prepare('SELECT tokens FROM oauth_tokens WHERE id=1').get();
-  return r ? JSON.parse(r.tokens) : null;
-}
-
-const saved = loadTokens();
-if (saved) { oauth2Client.setCredentials(saved); console.log('[Auth] Restored tokens'); }
-oauth2Client.on('tokens', t => { saveTokens({ ...oauth2Client.credentials, ...t }); });
-
-// ── Header row detection ────────────────────────────────────────
-function findHeaderRow(rows) {
-  let best = { idx: 0, score: -1 };
-  for (let i = 0; i < Math.min(rows.length, 20); i++) {
-    const row = rows[i] || [];
-    const nonEmpty = row.filter(v => v !== '' && v !== null && v !== undefined);
-    if (nonEmpty.length < 2) continue;
-    if (typeof nonEmpty[0] !== 'string') continue;
-    const stringCount = nonEmpty.filter(v => typeof v === 'string').length;
-    const score = nonEmpty.length + stringCount;
-    if (score > best.score) best = { idx: i, score };
-  }
-  return best.score >= 0 ? best.idx : 0;
-}
-
-// ── Fetch all tabs from a spreadsheet ──────────────────────────
-async function getSpreadsheetMeta(sid) {
-  const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
-  const meta = await sheets.spreadsheets.get({
-    spreadsheetId: sid,
-    fields: 'properties.title,sheets.properties.title'
-  });
-  const title = meta.data.properties?.title || sid;
-  const tabs = meta.data.sheets.map(s => s.properties.title);
-  return { title, tabs };
-}
-
-async function fetchAllTabs(sid) {
-  const sheets = google.sheets({ version: 'v4', auth: oauth2Client });
-  const { title, tabs } = await getSpreadsheetMeta(sid);
-  cache.spreadsheetTitle = title;
-  cache.tabNames = tabs;
-
-  const result = {};
-  await Promise.all(tabs.map(async tab => {
-    try {
-      const res = await sheets.spreadsheets.values.get({
-        spreadsheetId: sid,
-        range: `'${tab}'`,
-        valueRenderOption: 'UNFORMATTED_VALUE',
-        dateTimeRenderOption: 'FORMATTED_STRING'
-      });
-      const rows = res.data.values || [];
-      if (rows.length < 2) { result[tab] = { headers: rows[0]||[], rows: [] }; return; }
-      const hi = findHeaderRow(rows);
-      const headers = rows[hi].map(String);
-      result[tab] = {
-        headers,
-        rows: rows.slice(hi + 1).map(r => {
-          const o = {}; headers.forEach((h, i) => o[h] = r[i] ?? ''); return o;
-        })
-      };
-    } catch(e) {
-      console.warn(`[Sheets] "${tab}": ${e.message}`);
-      result[tab] = { headers:[], rows:[], error: e.message };
-    }
-  }));
-  return result;
-}
-
-async function refreshCache(newSid) {
-  const creds = oauth2Client.credentials;
-  if (!creds?.access_token && !creds?.refresh_token) { console.warn('[Cache] Not authenticated'); return; }
-  const sid = newSid || getActiveSpreadsheetId();
-  if (!sid) { console.warn('[Cache] No spreadsheet ID'); return; }
-  try {
-    console.log(`[Cache] Refreshing "${sid}"...`);
-    cache.data = await fetchAllTabs(sid);
-    cache.spreadsheetId = sid;
-    cache.lastFetched = Date.now();
-    console.log(`[Cache] Done — ${Object.keys(cache.data).length} tabs from "${cache.spreadsheetTitle}"`);
-  } catch(e) { console.error('[Cache] Failed:', e.message); }
 }
 
 // ── Middleware ──────────────────────────────────────────────────
@@ -233,176 +195,134 @@ app.use(session({
   store: new FileStore({ path: path.join(__dirname,'../data/sessions'), ttl: 30*24*60*60, retries: 0, logFn: ()=>{} }),
   secret: process.env.SESSION_SECRET || 'dev-secret',
   resave: false, saveUninitialized: false,
-  cookie: { maxAge: 30*24*60*60*1000 }
+  cookie: {
+    maxAge: 30*24*60*60*1000,
+    httpOnly: true,
+    sameSite: 'lax',
+    secure: process.env.NODE_ENV === 'production',
+  }
 }));
 
-function requireAuth(req, res, next) {
-  const c = oauth2Client.credentials;
-  if (!c?.access_token && !c?.refresh_token)
-    return res.status(401).json({ error:'Not authenticated', authUrl:'/auth/login' });
+// ── App-level auth middleware ────────────────────────────────────
+function requireAppAuth(req, res, next) {
+  if (!req.session?.userId)
+    return res.status(401).json({ error: 'Not authenticated', loginRequired: true });
   next();
 }
 
-// ── Auth routes ─────────────────────────────────────────────────
-const SCOPES = [
-  'https://www.googleapis.com/auth/spreadsheets.readonly',
-  'https://www.googleapis.com/auth/drive.metadata.readonly',
-];
-
-app.get('/auth/login', (req, res) => {
-  res.redirect(oauth2Client.generateAuthUrl({
-    access_type: 'offline', prompt: 'consent', scope: SCOPES
-  }));
+// ── Rate limiter for auth endpoints ─────────────────────────────
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 15,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many attempts. Please try again in 15 minutes.' },
 });
 
-app.get('/auth/callback', async (req, res) => {
-  if (req.query.error) return res.redirect('/?auth=error');
+// ── Apply requireAppAuth globally to all API routes ──────────────
+app.use('/api', requireAppAuth);
+
+// ── App-level auth routes ─────────────────────────────────────────
+app.get('/auth/app-status', (req, res) => {
+  if (!req.session?.userId) return res.json({ authenticated: false });
+  const user = db.prepare('SELECT id, email, name, role FROM users WHERE id=?').get([req.session.userId]);
+  if (!user) { req.session.destroy(() => {}); return res.json({ authenticated: false }); }
+  res.json({ authenticated: true, user });
+});
+
+app.post('/auth/app-signup', authLimiter, (req, res) => {
+  const { email, password, name } = req.body;
+  if (!email || !password || !name)
+    return res.status(400).json({ error: 'Name, email, and password are required' });
+  if (password.length < 6)
+    return res.status(400).json({ error: 'Password must be at least 6 characters' });
+  const emailLow = email.toLowerCase().trim();
+  if (!emailLow.endsWith('@nysonian.com'))
+    return res.status(403).json({ error: 'Only @nysonian.com email addresses can create an account.' });
+  const existing = db.prepare('SELECT id FROM users WHERE email=?').get([emailLow]);
+  if (existing) return res.status(400).json({ error: 'An account with this email already exists' });
+  const count = db.prepare('SELECT COUNT(*) as n FROM users').get();
+  const role = count.n === 0 ? 'admin' : 'viewer';
+  const hash = bcrypt.hashSync(password, 12);
   try {
-    const { tokens } = await oauth2Client.getToken(req.query.code);
-    oauth2Client.setCredentials(tokens);
-    saveTokens(tokens);
-    await refreshCache();
-    res.redirect('/?auth=success');
-  } catch(e) { console.error('[Auth]', e.message); res.redirect('/?auth=error'); }
+    db.prepare('INSERT INTO users(email,password_hash,name,role) VALUES(?,?,?,?)').run([emailLow, hash, name.trim(), role]);
+    const user = db.prepare('SELECT id,email,name,role FROM users WHERE email=?').get([emailLow]);
+    if (!user) return res.status(500).json({ error: 'Account created but could not retrieve user' });
+    req.session.userId = user.id;
+    res.json({ ok: true, user });
+  } catch(e) {
+    console.error('[Signup]', e.message, e.stack);
+    res.status(500).json({ error: e.message || 'Could not create account' });
+  }
 });
 
-app.get('/auth/status', (req, res) => {
-  const c = oauth2Client.credentials;
-  res.json({
-    authenticated: !!(c?.access_token || c?.refresh_token),
-    lastFetched: cache.lastFetched ? new Date(cache.lastFetched).toISOString() : null,
-    tabsLoaded: Object.keys(cache.data).length,
-    spreadsheetId: cache.spreadsheetId || getActiveSpreadsheetId(),
-    spreadsheetTitle: cache.spreadsheetTitle || null,
-  });
+app.post('/auth/app-login', authLimiter, (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password)
+    return res.status(400).json({ error: 'Email and password are required' });
+  const user = db.prepare('SELECT * FROM users WHERE email=?').get([email.toLowerCase().trim()]);
+  if (!user || !bcrypt.compareSync(password, user.password_hash))
+    return res.status(401).json({ error: 'Invalid email or password' });
+  db.prepare('UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?').run([user.id]);
+  req.session.userId = user.id;
+  res.json({ ok: true, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
 });
 
-app.post('/auth/logout', (req, res) => {
-  db.prepare('DELETE FROM oauth_tokens WHERE id=1').run();
-  oauth2Client.setCredentials({});
-  cache.data = {}; cache.lastFetched = null; cache.spreadsheetTitle = null; cache.tabNames = [];
+app.post('/auth/app-logout', (req, res) => {
+  req.session.destroy(() => {});
   res.json({ ok: true });
 });
 
-// ── Drive — list all user's spreadsheets ────────────────────────
-app.get('/api/drive/sheets', requireAuth, async (req, res) => {
-  try {
-    const drive = google.drive({ version: 'v3', auth: oauth2Client });
-    const result = await drive.files.list({
-      q: "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
-      fields: 'files(id,name,modifiedTime,owners)',
-      orderBy: 'modifiedTime desc',
-      pageSize: 50,
-    });
-    res.json(result.data.files || []);
-  } catch(e) {
-    console.error('[Drive]', e.message);
-    // If scope not granted, return empty list with hint
-    res.json({ error: e.message, needsReauth: e.message.toLowerCase().includes('insufficient') || e.message.toLowerCase().includes('permission') || e.message.toLowerCase().includes('forbidden') });
-  }
-});
+// ── Analytics routes ────────────────────────────────────────────
+app.use('/api/analytics', requireAppAuth, analyticsRouter);
 
-// ── Spreadsheet management ──────────────────────────────────────
-app.get('/api/spreadsheet', requireAuth, (req, res) => {
-  res.json({
-    id: cache.spreadsheetId || getActiveSpreadsheetId(),
-    title: cache.spreadsheetTitle,
-    tabs: cache.tabNames,
-    lastFetched: cache.lastFetched ? new Date(cache.lastFetched).toISOString() : null,
-  });
-});
-
-app.post('/api/spreadsheet/select', requireAuth, async (req, res) => {
-  const { spreadsheetId } = req.body;
-  if (!spreadsheetId) return res.status(400).json({ error: 'spreadsheetId required' });
-  try {
-    setSetting('spreadsheet_id', spreadsheetId);
-    await refreshCache(spreadsheetId);
-    res.json({
-      ok: true,
-      id: spreadsheetId,
-      title: cache.spreadsheetTitle,
-      tabs: cache.tabNames,
-    });
-  } catch(e) {
-    console.error('[Select]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Sheets API ──────────────────────────────────────────────────
-app.get('/api/sheets/refresh', requireAuth, async (req, res) => {
-  await refreshCache();
-  res.json({ ok: true, lastFetched: new Date(cache.lastFetched).toISOString(), tabs: cache.tabNames });
-});
-
-app.get('/api/sheets/tabs', requireAuth, (req, res) => res.json(Object.keys(cache.data)));
-
-app.get('/api/sheets/:tab', requireAuth, async (req, res) => {
-  if (cache.isStale()) await refreshCache();
-  const tab = decodeURIComponent(req.params.tab);
-  const d = cache.data[tab];
-  if (!d) return res.status(404).json({ error:`Tab "${tab}" not found` });
-  const annotations = db.prepare('SELECT * FROM annotations WHERE tab=? ORDER BY created_at DESC').all(tab);
-  const highlights = db.prepare('SELECT * FROM highlights WHERE tab=?').all(tab);
-  const hlKeys = new Set(highlights.map(h=>h.row_key));
-  const enriched = d.rows.map((row, i) => {
-    const rk = String(row['Date']||row['Tier']||row['Variant']||row['Channel']||row['Week (Mon)']||row['Cohort Week']||row['Day']||row['Product / Bundle']||row['Campaign Name']||i);
-    return { ...row, _rowKey:rk, _highlighted:hlKeys.has(rk)?highlights.find(h=>h.row_key===rk)?.color||'yellow':null, _annotations:annotations.filter(a=>a.row_key===rk) };
-  });
-  res.json({ tab, headers:d.headers, rows:enriched, lastFetched: cache.lastFetched?new Date(cache.lastFetched).toISOString():null });
-});
+// ── AI Dashboard routes ─────────────────────────────────────────
+app.use('/api/dashboards', requireAppAuth, dashRouter);
 
 // ── Annotations ─────────────────────────────────────────────────
-app.get('/api/annotations', requireAuth, (req, res) => {
+app.get('/api/annotations', (req, res) => {
   const rows = req.query.tab
-    ? db.prepare('SELECT * FROM annotations WHERE tab=? ORDER BY created_at DESC').all(req.query.tab)
+    ? db.prepare('SELECT * FROM annotations WHERE tab=? ORDER BY created_at DESC').all([req.query.tab])
     : db.prepare('SELECT * FROM annotations ORDER BY created_at DESC').all();
   res.json(rows);
 });
-app.post('/api/annotations', requireAuth, (req, res) => {
+app.post('/api/annotations', (req, res) => {
   const { tab, row_key, metric, note, color, author } = req.body;
   if (!tab||!row_key||!note) return res.status(400).json({ error:'tab, row_key, note required' });
   const r = db.prepare('INSERT INTO annotations(tab,row_key,metric,note,color,author) VALUES(?,?,?,?,?,?)')
-    .run(tab, row_key, metric||'', note, color||'yellow', author||'user');
-  res.json(db.prepare('SELECT * FROM annotations WHERE id=?').get(r.lastInsertRowid));
+    .run([tab, row_key, metric||'', note, color||'yellow', author||'user']);
+  res.json(db.prepare('SELECT * FROM annotations WHERE id=?').get([r.lastInsertRowid]));
 });
-app.put('/api/annotations/:id', requireAuth, (req, res) => {
+app.put('/api/annotations/:id', (req, res) => {
   const { note, color } = req.body;
-  db.prepare('UPDATE annotations SET note=?,color=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run(note, color||'yellow', req.params.id);
-  res.json(db.prepare('SELECT * FROM annotations WHERE id=?').get(req.params.id));
+  db.prepare('UPDATE annotations SET note=?,color=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run([note, color||'yellow', req.params.id]);
+  res.json(db.prepare('SELECT * FROM annotations WHERE id=?').get([req.params.id]));
 });
-app.delete('/api/annotations/:id', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM annotations WHERE id=?').run(req.params.id);
+app.delete('/api/annotations/:id', (req, res) => {
+  db.prepare('DELETE FROM annotations WHERE id=?').run([req.params.id]);
   res.json({ ok:true });
 });
 
 // ── Highlights ──────────────────────────────────────────────────
-app.post('/api/highlights', requireAuth, (req, res) => {
+app.post('/api/highlights', (req, res) => {
   const { tab, row_key, color } = req.body;
   if (!tab||!row_key) return res.status(400).json({ error:'tab, row_key required' });
   db.prepare('INSERT INTO highlights(tab,row_key,color) VALUES(?,?,?) ON CONFLICT(tab,row_key) DO UPDATE SET color=excluded.color')
-    .run(tab, row_key, color||'yellow');
+    .run([tab, row_key, color||'yellow']);
   res.json({ ok:true });
 });
-app.delete('/api/highlights', requireAuth, (req, res) => {
-  db.prepare('DELETE FROM highlights WHERE tab=? AND row_key=?').run(req.body.tab, req.body.row_key);
+app.delete('/api/highlights', (req, res) => {
+  db.prepare('DELETE FROM highlights WHERE tab=? AND row_key=?').run([req.body.tab, req.body.row_key]);
   res.json({ ok:true });
 });
 
 // ── AI Chat ─────────────────────────────────────────────────────
-app.post('/api/ai/chat', requireAuth, async (req, res) => {
+app.post('/api/ai/chat', async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
   try {
-    const { messages = [], context = '', tab = '' } = req.body;
-    const tabData = tab && cache.data[tab] ? cache.data[tab] : null;
-    let contextBlock = context || '';
-    if (tabData) {
-      const sample = (tabData.rows || []).slice(0, 30);
-      contextBlock += `\n\nUser is currently viewing tab: "${tab}"\nHeaders: ${JSON.stringify(tabData.headers)}\nSample data (first 30 rows): ${JSON.stringify(sample)}`;
-    }
-    const systemContent = contextBlock
-      ? `${AI_SYSTEM_PROMPT}\n\n--- CURRENT DASHBOARD CONTEXT ---\n${contextBlock}`
+    const { messages = [], context = '' } = req.body;
+    const systemContent = context
+      ? `${AI_SYSTEM_PROMPT}\n\n--- CURRENT CONTEXT ---\n${context}`
       : AI_SYSTEM_PROMPT;
 
     const response = await openai.chat.completions.create({
@@ -418,13 +338,13 @@ app.post('/api/ai/chat', requireAuth, async (req, res) => {
   }
 });
 
-// ── AI Insights (per-tab analysis) ──────────────────────────────
-app.post('/api/ai/insights', requireAuth, async (req, res) => {
+// ── AI Insights ──────────────────────────────────────────────────
+app.post('/api/ai/insights', async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
   try {
     const { tab, headers, rows } = req.body;
     const sample = (rows || []).slice(0, 50);
-    const prompt = `Analyze this dashboard data tab named "${tab}" and give 3-4 sharp business insights.
+    const prompt = `Analyze this analytics data named "${tab}" and give 3-4 sharp business insights.
 Headers: ${JSON.stringify(headers)}
 Data (${rows.length} rows, showing first 40): ${JSON.stringify(sample)}
 
@@ -449,17 +369,17 @@ Respond ONLY with valid JSON, no markdown, no code blocks:
   }
 });
 
-// ── AI Field Helper (for data entry) ────────────────────────────
-app.post('/api/ai/field-help', requireAuth, async (req, res) => {
+// ── AI Field Helper ────────────────────────────────────────────────────────
+app.post('/api/ai/field-help', async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
   try {
     const { tab, field, currentValue, allFields } = req.body;
-    const prompt = `The user is entering data in the "${tab}" tab of the NOBL Air dashboard.
-They are filling in the field: "${field}"
+    const prompt = `The user is viewing the "${tab}" analytics section.
+They are looking at the field: "${field}"
 Current value: ${currentValue || '(empty)'}
-All fields in this form: ${JSON.stringify(allFields)}
+All fields: ${JSON.stringify(allFields)}
 
-In 2-3 sentences, explain: what this field means, what a good value looks like, and any tips for entering it correctly. Be specific to NOBL Air's business.`;
+In 2-3 sentences, explain what this metric means, what a good value looks like, and any context for NOBL Air or Pilates FLO's business.`;
 
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
@@ -476,19 +396,493 @@ In 2-3 sentences, explain: what this field means, what a good value looks like, 
   }
 });
 
-// ── Cron ────────────────────────────────────────────────────────
-cron.schedule(process.env.REFRESH_CRON||'0 8 * * *', () => {
-  console.log('[Cron] Scheduled refresh');
-  refreshCache();
+// ── AI Dashboard Generator (clarify + generate) ──────────────────
+app.post('/api/ai/dashboard-generate', async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
+  try {
+    const { messages = [] } = req.body;
+    const today = new Date().toISOString().slice(0, 10);
+    const systemPrompt = getClarifyPrompt(today);
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [
+        { role: 'system', content: systemPrompt },
+        ...messages,
+      ],
+      max_tokens: 4000,
+      temperature: 0.15,
+    });
+
+    let raw = response.choices[0].message.content.trim();
+
+    // Strip markdown code fences if present
+    const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    // Detect if this is a JSON config or a natural-language clarification question
+    const jsonStart = cleaned.search(/\{[\s\S]*"sections"/);
+
+    if (jsonStart !== -1) {
+      // AI generated a config — parse and validate it
+      const jsonStr = cleaned.slice(jsonStart);
+      let config;
+      try {
+        config = JSON.parse(jsonStr);
+      } catch(parseErr) {
+        console.error('[AI Dashboard Gen] Parse error:', parseErr.message, '\nRaw:', cleaned.slice(0, 300));
+        // Return as a conversational message so user knows what happened
+        return res.json({ message: raw + '\n\n(Note: JSON parse error — please try again with clearer requirements)' });
+      }
+      if (!config?.sections) {
+        return res.json({ message: raw });
+      }
+      console.log('[AI Dashboard Gen] Config generated:', config.title, `(${config.sections.length} sections)`);
+      return res.json({ config, message: raw });
+    }
+
+    // Natural language response (clarification questions or acknowledgement)
+    console.log('[AI Dashboard Gen] Clarification response');
+    res.json({ message: raw });
+
+  } catch(e) {
+    console.error('[AI Dashboard Gen]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Sync trigger (manual + backfill) ─────────────────────────────
+app.post('/api/sync/trigger', requireAppAuth, async (req, res) => {
+  try {
+    const {
+      tasks     = ['klaviyo', 'appstle', 'tw_refresh'],
+      startDate = null,
+      endDate   = null,
+      brands    = ['NOBL', 'FLO'],
+      mode      = 'manual',
+    } = req.body || {};
+
+    // Determine date range
+    const today = new Date().toISOString().slice(0, 10);
+    const yesterday = (() => { const d=new Date(); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })();
+    const start = startDate || yesterday;
+    const end   = endDate   || today;
+
+    const runId = `${mode}_${Date.now()}`;
+    syncEngine.runSync({ runId, tasks, startDate: start, endDate: end, brands })
+      .catch(e => console.error('[Sync]', e.message));
+
+    console.log(`[Sync] ${mode} started: ${runId} | tasks=${tasks.join(',')} | ${start}→${end}`);
+    res.json({ ok: true, run_id: runId, message: `Sync started (${mode})`, tasks, startDate: start, endDate: end });
+  } catch(e) {
+    console.error('[Sync trigger]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Sync status ──────────────────────────────────────────────────
+app.use('/api/sync/status', requireAppAuth, syncStatusRouter);
+
+// ── TripleWhale live data ─────────────────────────────────────────
+app.use('/api/tw', requireAppAuth, twRouter);
+
+// ── Daily cron: 11:00 AM GMT+5 = 06:00 UTC ───────────────────────
+// Fetches yesterday's data from all APIs and loads it into the DB.
+try {
+  const cron = require('node-cron');
+
+  // '0 6 * * *' = 06:00 UTC = 11:00 AM Asia/Karachi (GMT+5)
+  cron.schedule('0 6 * * *', () => {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yStr = yesterday.toISOString().slice(0, 10);
+    const runId = `cron_daily_${yStr}_${Date.now()}`;
+    console.log(`[Cron] ▶ Daily sync for ${yStr} → ${runId}`);
+    syncEngine.runSync({
+      runId,
+      tasks:     ['klaviyo', 'appstle', 'tw_refresh'],
+      startDate: yStr,
+      endDate:   yStr,
+      brands:    ['NOBL', 'FLO'],
+    }).catch(e => console.error('[Cron sync error]', e.message));
+  }, { timezone: 'UTC' });
+
+  console.log('[Cron] Daily sync scheduled: 06:00 UTC (11:00 AM GMT+5)');
+} catch(e) {
+  console.warn('[Cron] node-cron unavailable:', e.message);
+}
+
+// ── Google Sheets utility helpers ────────────────────────────────
+
+/**
+ * Find the best header row index.
+ * Strategy: find the first row where col 0-2 contains a real date (data start),
+ * then pick the last non-empty row before it that has 3+ text-label cells.
+ * Falls back to first row with 3+ non-empty cells.
+ */
+function findHeaderRow(values) {
+  const looksLikeDate = (s) =>
+    /^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(s) ||
+    /^\d{4}-\d{2}-\d{2}$/.test(s) ||
+    /^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}/i.test(s);
+
+  const looksLikeTextLabel = (s) => {
+    if (!s || s.length < 2) return false;
+    if (looksLikeDate(s)) return false;
+    // Not a pure number or currency value
+    const cleaned = s.replace(/[$,% ]/g, '');
+    return isNaN(parseFloat(cleaned)) || cleaned === '';
+  };
+
+  // Step 1: find first row where column 0 or 1 contains a date → start of data
+  // (Only check col 0-1 so we don't confuse date-range metadata in later columns)
+  let dataStartIdx = -1;
+  for (let i = 1; i < Math.min(values.length, 25); i++) {
+    const row = values[i] || [];
+    const col0 = String(row[0] || '').trim();
+    const col1 = String(row[1] || '').trim();
+    if (looksLikeDate(col0) || looksLikeDate(col1)) {
+      dataStartIdx = i;
+      break;
+    }
+  }
+
+  if (dataStartIdx > 0) {
+    // Step 2: scan backwards from dataStartIdx to find the best header row
+    // Pick the row with the most text-label cells (not dates/numbers)
+    let bestIdx = -1;
+    let bestScore = 0;
+    for (let i = Math.max(0, dataStartIdx - 5); i < dataStartIdx; i++) {
+      const row = values[i] || [];
+      const score = row.filter(c => looksLikeTextLabel(String(c || '').trim())).length;
+      if (score > bestScore) { bestScore = score; bestIdx = i; }
+    }
+    if (bestIdx >= 0 && bestScore >= 2) return bestIdx;
+  }
+
+  // Fallback: first row with 3+ non-empty cells
+  for (let i = 0; i < Math.min(values.length, 15); i++) {
+    const row = values[i] || [];
+    const nonEmpty = row.filter(c => c !== null && c !== undefined && String(c).trim() !== '').length;
+    if (nonEmpty >= 3) return i;
+  }
+  return 0;
+}
+
+/**
+ * Clean and deduplicate header names.
+ * Empty header cells get a name inferred from data (Date, or ColA/ColB/...).
+ */
+function cleanHeaders(headers, firstDataRow) {
+  const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const seen = {};
+  return headers.map((h, i) => {
+    let s = String(h || '').trim();
+    if (!s) {
+      // Infer from first data cell — if it looks like a date, call it "Date"
+      const sample = String(firstDataRow?.[i] || '').trim();
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$|^\d{4}-\d{2}-\d{2}$/.test(sample)) {
+        s = 'Date';
+      } else if (sample && !/^\d+$/.test(sample)) {
+        s = i < 26 ? letters[i] : `Col${i}`;
+      } else {
+        s = i < 26 ? letters[i] : `Col${i}`;
+      }
+    }
+    const base = s;
+    if (seen[base] !== undefined) {
+      seen[base]++;
+      s = `${base}_${seen[base]}`;
+    } else {
+      seen[base] = 0;
+    }
+    return s;
+  });
+}
+
+/**
+ * Filter data rows — skip rows that are clearly section labels
+ * (only 0-2 non-empty cells and no numeric values).
+ */
+function filterDataRows(rows, headerCount) {
+  return rows.filter(row => {
+    const cells = row.slice(0, Math.max(headerCount, 5));
+    const nonEmpty = cells.filter(c => c !== null && c !== undefined && String(c).trim() !== '');
+    const hasNumber = nonEmpty.some(c => {
+      const cleaned = String(c).replace(/[$,% ]/g, '');
+      return !isNaN(parseFloat(cleaned)) && cleaned !== '';
+    });
+    // Keep rows with 3+ non-empty cells, or rows that have at least one number
+    return nonEmpty.length >= 3 || (nonEmpty.length >= 1 && hasNumber);
+  });
+}
+
+// ── Google Sheets helpers ─────────────────────────────────────────
+// Supports two auth modes:
+//   1. GOOGLE_API_KEY  — simplest, works for any sheet shared "anyone with link can view"
+//   2. GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY — service account for private sheets
+async function sheetsGet(path, params = {}) {
+  const apiKey = process.env.GOOGLE_API_KEY;
+  const clientEmail = process.env.GOOGLE_CLIENT_EMAIL;
+  const privateKey  = (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n');
+  const base = `https://sheets.googleapis.com/v4/spreadsheets${path}`;
+
+  if (apiKey) {
+    // Simple API key — works for public / "anyone with link" sheets
+    const qs = new URLSearchParams({ ...params, key: apiKey }).toString();
+    const r = await fetch(`${base}?${qs}`);
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err?.error?.message || `Sheets API ${r.status}`);
+    }
+    return r.json();
+  }
+
+  if (clientEmail && privateKey) {
+    // Service account via googleapis
+    const { google } = require('googleapis');
+    const auth = new google.auth.GoogleAuth({
+      credentials: { client_email: clientEmail, private_key: privateKey },
+      scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+    });
+    const sheets = google.sheets({ version: 'v4', auth });
+    // path is like "/{id}" or "/{id}/values/{range}"
+    const parts = path.replace(/^\//, '').split('/values/');
+    if (parts.length === 2) {
+      const r = await sheets.spreadsheets.values.get({ spreadsheetId: parts[0], range: decodeURIComponent(parts[1]) });
+      return r.data;
+    } else {
+      const r = await sheets.spreadsheets.get({ spreadsheetId: parts[0], fields: params.fields });
+      return r.data;
+    }
+  }
+
+  throw new Error(
+    'Google Sheets not configured. Add GOOGLE_API_KEY to your .env file.\n' +
+    'Share your sheet with "Anyone with the link can view", then add:\n' +
+    '  GOOGLE_API_KEY=your_key_here\n' +
+    'Get a free key at: https://console.cloud.google.com → APIs & Services → Credentials'
+  );
+}
+
+// ── Google Sheets import endpoint ────────────────────────────────
+app.post('/api/sheets/import', requireAppAuth, async (req, res) => {
+  const { spreadsheetId } = req.body;
+  if (!spreadsheetId) return res.status(400).json({ error: 'spreadsheetId required' });
+  try {
+    const meta = await sheetsGet(`/${spreadsheetId}`, { fields: 'properties,sheets.properties' });
+    const title = meta.properties?.title || 'Imported Sheet';
+    const tabs  = (meta.sheets || []).map(s => ({
+      name:    s.properties.title,
+      sheetId: s.properties.sheetId,
+      rowCount:s.properties.gridProperties?.rowCount || 0,
+      colCount:s.properties.gridProperties?.columnCount || 0,
+    }));
+    res.json({ ok: true, title, spreadsheetId, tabs });
+  } catch(e) {
+    console.error('[Sheets import]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Google Sheets tab data endpoint ──────────────────────────────
+app.get('/api/sheets/tab', requireAppAuth, async (req, res) => {
+  const { sheetId, tabName } = req.query;
+  if (!sheetId || !tabName) return res.status(400).json({ error: 'sheetId and tabName required' });
+  try {
+    const range = encodeURIComponent(`'${tabName}'`);
+    const data  = await sheetsGet(`/${sheetId}/values/${range}`);
+    const values  = data.values || [];
+
+    // Smart header detection — many sheets have empty rows 1-7 before real headers
+    const headerIdx  = findHeaderRow(values);
+    const rawHeaders = values[headerIdx] || [];
+    const rawRows    = values.slice(headerIdx + 1);
+
+    // Filter data rows first so we use real data (not metadata rows) for type inference
+    const filteredRaws = filterDataRows(rawRows, rawHeaders.length);
+    const firstRealDataRow = filteredRaws[0] || rawRows[0] || [];
+
+    // Clean + deduplicate header names using actual data rows for type inference
+    const headers = cleanHeaders(rawHeaders, firstRealDataRow);
+
+    res.json({ ok: true, headers, rows: filteredRaws, rowCount: filteredRaws.length, headerRowIndex: headerIdx });
+  } catch(e) {
+    console.error('[Sheets tab]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Google Sheets AI Analysis ────────────────────────────────────
+app.post('/api/sheets/analyze', requireAppAuth, async (req, res) => {
+  const { spreadsheetId, tabs } = req.body;
+  if (!spreadsheetId || !tabs?.length) return res.status(400).json({ error: 'spreadsheetId and tabs required' });
+  if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
+
+  try {
+    // Fetch sample data from ALL tabs (up to 16), using smart header detection
+    const tabSamples = [];
+    for (const tab of tabs.slice(0, 16)) {
+      try {
+        const range = encodeURIComponent(`'${tab.name}'`);
+        const data = await sheetsGet(`/${spreadsheetId}/values/${range}`);
+        const values = data.values || [];
+
+        // Smart header detection
+        const headerIdx  = findHeaderRow(values);
+        const rawHeaders = values[headerIdx] || [];
+        const rawRows    = values.slice(headerIdx + 1);
+        const firstDataRow = rawRows[0] || [];
+        const headers = cleanHeaders(rawHeaders, firstDataRow);
+        const dataRows = filterDataRows(rawRows, headers.length);
+
+        tabSamples.push({
+          name: tab.name,
+          headers,
+          sampleRows: dataRows.slice(0, 20),  // 20 data rows for AI context
+          totalDataRows: dataRows.length,
+          isEmpty: headers.length < 2 || dataRows.length === 0,
+        });
+      } catch(e) {
+        console.warn(`[Analyze] Tab "${tab.name}": ${e.message}`);
+        tabSamples.push({ name: tab.name, headers: [], sampleRows: [], totalDataRows: 0, isEmpty: true });
+      }
+    }
+
+    if (!tabSamples.length) return res.status(400).json({ error: 'No readable tabs found' });
+
+    const prompt = `You are building a beautiful, rich analytics dashboard for NOBL Air (DTC travel accessories brand) and Pilates FLO (fitness equipment brand). You have access to their Google Sheets performance data across ${tabSamples.length} tabs.
+
+BUSINESS CONTEXT:
+- NOBL Air: Sells AirTag holders, travel gear. Key KPIs: Revenue (F=Forecast, A=Actual), Spend, MER (Marketing Efficiency Ratio = Revenue/Spend), Orders, CAC, ROAS, Subscription Revenue, regional breakdown (US/CA/AUS/Dubai/EU)
+- Pilates FLO: Sells Portable/Wooden/Metal Reformers. Key KPIs: Revenue, Spend, Orders, CAC, product-line breakdown, regional performance
+- Channels: Meta, Google, Applovin, Snapchat, TikTok, Pinterest, Bing, X
+- MER target is ~3.5x, good ROAS is 3x+, pacing = actual/forecast %
+
+HERE ARE ALL ${tabSamples.length} TABS WITH THEIR REAL DATA:
+
+${tabSamples.map(t => `
+╔══ TAB: "${t.name}" ══ (${t.totalDataRows} data rows)
+${t.isEmpty ? '(empty — no parseable data)' : `COLUMNS (${t.headers.length} total): ${t.headers.slice(0, 30).join(' | ')}
+SAMPLE DATA (first 20 rows):
+${t.sampleRows.slice(0, 20).map((r, ri) => `  row${ri+1}: ${r.slice(0, Math.min(t.headers.length, 20)).join(' | ')}`).join('\n')}`}
+`).join('\n')}
+
+YOUR TASK: Generate a JSON config that creates a rich, beautiful dashboard for EVERY one of these ${tabSamples.length} tabs.
+
+CRITICAL RULES:
+1. Generate an entry in "analyzedTabs" for EVERY tab — all ${tabSamples.length} of them. No exceptions.
+2. Field names in your config MUST EXACTLY match the column header strings above — copy them character-for-character including spaces, parentheses, slashes.
+3. For empty tabs: include them with sections:[] so they still appear in the tab strip.
+4. The "Date" column (or first column with date-like values) is always the xField for time-series charts.
+
+SECTION TYPES TO USE:
+- "kpi_row": Summary cards at the top. Use aggregation="sum" for revenue/spend/orders, "latest" for current-day values, "average" for rates (MER, ROAS, CVR %).
+- "area_chart": For time-series data (date on x-axis, metrics on y-axis). Max 3 series.
+- "bar_chart": For categorical comparisons (Channel, Region, Product on x-axis). The renderer auto-aggregates by category.
+- "line_chart": For trend comparisons with multiple lines. Max 3 series.
+- "table": Always include a full data table. Show the most useful columns (max 12).
+
+FORMAT RULES (apply to every field/item):
+- "currency" → any Revenue, Spend, Budget, Cost, Sales, CAC, AOV, Variance columns
+- "percent" → MER, ROAS, CVR, Rate, Pacing, %, YoY columns
+- "number" → Orders, Units, Count, Clicks, Subscribers, Visitors, Purchases
+- "date" → Date, Week, Month, Day columns
+- "text" → Channel, Region, Product name columns
+
+COLORS:
+- Revenue/Sales: #6366f1 (indigo)
+- Spend/Cost: #f59e0b (amber)
+- MER/ROAS/CVR: #14b8a6 (teal)
+- Orders: #8b5cf6 (violet)
+- Forecast: dashed, same color
+- Actual: solid
+- Other series: #ef4444, #06b6d4, #1877f2, #10b981
+
+TAB-SPECIFIC GUIDANCE based on what I can see in the data:
+- Tabs with "Topline" in name: daily date rows, has Revenue (F), Revenue (A), Variance ($), Spend (F), Spend (A) columns → area_chart for Revenue (F) vs Revenue (A) trend, kpi_row for MTD totals
+- Tabs with "YoY" in name: months as rows, metric categories — use bar_chart to compare 2025 vs 2026
+- Tabs with "Channel" in name: has channel categories → bar_chart grouped by Channel
+- Tabs with "Targets" in name: quarterly targets vs actuals → kpi_row showing pacing %
+- Tabs with "Visitors" or "CVR" in name: date rows with regional visitor/CVR data → area_chart CVR trend
+- "YTD/QTD" tabs: summary metrics, use kpi_row + table
+- "Charts" tabs: likely already-aggregated data, use bar_chart + table
+
+OUTPUT FORMAT — respond with ONLY this JSON (no markdown, no explanation):
+{
+  "title": "Nobl + Flo Performance Dashboard",
+  "analyzedTabs": [
+    {
+      "sheetTabName": "exact tab name from above",
+      "displayName": "Short Label",
+      "sections": [
+        {
+          "type": "kpi_row",
+          "title": "Key Metrics",
+          "aggregation": "sum",
+          "items": [
+            {"label": "Total Revenue", "field": "Revenue (A)", "format": "currency"},
+            {"label": "Total Spend", "field": "Spend (A)", "format": "currency"},
+            {"label": "Avg MER", "field": "MER", "format": "percent", "aggregation": "average"}
+          ]
+        },
+        {
+          "type": "area_chart",
+          "title": "Revenue: Forecast vs Actual",
+          "xField": "Date",
+          "series": [
+            {"field": "Revenue (F)", "label": "Forecast", "color": "#a5b4fc"},
+            {"field": "Revenue (A)", "label": "Actual", "color": "#6366f1"}
+          ]
+        },
+        {
+          "type": "bar_chart",
+          "title": "Spend by Channel",
+          "xField": "Channel",
+          "series": [
+            {"field": "Spend (A)", "label": "Spend", "color": "#f59e0b"}
+          ]
+        },
+        {
+          "type": "table",
+          "title": "Daily Performance",
+          "columns": [
+            {"field": "Date", "label": "Date", "format": "date"},
+            {"field": "Revenue (A)", "label": "Revenue", "format": "currency"},
+            {"field": "Spend (A)", "label": "Spend", "format": "currency"},
+            {"field": "MER", "label": "MER", "format": "percent"}
+          ]
+        }
+      ]
+    }
+  ]
+}
+
+Remember: use the EXACT column names from the tab data above. Generate configs for ALL ${tabSamples.length} tabs.`;
+
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: [{ role: 'user', content: prompt }],
+      response_format: { type: 'json_object' },
+      temperature: 0.1,
+      max_tokens: 16000,
+    });
+
+    const config = JSON.parse(completion.choices[0].message.content);
+    console.log(`[Sheets analyze] Generated ${config.analyzedTabs?.length || 0} tab configs for "${config.title}"`);
+    res.json({ ok: true, config });
+  } catch(e) {
+    console.error('[Sheets analyze]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ── Serve React ─────────────────────────────────────────────────
 const clientBuild = path.join(__dirname,'../client/build');
 app.use(express.static(clientBuild));
-app.get('*', (req,res) => res.sendFile(path.join(clientBuild,'index.html')));
+app.get('*', (req, res) => res.sendFile(path.join(clientBuild, 'index.html')));
 
-app.listen(PORT, () => {
-  console.log(`\n  NOBL Air Dashboard → http://localhost:${PORT}`);
-  console.log(`   Google Auth → http://localhost:${PORT}/auth/login\n`);
-  if (saved) refreshCache();
+// ── Start ────────────────────────────────────────────────────────
+app.listen(PORT, async () => {
+  console.log(`\n  NOBL Analytics Dashboard → http://localhost:${PORT}\n`);
+  await initPostgresTables();
 });

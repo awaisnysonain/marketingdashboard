@@ -1,0 +1,473 @@
+[Backfill] Starting: 2025-01-01 → 2026-04-27
+[Backfill] Run ID: manual_backfill_1777384208645
+
+[SyncEngine] ▶ Run manual_backfill_1777384208645 | tasks: klaviyo,appstle,tw_refresh | brands: NOBL,FLO | 2025-01-01 → 2026-04-27
+[Klaviyo] Syncing NOBL 2025-01-01 → 2025-01-07
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-01-08 → 2025-01-14
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-01-15 → 2025-01-21
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-01-22 → 2025-01-28
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-01-29 → 2025-02-04
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-02-05 → 2025-02-11
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-02-12 → 2025-02-18
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-02-19 → 2025-02-25
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-02-26 → 2025-03-04
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-03-05 → 2025-03-11
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-03-12 → 2025-03-18
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-03-19 → 2025-03-25
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-03-26 → 2025-04-01
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-04-02 → 2025-04-08
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-04-09 → 2025-04-15
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-04-16 → 2025-04-22
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-04-23 → 2025-04-29
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-04-30 → 2025-05-06
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-05-07 → 2025-05-13
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-05-14 → 2025-05-20
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-05-21 → 2025-05-27
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-05-28 → 2025-06-03
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-06-04 → 2025-06-10
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-06-11 → 2025-06-17
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-06-18 → 2025-06-24
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-06-25 → 2025-07-01
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-07-02 → 2025-07-08
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-07-09 → 2025-07-15
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-07-16 → 2025-07-22
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-07-23 → 2025-07-29
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-07-30 → 2025-08-05
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-08-06 → 2025-08-12
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-08-13 → 2025-08-19
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-08-20 → 2025-08-26
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-08-27 → 2025-09-02
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-09-03 → 2025-09-09
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-09-10 → 2025-09-16
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-09-17 → 2025-09-23
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-09-24 → 2025-09-30
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-10-01 → 2025-10-07
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-10-08 → 2025-10-14
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-10-15 → 2025-10-21
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-10-22 → 2025-10-28
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-10-29 → 2025-11-04
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-11-05 → 2025-11-11
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-11-12 → 2025-11-18
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-11-19 → 2025-11-25
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-11-26 → 2025-12-02
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-12-03 → 2025-12-09
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-12-10 → 2025-12-16
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-12-17 → 2025-12-23
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-12-24 → 2025-12-30
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2025-12-31 → 2026-01-06
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-01-07 → 2026-01-13
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-01-14 → 2026-01-20
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-01-21 → 2026-01-27
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-01-28 → 2026-02-03
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-02-04 → 2026-02-10
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-02-11 → 2026-02-17
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-02-18 → 2026-02-24
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-02-25 → 2026-03-03
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-03-04 → 2026-03-10
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-03-11 → 2026-03-17
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-03-18 → 2026-03-24
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-03-25 → 2026-03-31
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-04-01 → 2026-04-07
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-04-08 → 2026-04-14
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-04-15 → 2026-04-21
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 7 rows upserted, 0 errors
+[Klaviyo] Syncing NOBL 2026-04-22 → 2026-04-27
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] NOBL: 6 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-01-01 → 2025-01-07
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-01-08 → 2025-01-14
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-01-15 → 2025-01-21
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-01-22 → 2025-01-28
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-01-29 → 2025-02-04
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-02-05 → 2025-02-11
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-02-12 → 2025-02-18
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-02-19 → 2025-02-25
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-02-26 → 2025-03-04
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-03-05 → 2025-03-11
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-03-12 → 2025-03-18
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-03-19 → 2025-03-25
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-03-26 → 2025-04-01
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-04-02 → 2025-04-08
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-04-09 → 2025-04-15
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-04-16 → 2025-04-22
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-04-23 → 2025-04-29
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-04-30 → 2025-05-06
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-05-07 → 2025-05-13
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-05-14 → 2025-05-20
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-05-21 → 2025-05-27
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-05-28 → 2025-06-03
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-06-04 → 2025-06-10
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-06-11 → 2025-06-17
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-06-18 → 2025-06-24
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-06-25 → 2025-07-01
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-07-02 → 2025-07-08
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-07-09 → 2025-07-15
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-07-16 → 2025-07-22
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-07-23 → 2025-07-29
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-07-30 → 2025-08-05
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-08-06 → 2025-08-12
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-08-13 → 2025-08-19
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-08-20 → 2025-08-26
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-08-27 → 2025-09-02
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-09-03 → 2025-09-09
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-09-10 → 2025-09-16
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-09-17 → 2025-09-23
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-09-24 → 2025-09-30
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-10-01 → 2025-10-07
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-10-08 → 2025-10-14
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-10-15 → 2025-10-21
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-10-22 → 2025-10-28
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-10-29 → 2025-11-04
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-11-05 → 2025-11-11
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-11-12 → 2025-11-18
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-11-19 → 2025-11-25
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-11-26 → 2025-12-02
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-12-03 → 2025-12-09
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-12-10 → 2025-12-16
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-12-17 → 2025-12-23
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-12-24 → 2025-12-30
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2025-12-31 → 2026-01-06
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-01-07 → 2026-01-13
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-01-14 → 2026-01-20
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-01-21 → 2026-01-27
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-01-28 → 2026-02-03
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-02-04 → 2026-02-10
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-02-11 → 2026-02-17
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-02-18 → 2026-02-24
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-02-25 → 2026-03-03
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-03-04 → 2026-03-10
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-03-11 → 2026-03-17
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-03-18 → 2026-03-24
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-03-25 → 2026-03-31
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-04-01 → 2026-04-07
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-04-08 → 2026-04-14
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-04-15 → 2026-04-21
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 7 rows upserted, 0 errors
+[Klaviyo] Syncing FLO 2026-04-22 → 2026-04-27
+[Klaviyo] Metric IDs: { sent: null, opened: null, clicked: null, revenue: null }
+[Klaviyo] FLO: 6 rows upserted, 0 errors
+[Appstle] Syncing subscription revenue 2025-01-01 → 2025-01-07
+[Appstle/Shopify] Fetched 0 subscription orders over 6 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-01-08 → 2025-01-14
+[Appstle/Shopify] Fetched 0 subscription orders over 5 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-01-15 → 2025-01-21
+[Appstle/Shopify] Fetched 0 subscription orders over 6 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-01-22 → 2025-01-28
+[Appstle/Shopify] Fetched 0 subscription orders over 6 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-01-29 → 2025-02-04
+[Appstle/Shopify] Fetched 0 subscription orders over 7 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-02-05 → 2025-02-11
+[Appstle/Shopify] Fetched 0 subscription orders over 7 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-02-12 → 2025-02-18
+[Appstle/Shopify] Fetched 0 subscription orders over 9 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-02-19 → 2025-02-25
+[Appstle/Shopify] Fetched 0 subscription orders over 8 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-02-26 → 2025-03-04
+[Appstle/Shopify] Fetched 0 subscription orders over 6 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-03-05 → 2025-03-11
+[Appstle/Shopify] Fetched 0 subscription orders over 7 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-03-12 → 2025-03-18
+[Appstle/Shopify] Fetched 0 subscription orders over 10 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-03-19 → 2025-03-25
+[Appstle/Shopify] Fetched 0 subscription orders over 12 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-03-26 → 2025-04-01
+[Appstle/Shopify] Fetched 0 subscription orders over 12 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-04-02 → 2025-04-08
+[Appstle/Shopify] Fetched 0 subscription orders over 10 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-04-09 → 2025-04-15
+[Appstle/Shopify] Fetched 0 subscription orders over 14 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-04-16 → 2025-04-22
+[Appstle/Shopify] Fetched 0 subscription orders over 18 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-04-23 → 2025-04-29
+[Appstle/Shopify] Fetched 0 subscription orders over 21 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-04-30 → 2025-05-06
+[Appstle/Shopify] Fetched 0 subscription orders over 19 pages
+[Appstle] No subscription orders found for range
+[Appstle] Syncing subscription revenue 2025-05-07 → 2025-05-13

@@ -1,279 +1,293 @@
-import React,{useState,useEffect,useCallback,useRef,Component} from 'react';
-import {getStatus,refreshSheets,getDriveSheets,getSpreadsheet,selectSpreadsheet} from './utils/api';
+import React, { useState, useEffect, useCallback, useRef, Component } from 'react';
+import { appStatus, appLogout, triggerSync, getSyncStatus } from './utils/api';
 import TopBar from './components/TopBar';
-import TabBar from './components/TabBar';
-import {Icons} from './components/Icons';
+import Sidebar, { CORE_TABS } from './components/Sidebar';
+import { Icons } from './components/Icons';
 import AiAssistant from './components/AiAssistant';
+import LoginPage from './pages/LoginPage';
 
-import SummaryPage from './pages/SummaryPage';
-import DailyInputPage from './pages/DailyInputPage';
-import DailyTrendPage from './pages/DailyTrendPage';
-import TTPPage from './pages/TTPPage';
-import WeeklyTrendsPage from './pages/WeeklyTrendsPage';
-import CohortPage from './pages/CohortPage';
-import DayOfWeekPage from './pages/DayOfWeekPage';
-import ByProductPage from './pages/ByProductPage';
-import ProductColorPage from './pages/ProductColorPage';
-import VariantPage from './pages/VariantPage';
-import ByChannelPage from './pages/ByChannelPage';
-import ChannelFunnelPage from './pages/ChannelFunnelPage';
-import TierChannelPage from './pages/TierChannelPage';
-import FbCampaignsPage from './pages/FbCampaignsPage';
-import FbAdsetsPage from './pages/FbAdsetsPage';
-import ForecastPage from './pages/ForecastPage';
-import GenericSheetPage from './pages/GenericSheetPage';
+import OverviewPage      from './pages/OverviewPage';
+import NoblPage          from './pages/NoblPage';
+import FloPage           from './pages/FloPage';
+import ChannelsPage      from './pages/ChannelsPage';
+import SubsPage          from './pages/SubsPage';
+import AiBuilderPage     from './pages/AiBuilderPage';
+import SyncPage          from './pages/SyncPage';
+import GenericDashPage   from './pages/GenericDashPage';
+import LivePage          from './pages/LivePage';
 
-// Custom components for known tab names
-const CUSTOM_PAGES = {
-  'Summary':                    (pp) => <SummaryPage {...pp}/>,
-  'Daily Input':                (pp) => <DailyInputPage {...pp}/>,
-  'Daily Trend':                (pp) => <DailyTrendPage {...pp}/>,
-  'Day of Week':                (pp) => <DayOfWeekPage {...pp}/>,
-  'Trial to Paid':              (pp) => <TTPPage {...pp}/>,
-  'Weekly Trends':              (pp) => <WeeklyTrendsPage {...pp}/>,
-  'Cohort Analysis':            (pp) => <CohortPage {...pp}/>,
-  'By Product':                 (pp) => <ByProductPage {...pp}/>,
-  'Product x Color':            (pp) => <ProductColorPage {...pp}/>,
-  'Variant Activation':         (pp) => <VariantPage {...pp}/>,
-  'By Channel':                 (pp) => <ByChannelPage {...pp}/>,
-  'Channel Funnel':             (pp) => <ChannelFunnelPage {...pp}/>,
-  'Tier x Channel':             (pp) => <TierChannelPage {...pp}/>,
-  'FB Campaigns':               (pp) => <FbCampaignsPage {...pp}/>,
-  'FB Adsets':                  (pp) => <FbAdsetsPage {...pp}/>,
-  'Revenue Forcast':            (pp) => <ForecastPage {...pp}/>,
-};
-
-function getInitialTheme(){
-  try{return localStorage.getItem('nobl-theme')||'dark';}catch{return 'dark';}
+function getInitialTheme() {
+  try { return localStorage.getItem('nobl-theme') || 'dark'; } catch { return 'dark'; }
+}
+function getSidebarState() {
+  try { return localStorage.getItem('nobl-sidebar-collapsed') === 'true'; } catch { return false; }
 }
 
-export default function App(){
-  const [auth,setAuth]=useState(null);
-  const [activeTab,setActiveTab]=useState(null);
-  const [tabs,setTabs]=useState([]);
-  const [spreadsheetTitle,setSpreadsheetTitle]=useState(null);
-  const [driveSheets,setDriveSheets]=useState(null);
-  const [refreshing,setRefreshing]=useState(false);
-  const [switching,setSwitching]=useState(false);
-  const [toast,setToast]=useState(null);
-  const [theme,setTheme]=useState(getInitialTheme);
-  // Slide direction: 1 = slide left (next), -1 = slide right (prev)
-  const [slideDir,setSlideDir]=useState(0);
-  const [sliding,setSliding]=useState(false);
-  const prevTabRef=useRef(null);
+const CORE_PAGE_MAP = {
+  'Overview':      OverviewPage,
+  'NOBL Air':      NoblPage,
+  'Pilates FLO':   FloPage,
+  'Channels':      ChannelsPage,
+  'Subscriptions': SubsPage,
+  'Live Data':     LivePage,
+};
 
-  useEffect(()=>{
-    document.documentElement.setAttribute('data-theme',theme);
-    try{localStorage.setItem('nobl-theme',theme);}catch{}
-  },[theme]);
+export default function App() {
+  const [appUser, setAppUser]           = useState(undefined);
+  const [activeTab, setActiveTab]       = useState('Overview');
+  const [toast, setToast]               = useState(null);
+  const [theme, setTheme]               = useState(getInitialTheme);
+  const [refreshing, setRefreshing]     = useState(false);
+  const [syncStatus, setSyncStatus]     = useState(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(getSidebarState);
+  const [dynamicTabs, setDynamicTabs]   = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nobl-dynamic-tabs') || '[]'); } catch { return []; }
+  });
+  const [showAiBuilder, setShowAiBuilder] = useState(false);
+  const [showSync, setShowSync]           = useState(false);
+  const [pageKey, setPageKey]             = useState(0);
+  const prevTab = useRef(activeTab);
 
-  const showToast=useCallback((msg,type='info')=>{
-    setToast({msg,type});
-    setTimeout(()=>setToast(null),4000);
-  },[]);
+  // Persist theme
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try { localStorage.setItem('nobl-theme', theme); } catch {}
+  }, [theme]);
 
-  useEffect(()=>{
-    // Load auth + spreadsheet info
-    Promise.all([getStatus(), getSpreadsheet()]).then(([s,sp])=>{
-      setAuth(s);
-      if(sp.tabs?.length){
-        setTabs(sp.tabs);
-        setSpreadsheetTitle(sp.title);
-        setActiveTab(prev=>prev&&sp.tabs.includes(prev)?prev:sp.tabs[0]);
-      }
-      // Load Drive sheets (non-blocking)
-      getDriveSheets().then(sheets=>{
-        setDriveSheets(Array.isArray(sheets)?sheets:sheets?.error?sheets:[]);
-      }).catch(()=>setDriveSheets([]));
-    }).catch(()=>setAuth({authenticated:false}));
+  // Persist sidebar state
+  useEffect(() => {
+    try { localStorage.setItem('nobl-sidebar-collapsed', sidebarCollapsed); } catch {}
+  }, [sidebarCollapsed]);
 
-    const p=new URLSearchParams(window.location.search);
-    if(p.get('auth')==='success'){showToast('Connected to Google Sheets!','success');window.history.replaceState({},'','/');}
-    else if(p.get('auth')==='error'){showToast('Google auth failed','error');window.history.replaceState({},'','/');}
-  },[showToast]);
+  // Persist dynamic tabs
+  useEffect(() => {
+    try { localStorage.setItem('nobl-dynamic-tabs', JSON.stringify(dynamicTabs)); } catch {}
+  }, [dynamicTabs]);
 
-  async function handleRefresh(){
+  const showToast = useCallback((msg, type = 'info') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 4000);
+  }, []);
+
+  // Auth check
+  useEffect(() => {
+    appStatus().then(s => setAppUser(s.authenticated ? s.user : null)).catch(() => setAppUser(null));
+  }, []);
+
+  // Poll sync status every 60s
+  useEffect(() => {
+    if (!appUser) return;
+    function fetchSync() {
+      getSyncStatus().then(d => {
+        const rec = d?.recent?.[0];
+        if (!rec) { setSyncStatus(null); return; }
+        const st  = String(rec.status||'').toLowerCase();
+        if (st === 'error') { setSyncStatus('error'); return; }
+        const age = rec.finished_at ? Date.now() - new Date(rec.finished_at).getTime() : Infinity;
+        setSyncStatus(age < 3600000 ? 'ok' : 'warn');
+      }).catch(() => setSyncStatus(null));
+    }
+    fetchSync();
+    const id = setInterval(fetchSync, 60000);
+    return () => clearInterval(id);
+  }, [appUser]);
+
+  async function handleLogout() {
+    await appLogout().catch(() => {});
+    setAppUser(null);
+  }
+
+  async function handleRefresh() {
+    if (refreshing) return;
     setRefreshing(true);
-    try{
-      await refreshSheets();
-      const [s,sp]=await Promise.all([getStatus(),getSpreadsheet()]);
-      setAuth(s);
-      if(sp.tabs?.length){ setTabs(sp.tabs); setSpreadsheetTitle(sp.title); }
-      showToast('Data refreshed','success');
+    try {
+      await triggerSync({ tasks: ['klaviyo', 'appstle', 'tw_refresh'] });
+      showToast('Sync started — data will update in ~2 min', 'success');
+    } catch {
+      showToast('Failed to start sync', 'error');
+    } finally {
+      setTimeout(() => setRefreshing(false), 1500);
     }
-    catch{showToast('Refresh failed','error');}
-    finally{setRefreshing(false);}
   }
 
-  async function handleSelectSpreadsheet(id, name){
-    setSwitching(true);
-    setSpreadsheetTitle(name);
-    try{
-      const result=await selectSpreadsheet(id);
-      if(result.tabs?.length){
-        setTabs(result.tabs);
-        setSpreadsheetTitle(result.title||name);
-        setActiveTab(result.tabs[0]);
+  function handleTabChange(id) {
+    if (id === activeTab) return;
+    prevTab.current = activeTab;
+    setActiveTab(id);
+    setPageKey(k => k + 1);
+    setShowAiBuilder(false);
+    setShowSync(false);
+  }
+
+  function handleAddDashboard() {
+    setShowAiBuilder(true);
+    setShowSync(false);
+  }
+
+  function handleDashboardCreated(dash) {
+    // dash = { id, label, subtitle, type:'dashboard', config }
+    setDynamicTabs(prev => {
+      const existing = prev.findIndex(t => t.id === dash.id);
+      if (existing >= 0) {
+        const next = [...prev];
+        next[existing] = dash;
+        return next;
       }
-      const s=await getStatus();
-      setAuth({...s,spreadsheetId:id});
-      showToast(`Switched to "${result.title||name}"`, 'success');
-    }
-    catch{showToast('Failed to switch spreadsheet','error');}
-    finally{setSwitching(false);}
+      return [...prev, dash];
+    });
+    setActiveTab(dash.id);
+    setShowAiBuilder(false);
+    showToast(`Dashboard "${dash.label}" created`, 'success');
   }
 
-  function handleTabChange(tab){
-    if(tab===activeTab) return;
-    const oldIdx=tabs.indexOf(activeTab);
-    const newIdx=tabs.indexOf(tab);
-    setSlideDir(newIdx>oldIdx?1:-1);
-    setSliding(true);
-    prevTabRef.current=activeTab;
-    setTimeout(()=>{
-      setActiveTab(tab);
-      setSliding(false);
-      setSlideDir(0);
-    },180);
+  function handleDeleteDynamic(id) {
+    setDynamicTabs(prev => prev.filter(t => t.id !== id));
+    if (activeTab === id) setActiveTab('Overview');
+    showToast('Removed', 'info');
   }
 
-  if(!auth) return <Spinner/>;
-  if(!auth.authenticated) return <LoginScreen/>;
+  if (appUser === undefined) return <Spinner />;
+  if (!appUser) return <LoginPage onLogin={setAppUser} />;
 
-  const pp={showToast};
-  const renderPage=()=>{
-    if(!activeTab) return <EmptyState/>;
-    const custom=CUSTOM_PAGES[activeTab];
-    if(custom) return custom(pp);
-    return <GenericSheetPage key={activeTab} tabName={activeTab} {...pp}/>;
-  };
+  // Determine which component to render
+  let PageComp = null;
+  let pageDynamic = null;
 
-  return(
-    <div style={{display:'flex',flexDirection:'column',height:'100vh',overflow:'hidden',background:'var(--bg)'}}>
-      <TopBar
-        auth={auth}
-        onRefresh={handleRefresh}
-        refreshing={refreshing}
-        theme={theme}
-        onToggleTheme={()=>setTheme(t=>t==='dark'?'light':'dark')}
-        spreadsheetTitle={spreadsheetTitle}
-        driveSheets={driveSheets}
-        onSelectSpreadsheet={handleSelectSpreadsheet}
-        switching={switching}
+  if (showSync) {
+    PageComp = SyncPage;
+  } else if (showAiBuilder) {
+    PageComp = AiBuilderPage;
+  } else if (CORE_PAGE_MAP[activeTab]) {
+    PageComp = CORE_PAGE_MAP[activeTab];
+  } else {
+    pageDynamic = dynamicTabs.find(t => t.id === activeTab);
+    if (pageDynamic) PageComp = GenericDashPage;
+    else PageComp = OverviewPage;
+  }
+
+  return (
+    <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg)' }}>
+      {/* Sidebar */}
+      <Sidebar
+        active={showSync ? '__sync' : showAiBuilder ? '__builder' : activeTab}
+        onChange={handleTabChange}
+        dynamicTabs={dynamicTabs}
+        onAddDashboard={handleAddDashboard}
+        onDeleteDynamic={handleDeleteDynamic}
+        collapsed={sidebarCollapsed}
+        onCollapse={() => setSidebarCollapsed(c => !c)}
       />
 
-      {tabs.length>0&&(
-        <TabBar tabs={tabs} active={activeTab||tabs[0]} onChange={handleTabChange}/>
-      )}
+      {/* Main area */}
+      <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
+        <TopBar
+          activeTab={showSync ? 'Sync Status' : showAiBuilder ? 'AI Builder' : activeTab}
+          appUser={appUser}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
+          syncStatus={syncStatus}
+          theme={theme}
+          onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+          onLogout={handleLogout}
+          onOpenAiBuilder={() => { setShowAiBuilder(true); setShowSync(false); }}
+          onOpenSync={() => { setShowSync(true); setShowAiBuilder(false); }}
+          dynamicTabs={dynamicTabs}
+        />
 
-      <main style={{
-        flex:1,overflowY:'auto',overflowX:'hidden',
-        background:'var(--bg)',
-      }}>
-        <div style={{
-          maxWidth:1440,margin:'0 auto',
-          padding:'28px 32px',
-          transform:sliding?`translateX(${slideDir*18}px)`:'translateX(0)',
-          opacity:sliding?0:1,
-          transition:sliding?'none':'transform .18s ease, opacity .18s ease',
-        }}>
-          {switching?(
-            <div style={{padding:'80px 0',textAlign:'center',color:'var(--text3)'}}>
-              <div style={{width:28,height:28,border:'2px solid var(--border2)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin .8s linear infinite',margin:'0 auto 14px'}}/>
-              <p style={{fontSize:13}}>Loading spreadsheet…</p>
-            </div>
-          ):(
-            <ErrorBoundary key={activeTab}>
-              {renderPage()}
+        <main style={{ flex:1, overflowY: showAiBuilder ? 'hidden' : 'auto', overflowX:'hidden', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
+          <div
+            key={`${activeTab}-${showSync}-${showAiBuilder}-${pageKey}`}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              padding: showAiBuilder ? 0 : '20px 24px',
+              flex: showAiBuilder ? 1 : undefined,
+              minHeight: showAiBuilder ? 0 : undefined,
+              display: showAiBuilder ? 'flex' : 'block',
+              flexDirection: showAiBuilder ? 'column' : undefined,
+              animation:'fadein .2s ease',
+            }}
+          >
+            <ErrorBoundary key={`${activeTab}-${pageKey}`}>
+              {PageComp === AiBuilderPage
+                ? <AiBuilderPage showToast={showToast} onDashboardCreated={handleDashboardCreated} />
+                : PageComp === SyncPage
+                  ? <SyncPage showToast={showToast} />
+                  : PageComp === GenericDashPage
+                    ? <GenericDashPage tab={pageDynamic} showToast={showToast} />
+                    : <PageComp showToast={showToast} />
+              }
             </ErrorBoundary>
-          )}
-        </div>
-      </main>
+          </div>
+        </main>
+      </div>
 
-      {toast&&<Toast {...toast}/>}
-      {auth?.authenticated&&<AiAssistant activeTab={activeTab}/>}
-      <style>{`.hide-scrollbar::-webkit-scrollbar{display:none}`}</style>
+      {toast && <Toast {...toast} />}
+      <AiAssistant activeTab={activeTab} />
     </div>
   );
 }
 
-// ── Error boundary — catches render crashes, shows msg instead of blank ──
+/* ── Error Boundary ─────────────────────────────────────────────── */
 class ErrorBoundary extends Component {
-  constructor(props){super(props);this.state={error:null};}
-  static getDerivedStateFromError(e){return{error:e};}
-  componentDidCatch(e,info){console.error('[ErrorBoundary]',e,info);}
-  render(){
-    if(this.state.error){
-      return(
-        <div style={{padding:'60px 32px',maxWidth:540,margin:'0 auto'}}>
-          <div style={{background:'rgba(239,68,68,.08)',border:'1px solid rgba(239,68,68,.3)',borderRadius:12,padding:'24px 28px'}}>
-            <div style={{fontWeight:700,fontSize:15,marginBottom:8,color:'var(--danger)'}}>Something went wrong</div>
-            <div style={{fontSize:13,color:'var(--text2)',marginBottom:16,lineHeight:1.7}}>
-              This tab crashed during rendering. Try refreshing the data or switching to another tab.
-            </div>
-            <code style={{fontSize:11,color:'var(--text3)',display:'block',background:'var(--bg3)',borderRadius:6,padding:'10px 12px',wordBreak:'break-all'}}>
-              {String(this.state.error?.message||this.state.error)}
-            </code>
-            <button onClick={()=>this.setState({error:null})} style={{marginTop:16,padding:'7px 18px',background:'var(--accent)',color:'#fff',border:'none',borderRadius:8,fontSize:13,cursor:'pointer',fontWeight:600}}>
-              Try again
-            </button>
+  constructor(p) { super(p); this.state = { error:null }; }
+  static getDerivedStateFromError(e) { return { error:e }; }
+  componentDidCatch(e, i) { console.error('[ErrorBoundary]', e, i); }
+  render() {
+    if (this.state.error) return (
+      <div style={{ padding:'60px 32px', maxWidth:540, margin:'0 auto' }}>
+        <div style={{
+          background:'var(--danger-dim)', border:'1px solid rgba(239,68,68,.3)',
+          borderRadius:12, padding:'24px 28px',
+        }}>
+          <div style={{ fontWeight:700, fontSize:15, marginBottom:8, color:'var(--danger)' }}>Something went wrong</div>
+          <div style={{ fontSize:13, color:'var(--text2)', marginBottom:16, lineHeight:1.7 }}>
+            This page crashed. Try switching tabs or refreshing.
           </div>
+          <code style={{ fontSize:11, color:'var(--text3)', display:'block', background:'var(--bg3)',
+            borderRadius:6, padding:'10px 12px', wordBreak:'break-all' }}>
+            {String(this.state.error?.message || this.state.error)}
+          </code>
+          <button onClick={() => this.setState({ error:null })}
+            style={{ marginTop:16, padding:'7px 18px', background:'var(--accent)', color:'#fff',
+              border:'none', borderRadius:8, fontSize:13, cursor:'pointer', fontWeight:600 }}>
+            Try again
+          </button>
         </div>
-      );
-    }
+      </div>
+    );
     return this.props.children;
   }
 }
 
-function EmptyState(){
-  return(
-    <div style={{padding:'80px 0',textAlign:'center',color:'var(--text3)'}}>
-      <Icons.FileSpreadsheet size={40} style={{margin:'0 auto 16px',opacity:.3}}/>
-      <p style={{fontSize:14}}>Select a spreadsheet to get started</p>
+function Spinner() {
+  return (
+    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'var(--bg)', flexDirection:'column', gap:16 }}>
+      <div style={{
+        width:32, height:32,
+        background:'var(--accent)',
+        borderRadius:9, display:'flex', alignItems:'center', justifyContent:'center',
+        fontSize:14, fontWeight:800, color:'#fff',
+      }}>N</div>
+      <div style={{ width:24, height:24, border:'2px solid var(--border2)', borderTopColor:'var(--accent)', borderRadius:'50%', animation:'spin .8s linear infinite' }}/>
     </div>
   );
 }
 
-function Spinner(){
-  return(
-    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'100vh',background:'var(--bg)'}}>
-      <div style={{width:28,height:28,border:'2px solid var(--border2)',borderTopColor:'var(--accent)',borderRadius:'50%',animation:'spin .8s linear infinite'}}/>
-    </div>
-  );
-}
-
-function LoginScreen(){
-  return(
-    <div style={{display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',height:'100vh',gap:24,padding:24,background:'var(--bg)'}}>
-      <div style={{display:'flex',alignItems:'center',gap:10}}>
-        <div style={{width:42,height:42,background:'linear-gradient(135deg,var(--accent),var(--accent2))',borderRadius:11,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:800,fontSize:18,color:'#fff',fontFamily:'var(--font-head)'}}>N</div>
-        <span style={{fontSize:22,fontWeight:800,fontFamily:'var(--font-head)'}}>NOBL Air Analytics</span>
-      </div>
-      <p style={{color:'var(--text2)',maxWidth:360,textAlign:'center',lineHeight:1.8,fontSize:13}}>
-        Connect your Google account to access your spreadsheet dashboards.
-      </p>
-      <a href="/auth/login"
-        style={{display:'inline-flex',alignItems:'center',gap:9,background:'var(--accent)',color:'#fff',borderRadius:9,padding:'10px 24px',fontWeight:600,fontSize:13,textDecoration:'none'}}>
-        <Icons.FileSpreadsheet size={15}/>
-        Sign in with Google
-      </a>
-    </div>
-  );
-}
-
-function Toast({msg,type}){
-  const c={success:'var(--success)',error:'var(--danger)',info:'var(--accent)'};
-  const col=c[type]||'var(--border2)';
-  return(
+function Toast({ msg, type }) {
+  const col = { success:'var(--success)', error:'var(--danger)', info:'var(--accent)', warn:'var(--warn)' }[type] || 'var(--border2)';
+  return (
     <div style={{
-      position:'fixed',bottom:20,right:20,
-      background:'var(--bg2)',border:`1px solid ${col}`,
-      borderRadius:9,padding:'10px 16px',
-      display:'flex',alignItems:'center',gap:9,
-      zIndex:9999,fontSize:13,fontWeight:500,
-      animation:'fadein .2s ease',boxShadow:'var(--shadow)',
+      position:'fixed', bottom:20, right:20,
+      background:'var(--bg2)', border:`1px solid ${col}`,
+      borderRadius:10, padding:'10px 16px',
+      display:'flex', alignItems:'center', gap:9,
+      zIndex:9999, fontSize:13, fontWeight:500,
+      animation:'fadein .2s ease',
+      boxShadow:'var(--shadow-sm)',
+      maxWidth:360,
     }}>
-      <span style={{width:6,height:6,borderRadius:'50%',background:col,flexShrink:0}}/>
+      <span style={{ width:6, height:6, borderRadius:'50%', background:col, flexShrink:0 }}/>
       {msg}
     </div>
   );

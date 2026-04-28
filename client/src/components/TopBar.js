@@ -1,170 +1,170 @@
-import React,{useState,useRef,useEffect} from 'react';
-import {Icons} from './Icons';
+import React, { useState } from 'react';
+import { Icons } from './Icons';
 
-export default function TopBar({auth,onRefresh,refreshing,theme,onToggleTheme,
-  spreadsheetTitle,driveSheets,onSelectSpreadsheet,switching}){
+const PAGE_INFO = {
+  'Overview':      'All brands — real-time analytics',
+  'NOBL Air':      'nobltravel.com — revenue, spend & subscriptions',
+  'Pilates FLO':   'pilatesflo.com — product & channel performance',
+  'Channels':      'META · Google · TikTok · Snapchat · more',
+  'Subscriptions': 'Appstle — subscription revenue & MRR',
+};
 
-  const [open,setOpen]=useState(false);
-  const dropRef=useRef(null);
-  const fresh=auth?.lastFetched&&(Date.now()-new Date(auth.lastFetched).getTime())<6*60*60*1000;
+function HeaderBtn({ icon: Ic, label, onClick, danger, title: ttl, disabled, active, small }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <button
+      onClick={onClick}
+      title={ttl || label}
+      disabled={disabled}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: label ? 5 : 0,
+        padding: small ? '4px 8px' : label ? '5px 10px' : '5px 7px',
+        background: active
+          ? 'var(--accent-dim)'
+          : hov ? 'var(--bg3)' : 'transparent',
+        border: `1px solid ${active ? 'var(--accent)' : hov ? 'var(--border2)' : 'var(--border)'}`,
+        borderRadius: 'var(--radius)',
+        color: active ? 'var(--accent)' : danger && hov ? 'var(--danger)' : hov ? 'var(--text)' : 'var(--text2)',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        fontSize: 12, fontWeight: 500, fontFamily: 'var(--font-body)',
+        transition: 'border-color .12s, background .12s, color .12s',
+        whiteSpace: 'nowrap',
+        lineHeight: 1,
+      }}
+    >
+      <Ic size={12} />
+      {label && <span>{label}</span>}
+    </button>
+  );
+}
 
-  // Close dropdown on outside click
-  useEffect(()=>{
-    const handler=(e)=>{if(dropRef.current&&!dropRef.current.contains(e.target)) setOpen(false);};
-    document.addEventListener('mousedown',handler);
-    return()=>document.removeEventListener('mousedown',handler);
-  },[]);
+export default function TopBar({
+  activeTab, appUser,
+  onRefresh, refreshing, syncStatus,
+  theme, onToggleTheme, onLogout,
+  onOpenAiBuilder, onOpenSync,
+  dynamicTabs,
+}) {
+  const dynTab  = (dynamicTabs || []).find(t => t.id === activeTab);
+  const title   = dynTab ? (dynTab.label || dynTab.id) : (activeTab || 'Dashboard');
+  const subtitle = dynTab
+    ? (dynTab.subtitle || 'Custom dashboard')
+    : (PAGE_INFO[activeTab] || '');
 
-  const iconBtn={
-    display:'flex',alignItems:'center',gap:5,
-    background:'none',border:'1px solid var(--border2)',
-    color:'var(--text2)',borderRadius:'var(--radius)',
-    padding:'5px 11px',cursor:'pointer',transition:'all .15s',
-    fontSize:12,fontWeight:500,fontFamily:'var(--font-body)',
-  };
+  const syncDot = {
+    ok:    { color: 'var(--success)', title: 'Synced < 1h ago' },
+    warn:  { color: 'var(--warn)',    title: 'Last sync > 1h ago' },
+    error: { color: 'var(--danger)',  title: 'Sync failed' },
+  }[syncStatus];
 
-  const formatTime=(iso)=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
-
-  return(
+  return (
     <header style={{
-      display:'flex',alignItems:'center',justifyContent:'space-between',
-      padding:'0 20px',height:'var(--topbar-h)',
-      background:'var(--bg2)',
-      borderBottom:'1px solid var(--border)',
-      position:'sticky',top:0,zIndex:300,
-      gap:12,
+      height: 'var(--topbar-h)',
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0 18px',
+      background: 'var(--bg2)',
+      borderBottom: '1px solid var(--border)',
+      position: 'sticky', top: 0, zIndex: 300,
+      gap: 12, flexShrink: 0,
     }}>
-
-      {/* ── Left: Logo ─────────────────────────────────────── */}
-      <div style={{display:'flex',alignItems:'center',gap:9,flexShrink:0}}>
+      {/* Page title */}
+      <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{
-          width:26,height:26,
-          background:'linear-gradient(135deg,var(--accent),var(--accent2))',
-          borderRadius:6,display:'flex',alignItems:'center',justifyContent:'center',
-          fontFamily:'var(--font-head)',fontWeight:800,fontSize:12,color:'#fff',
-        }}>N</div>
-        <span style={{fontFamily:'var(--font-head)',fontSize:14,fontWeight:800,letterSpacing:'-0.2px',whiteSpace:'nowrap'}}>NOBL Air</span>
-      </div>
-
-      {/* ── Center: Spreadsheet selector ───────────────────── */}
-      <div ref={dropRef} style={{position:'relative',flex:'0 1 340px',minWidth:0}}>
-        <button onClick={()=>setOpen(o=>!o)}
-          disabled={switching}
-          style={{
-            display:'flex',alignItems:'center',gap:8,width:'100%',
-            background:'var(--bg3)',border:'1px solid var(--border2)',
-            color:'var(--text)',borderRadius:'var(--radius)',
-            padding:'6px 12px',cursor:'pointer',transition:'all .15s',
-            fontSize:13,fontWeight:500,fontFamily:'var(--font-body)',
-            opacity:switching?.7:1,
-          }}
-          onMouseEnter={e=>{if(!switching){e.currentTarget.style.borderColor='var(--accent)';e.currentTarget.style.boxShadow='0 0 0 2px var(--accent-dim)';}}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border2)';e.currentTarget.style.boxShadow='none';}}>
-          <Icons.FileSpreadsheet size={14} style={{flexShrink:0,color:'var(--teal)'}}/>
-          <span style={{flex:1,textAlign:'left',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:12.5}}>
-            {switching?'Loading…':spreadsheetTitle||'Select a spreadsheet'}
-          </span>
-          <Icons.ChevronRight size={12} style={{flexShrink:0,transform:open?'rotate(90deg)':'none',transition:'transform .15s',opacity:.5}}/>
-        </button>
-
-        {open&&(
+          fontSize: 13, fontWeight: 600, color: 'var(--text)',
+          lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}>
+          {title}
+        </div>
+        {subtitle && (
           <div style={{
-            position:'absolute',top:'calc(100% + 6px)',left:0,right:0,
-            background:'var(--bg2)',border:'1px solid var(--border2)',
-            borderRadius:10,overflow:'hidden',
-            boxShadow:'var(--shadow)',zIndex:400,
-            maxHeight:320,overflowY:'auto',
+            fontSize: 11, color: 'var(--text3)', lineHeight: 1.3,
+            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', marginTop: 1,
           }}>
-            {!driveSheets||driveSheets.error?(
-              <div style={{padding:'14px 16px'}}>
-                {driveSheets?.needsReauth?(
-                  <div style={{fontSize:12,color:'var(--text3)',lineHeight:1.6}}>
-                    <p style={{marginBottom:8,color:'var(--warn)'}}>Extra permission needed to list your sheets.</p>
-                    <a href="/auth/login" style={{color:'var(--accent)',fontSize:12}}>Sign in again to grant access</a>
-                  </div>
-                ):(
-                  <p style={{fontSize:12,color:'var(--text3)'}}>Could not load sheets. Check your connection.</p>
-                )}
-              </div>
-            ):driveSheets.length===0?(
-              <div style={{padding:'14px 16px',fontSize:12,color:'var(--text3)'}}>No spreadsheets found in your Drive.</div>
-            ):(
-              <>
-                <div style={{padding:'8px 12px 4px',fontSize:10,fontWeight:700,color:'var(--text3)',textTransform:'uppercase',letterSpacing:'1px',borderBottom:'1px solid var(--border)'}}>Your Google Sheets</div>
-                {driveSheets.map(sheet=>{
-                  const isActive=sheet.id===auth?.spreadsheetId;
-                  return(
-                    <button key={sheet.id}
-                      onClick={()=>{onSelectSpreadsheet(sheet.id,sheet.name);setOpen(false);}}
-                      style={{
-                        display:'flex',alignItems:'center',gap:10,width:'100%',
-                        padding:'9px 14px',background:isActive?'var(--accent-dim)':'transparent',
-                        border:'none',color:isActive?'var(--accent)':'var(--text)',
-                        fontSize:13,textAlign:'left',cursor:'pointer',transition:'background .1s',
-                        fontFamily:'var(--font-body)',
-                      }}
-                      onMouseEnter={e=>{if(!isActive)e.currentTarget.style.background='var(--bg4)';}}
-                      onMouseLeave={e=>{if(!isActive)e.currentTarget.style.background='transparent';}}>
-                      <Icons.FileSpreadsheet size={14} style={{flexShrink:0,color:isActive?'var(--accent)':'var(--teal)',opacity:.8}}/>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isActive?600:400,fontSize:13}}>{sheet.name}</div>
-                        {sheet.modifiedTime&&(
-                          <div style={{fontSize:10,color:'var(--text3)',marginTop:1}}>
-                            Modified {formatTime(sheet.modifiedTime)}
-                          </div>
-                        )}
-                      </div>
-                      {isActive&&<span style={{width:6,height:6,borderRadius:'50%',background:'var(--accent)',flexShrink:0}}/>}
-                    </button>
-                  );
-                })}
-              </>
-            )}
+            {subtitle}
           </div>
         )}
       </div>
 
-      {/* ── Right: Status + Actions ─────────────────────────── */}
-      <div style={{display:'flex',alignItems:'center',gap:6,flexShrink:0}}>
-        {/* Last updated */}
-        <div style={{display:'flex',alignItems:'center',gap:5,marginRight:4}}>
-          <span style={{
-            width:6,height:6,borderRadius:'50%',display:'inline-block',flexShrink:0,
-            background:!auth?.lastFetched?'var(--text3)':fresh?'var(--success)':'var(--warn)',
-            animation:fresh?'pulse-ring 2.5s infinite':'none',
-          }}/>
-          <span style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)',whiteSpace:'nowrap'}}>
-            {auth?.lastFetched?formatTime(auth.lastFetched):'Never'}
-          </span>
+      {/* Actions */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+
+        {/* AI Builder */}
+        <HeaderBtn
+          icon={Icons.Wand}
+          label="AI Builder"
+          onClick={onOpenAiBuilder}
+          title="Build dashboards with AI"
+          active={activeTab === 'AI Builder'}
+        />
+
+        <div style={{ width: 1, height: 16, background: 'var(--border2)', margin: '0 1px' }} />
+
+        {/* Sync dot + button */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+          {syncDot && (
+            <span
+              title={syncDot.title}
+              style={{
+                width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+                background: syncDot.color,
+              }}
+            />
+          )}
+          <HeaderBtn
+            icon={Icons.RefreshCw}
+            label={refreshing ? 'Syncing' : 'Sync'}
+            onClick={onRefresh}
+            disabled={refreshing}
+            title="Fetch latest data from all APIs"
+            small
+          />
         </div>
 
-        {/* Theme toggle */}
-        <button onClick={onToggleTheme}
-          style={iconBtn}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--accent)';e.currentTarget.style.color='var(--accent)';}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border2)';e.currentTarget.style.color='var(--text2)';}}>
-          {theme==='dark'?<Icons.Sun size={13}/>:<Icons.Moon size={13}/>}
-          <span>{theme==='dark'?'Light':'Dark'}</span>
-        </button>
+        {/* Sync status detail */}
+        <HeaderBtn icon={Icons.Database} onClick={onOpenSync} title="Sync status" active={activeTab === 'Sync Status'} />
 
-        {/* Refresh */}
-        <button onClick={onRefresh} disabled={refreshing}
-          style={{...iconBtn,background:'var(--accent)',borderColor:'transparent',color:'#fff',opacity:refreshing?.6:1}}
-          onMouseEnter={e=>{if(!refreshing)e.currentTarget.style.filter='brightness(1.1)';}}
-          onMouseLeave={e=>e.currentTarget.style.filter=''}>
-          <Icons.RefreshCw size={13} style={{animation:refreshing?'spin .7s linear infinite':'none'}}/>
-          <span>{refreshing?'Refreshing…':'Refresh'}</span>
-        </button>
+        <div style={{ width: 1, height: 16, background: 'var(--border2)', margin: '0 1px' }} />
 
-        {/* Sign out */}
-        <button
-          onClick={()=>fetch('/auth/logout',{method:'POST'}).then(()=>window.location.reload())}
-          style={iconBtn}
-          onMouseEnter={e=>{e.currentTarget.style.borderColor='var(--danger)';e.currentTarget.style.color='var(--danger)';}}
-          onMouseLeave={e=>{e.currentTarget.style.borderColor='var(--border2)';e.currentTarget.style.color='var(--text2)';}}>
-          <Icons.LogOut size={13}/>
-          <span>Out</span>
-        </button>
+        {/* Theme */}
+        <HeaderBtn
+          icon={theme === 'dark' ? Icons.Sun : Icons.Moon}
+          label={theme === 'dark' ? 'Light' : 'Dark'}
+          onClick={onToggleTheme}
+          small
+        />
+
+        {/* User */}
+        {appUser && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            padding: '4px 8px 4px 4px',
+            background: 'var(--bg3)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)',
+          }}>
+            <div style={{
+              width: 22, height: 22, borderRadius: '50%', flexShrink: 0,
+              background: 'var(--accent)', color: '#fff',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700,
+            }}>
+              {(appUser.name || 'U').charAt(0).toUpperCase()}
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text)', maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', lineHeight: 1.2 }}>
+                {appUser.name}
+              </div>
+              <div style={{ fontSize: 9, color: appUser.role === 'admin' ? 'var(--accent)' : 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '.3px', lineHeight: 1.2 }}>
+                {appUser.role}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Logout */}
+        <HeaderBtn icon={Icons.LogOut} onClick={onLogout} danger title="Sign out" />
       </div>
     </header>
   );

@@ -1,5 +1,11 @@
 const B = '';
 
+// ── App-level auth ───────────────────────────────────────────────
+export const appStatus  = () => fetch(`${B}/auth/app-status`).then(r=>r.json());
+export const appLogin   = (email,password) => fetch(`${B}/auth/app-login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})}).then(r=>r.json());
+export const appSignup  = (email,password,name) => fetch(`${B}/auth/app-signup`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name})}).then(r=>r.json());
+export const appLogout  = () => fetch(`${B}/auth/app-logout`,{method:'POST'}).then(r=>r.json());
+
 export const getStatus = () => fetch(`${B}/auth/status`).then(r=>r.json());
 export const getSummary = () => fetch(`${B}/api/summary`).then(r=>{ if(!r.ok)throw new Error(r.status); return r.json(); });
 export const getTab = t => fetch(`${B}/api/sheets/${encodeURIComponent(t)}`).then(r=>{ if(!r.ok)throw new Error(r.status); return r.json(); });
@@ -64,12 +70,35 @@ export function isPercent(header){
 export function isCurrency(header){
   const h=String(header).toLowerCase();
   return h.includes('revenue')||h.includes('gross')||h.includes('sales')||
-    h.includes('amount')||h.includes('rev')||h.startsWith('$')||h.includes('price');
+    h.includes('amount')||h.includes('rev')||h.startsWith('$')||h.includes('price')||
+    h.includes('spend')||h.includes('cost')||h.includes('cac')||h.includes('aov')||
+    h.includes('ltv')||h.includes('budget')||h.includes('profit')||h.includes('margin');
 }
 export function isDateField(header){
   const h=String(header).toLowerCase();
   return h==='date'||h.includes('week')||h==='cohort week';
 }
+
+// ── Analytics API ─────────────────────────────────────────────────
+export const getOverview = (start, end) => fetch(`${B}/api/analytics/overview?start=${start}&end=${end}`).then(r=>r.json());
+export const getNoblTopline = (start, end) => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(r=>r.json());
+export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(r=>r.json());
+export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(r=>r.json());
+export const getNoblSubs = (start, end) => fetch(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`).then(r=>r.json());
+export const getFloProducts = (start, end) => fetch(`${B}/api/analytics/flo/products?start=${start}&end=${end}`).then(r=>r.json());
+export const getSyncStatus = () => fetch(`${B}/api/sync/status`).then(r=>r.json());
+export const triggerSync = (opts={}) => fetch(`${B}/api/sync/trigger`, {
+  method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(opts),
+}).then(r=>r.json());
+export const getDashboards = () => fetch(`${B}/api/dashboards`).then(r=>r.json());
+export const saveDashboard = (d) => fetch(`${B}/api/dashboards`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}).then(r=>r.json());
+export const updateDashboard = (id, d) => fetch(`${B}/api/dashboards/${id}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(d)}).then(r=>r.json());
+export const deleteDashboard = (id) => fetch(`${B}/api/dashboards/${id}`, {method:'DELETE'}).then(r=>r.json());
+export const generateDashboard = (messages) => fetch(`${B}/api/ai/dashboard-generate`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({messages})}).then(r=>r.json());
+export const executeDashboard = (config) => fetch(`${B}/api/dashboards/execute`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({config})}).then(r=>r.json());
+
+export const getSyncDetail = () => fetch(`${B}/api/sync/status`).then(r=>r.json());
+export const runBackfill = (body) => fetch(`${B}/api/sync/trigger`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)}).then(r=>r.json());
 
 export function fmtCell(val,header){
   if(val===''||val===null||val===undefined) return '—';

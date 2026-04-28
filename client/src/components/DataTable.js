@@ -1,118 +1,389 @@
-import React,{useState,useCallback} from 'react';
-import {setHighlight,removeHighlight} from '../utils/api';
-import {fmtCell} from '../utils/api';
+import React, { useState, useCallback, useRef } from 'react';
+import { setHighlight, removeHighlight, fmtCell } from '../utils/api';
 import AnnotationModal from './AnnotationModal';
 
-const HL_COLORS=['yellow','green','red','blue',null];
-const HL_BG={yellow:'var(--hl-yellow)',green:'var(--hl-green)',red:'var(--hl-red)',blue:'var(--hl-blue)'};
-const ANN_COLOR={yellow:'#fbbf24',blue:'#4f8ef7',green:'#22c55e',red:'#f05252'};
+const HL_BG = { yellow: 'var(--hl-yellow)', green: 'var(--hl-green)', red: 'var(--hl-red)', blue: 'var(--hl-blue)' };
+const HL_CYCLE = ['yellow', 'green', 'red', 'blue', null];
 
-export default function DataTable({tab,headers,rows,onRowsChange,maxHeight='520px',searchable=true}){
-  const [search,setSearch]=useState('');
-  const [modal,setModal]=useState(null);
-  const [localRows,setLocalRows]=useState(rows);
+export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight = '480px', searchable = true }) {
+  const [search, setSearch]       = useState('');
+  const [localRows, setLocalRows] = useState(rows);
+  const [modal, setModal]         = useState(null);
+  const [sortBy, setSortBy]       = useState(null);
+  const [sortDir, setSortDir]     = useState('asc');
 
-  React.useEffect(()=>setLocalRows(rows),[rows]);
+  // Selection
+  const [selectedRows, setSelectedRows] = useState(new Set());
+  const [selectedCols, setSelectedCols] = useState(new Set());
+  const [anchorRow, setAnchorRow]       = useState(null);
+  const [anchorCol, setAnchorCol]       = useState(null);
+  const [selecting, setSelecting]       = useState(false);
+  const selStartRef = useRef(null);
 
-  const filtered=search
-    ? localRows.filter(r=>Object.values(r).some(v=>String(v).toLowerCase().includes(search.toLowerCase())))
+  React.useEffect(() => { setLocalRows(rows); }, [rows]);
+
+  const visibleHeaders = headers.filter(h => !h.startsWith('_'));
+
+  // Filter
+  const filtered = search
+    ? localRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(search.toLowerCase())))
     : localRows;
 
-  const cycleHighlight=useCallback(async(row)=>{
-    const curr=row._highlighted;
-    const idx=HL_COLORS.indexOf(curr);
-    const next=HL_COLORS[(idx+1)%HL_COLORS.length];
-    if(next===null){
-      await removeHighlight({tab,row_key:row._rowKey});
-    } else {
-      await setHighlight({tab,row_key:row._rowKey,color:next});
-    }
-    setLocalRows(prev=>prev.map(r=>r._rowKey===row._rowKey?{...r,_highlighted:next}:r));
-    onRowsChange&&onRowsChange();
-  },[tab,onRowsChange]);
+  // Sort
+  const sorted = sortBy
+    ? [...filtered].sort((a, b) => {
+        const va = a[sortBy], vb = b[sortBy];
+        if (va == null) return 1; if (vb == null) return -1;
+        const na = parseFloat(va), nb = parseFloat(vb);
+        if (!isNaN(na) && !isNaN(nb)) return sortDir === 'asc' ? na - nb : nb - na;
+        return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+      })
+    : filtered;
 
-  function openAnnotate(e,row){
-    e.preventDefault();
-    const existing=row._annotations?.[0]||null;
-    setModal({tab,rowKey:row._rowKey,metric:'',existing});
+  function handleSort(h) {
+    if (sortBy === h) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortBy(h); setSortDir('asc'); }
   }
 
-  function onAnnotationSaved(row,result){
-    setLocalRows(prev=>prev.map(r=>{
-      if(r._rowKey!==row._rowKey) return r;
-      if(!result) return {...r,_annotations:[]};
-      const anns=(r._annotations||[]).filter(a=>a.id!==result.id);
-      return {...r,_annotations:[result,...anns]};
+  // Row selection
+  function selectRow(e, rowIdx) {
+    e.preventDefault();
+    if (e.shiftKey && anchorRow !== null) {
+      const lo = Math.min(anchorRow, rowIdx), hi = Math.max(anchorRow, rowIdx);
+      const next = new Set(selectedRows);
+      for (let i = lo; i <= hi; i++) next.add(i);
+      setSelectedRows(next);
+    } else if (e.ctrlKey || e.metaKey) {
+      const next = new Set(selectedRows);
+      next.has(rowIdx) ? next.delete(rowIdx) : next.add(rowIdx);
+      setSelectedRows(next); setAnchorRow(rowIdx);
+    } else {
+      setSelectedRows(new Set([rowIdx])); setAnchorRow(rowIdx);
+    }
+    setSelectedCols(new Set());
+  }
+
+  function selectCol(e, colIdx) {
+    e.stopPropagation();
+    if (e.shiftKey && anchorCol !== null) {
+      const lo = Math.min(anchorCol, colIdx), hi = Math.max(anchorCol, colIdx);
+      const next = new Set(selectedCols);
+      for (let i = lo; i <= hi; i++) next.add(i);
+      setSelectedCols(next);
+    } else if (e.ctrlKey || e.metaKey) {
+      const next = new Set(selectedCols);
+      next.has(colIdx) ? next.delete(colIdx) : next.add(colIdx);
+      setSelectedCols(next); setAnchorCol(colIdx);
+    } else {
+      setSelectedCols(new Set([colIdx])); setAnchorCol(colIdx);
+    }
+    setSelectedRows(new Set());
+  }
+
+  // Drag
+  function handleRowMouseDown(e, rowIdx) {
+    if (e.button !== 0) return;
+    setSelecting(true); selStartRef.current = rowIdx;
+    if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
+      setSelectedRows(new Set([rowIdx])); setAnchorRow(rowIdx);
+    }
+  }
+  function handleRowMouseEnter(rowIdx) {
+    if (!selecting) return;
+    const lo = Math.min(selStartRef.current, rowIdx), hi = Math.max(selStartRef.current, rowIdx);
+    const next = new Set();
+    for (let i = lo; i <= hi; i++) next.add(i);
+    setSelectedRows(next);
+  }
+  function handleMouseUp() { setSelecting(false); }
+
+  // Highlight
+  const cycleHL = useCallback(async (row) => {
+    const curr = row._highlighted;
+    const next = HL_CYCLE[(HL_CYCLE.indexOf(curr) + 1) % HL_CYCLE.length];
+    if (next === null) await removeHighlight({ tab, row_key: row._rowKey });
+    else await setHighlight({ tab, row_key: row._rowKey, color: next });
+    setLocalRows(prev => prev.map(r => r._rowKey === row._rowKey ? { ...r, _highlighted: next } : r));
+    onRowsChange?.();
+  }, [tab, onRowsChange]);
+
+  function openAnnotate(e, row) {
+    e.preventDefault();
+    setModal({ tab, rowKey: row._rowKey, metric: '', existing: row._annotations?.[0] || null });
+  }
+  function onAnnotSaved(row, result) {
+    setLocalRows(prev => prev.map(r => {
+      if (r._rowKey !== row._rowKey) return r;
+      if (!result) return { ...r, _annotations: [] };
+      const anns = (r._annotations || []).filter(a => a.id !== result.id);
+      return { ...r, _annotations: [result, ...anns] };
     }));
   }
 
-  const visibleHeaders=headers.filter(h=>!h.startsWith('_'));
+  // Selection summary
+  const selCount = selectedRows.size > 0 ? selectedRows.size : selectedCols.size;
+  const selType  = selectedRows.size > 0 ? 'row' : selectedCols.size > 0 ? 'col' : null;
+  let selSum = null;
+  if (selectedRows.size > 0) {
+    const nums = [...selectedRows].flatMap(ri => {
+      const row = sorted[ri]; if (!row) return [];
+      return visibleHeaders.map(h => parseFloat(row[h])).filter(n => !isNaN(n));
+    });
+    if (nums.length) selSum = nums.reduce((a, b) => a + b, 0);
+  }
 
-  return(
-    <div>
-      {searchable && (
-        <div style={{marginBottom:12,display:'flex',alignItems:'center',gap:10}}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search…"
-            style={{background:'var(--bg4)',border:'1px solid var(--border2)',borderRadius:8,color:'var(--text)',padding:'8px 12px',fontSize:13,width:260,outline:'none'}}/>
-          {search && <button onClick={()=>setSearch('')} style={{background:'none',border:'none',color:'var(--text3)',fontSize:18,cursor:'pointer'}}>×</button>}
-          <span style={{fontSize:12,color:'var(--text3)',marginLeft:'auto'}}>{filtered.length} rows</span>
-        </div>
-      )}
-      <div style={{overflowX:'auto',overflowY:'auto',maxHeight,borderRadius:'var(--radius)',border:'1px solid var(--border)'}}>
-        <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+  function clearSelection() { setSelectedRows(new Set()); setSelectedCols(new Set()); }
+
+  // Column first-header left-align detection
+  function isNumCol(h) {
+    const sample = sorted.slice(0, 10).map(r => r[h]).filter(v => v != null);
+    return sample.length > 0 && sample.every(v => !isNaN(parseFloat(v)) && v !== '');
+  }
+
+  return (
+    <div onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ userSelect: 'none' }}>
+
+      {/* Toolbar */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+        {searchable && (
+          <div style={{ position: 'relative' }}>
+            <input
+              value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Filter rows..."
+              style={{
+                padding: '5px 8px 5px 26px', width: 200,
+                background: 'var(--bg3)', border: '1px solid var(--border2)',
+                borderRadius: 'var(--radius)', color: 'var(--text)',
+                fontSize: 12, outline: 'none', fontFamily: 'var(--font-body)',
+              }}
+              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
+              onBlur={e => e.target.style.borderColor = 'var(--border2)'}
+            />
+            <svg style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', opacity: .4 }}
+              width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            {search && (
+              <button onClick={() => setSearch('')}
+                style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)',
+                  background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 14 }}>×</button>
+            )}
+          </div>
+        )}
+
+        <span style={{ fontSize: 11, color: 'var(--text4)', marginLeft: 'auto' }}>
+          {sorted.length.toLocaleString()} rows
+        </span>
+
+        {selType && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: '3px 8px', background: 'var(--accent-dim)',
+            border: '1px solid var(--accent)', borderRadius: 'var(--radius)',
+            fontSize: 11, color: 'var(--accent)',
+          }}>
+            <span>{selCount} {selType}{selCount !== 1 ? 's' : ''}</span>
+            {selSum !== null && (
+              <span style={{ color: 'var(--text2)' }}>
+                Σ {selSum.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+              </span>
+            )}
+            <button onClick={clearSelection}
+              style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: 0 }}>×</button>
+          </div>
+        )}
+      </div>
+
+      {/* Table */}
+      <div style={{
+        overflowX: 'auto', overflowY: 'auto', maxHeight,
+        border: '1px solid var(--border)',
+        borderRadius: 'var(--radius)',
+        background: 'var(--bg2)',
+      }}>
+        <table style={{
+          width: '100%',
+          borderCollapse: 'collapse',
+          fontSize: 12,
+          tableLayout: 'auto',
+        }}>
+
+          {/* HEAD */}
           <thead>
-            <tr style={{background:'var(--bg4)',position:'sticky',top:0,zIndex:1}}>
-              <th style={{width:28,padding:'10px 6px',borderBottom:'1px solid var(--border2)'}}/>
-              {visibleHeaders.map(h=>(
-                <th key={h} style={{padding:'10px 12px',textAlign:'left',fontWeight:500,color:'var(--text2)',whiteSpace:'nowrap',borderBottom:'1px solid var(--border2)',fontSize:12}}>
-                  {h}
-                </th>
-              ))}
-              <th style={{width:28,borderBottom:'1px solid var(--border2)'}}/>
+            <tr style={{ background: 'var(--bg3)', position: 'sticky', top: 0, zIndex: 2 }}>
+              {/* Row # */}
+              <th style={{
+                width: 32, padding: '6px 0',
+                borderBottom: '1px solid var(--border2)',
+                borderRight: '1px solid var(--border2)',
+                color: 'var(--text4)', fontSize: 10, fontWeight: 500,
+                textAlign: 'center',
+              }}>
+                #
+              </th>
+              {/* Data columns */}
+              {visibleHeaders.map((h, ci) => {
+                const isNum = isNumCol(h);
+                const isSelCol = selectedCols.has(ci);
+                const isSort = sortBy === h;
+                return (
+                  <th
+                    key={h}
+                    onClick={e => { handleSort(h); selectCol(e, ci); }}
+                    style={{
+                      padding: '6px 10px',
+                      borderBottom: '1px solid var(--border2)',
+                      borderRight: ci < visibleHeaders.length - 1 ? '1px solid var(--col-sep)' : 'none',
+                      textAlign: isNum ? 'right' : 'left',
+                      fontSize: 11, fontWeight: 600,
+                      color: isSelCol ? 'var(--accent)' : isSort ? 'var(--text)' : 'var(--text3)',
+                      background: isSelCol ? 'var(--accent-soft)' : undefined,
+                      whiteSpace: 'nowrap', cursor: 'pointer',
+                      userSelect: 'none',
+                      letterSpacing: '.01em',
+                    }}
+                  >
+                    {h}
+                    {isSort && (
+                      <span style={{ marginLeft: 4, fontSize: 9, opacity: .7 }}>
+                        {sortDir === 'asc' ? '▲' : '▼'}
+                      </span>
+                    )}
+                  </th>
+                );
+              })}
+              {/* Actions placeholder */}
+              <th style={{ width: 28, borderBottom: '1px solid var(--border2)' }} />
             </tr>
           </thead>
+
+          {/* BODY */}
           <tbody>
-            {filtered.map((row,i)=>{
-              const bg=row._highlighted ? HL_BG[row._highlighted] : i%2===1?'rgba(255,255,255,0.015)':'transparent';
-              const hasAnn=(row._annotations||[]).length>0;
-              return(
-                <tr key={row._rowKey||i}
-                  style={{background:bg,transition:'background .1s'}}
-                  onContextMenu={e=>openAnnotate(e,row)}
-                  onMouseEnter={e=>e.currentTarget.style.background=row._highlighted?HL_BG[row._highlighted]:'rgba(255,255,255,0.04)'}
-                  onMouseLeave={e=>e.currentTarget.style.background=bg}>
-                  <td style={{padding:'0 6px',textAlign:'center',cursor:'pointer'}} onClick={()=>cycleHighlight(row)}>
-                    <div style={{width:8,height:8,borderRadius:'50%',background:row._highlighted?HL_BG[row._highlighted].replace('var(--hl-','').replace(')',''):HL_BG.yellow,border:`1px solid ${row._highlighted?'currentColor':'var(--border2)'}`,margin:'0 auto',opacity:row._highlighted?1:0.3}}/>
+            {sorted.length === 0 && (
+              <tr>
+                <td colSpan={visibleHeaders.length + 2}
+                  style={{ padding: '28px', textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>
+                  No rows match
+                </td>
+              </tr>
+            )}
+            {sorted.map((row, ri) => {
+              const isRowSel = selectedRows.has(ri);
+              const isHL = row._highlighted;
+              const evenBg = ri % 2 === 1 ? 'var(--bg3)' : 'var(--bg2)';
+              const rowBg = isRowSel ? 'var(--accent-dim)' : isHL ? HL_BG[isHL] : evenBg;
+
+              return (
+                <tr
+                  key={row._rowKey || ri}
+                  onMouseDown={e => handleRowMouseDown(e, ri)}
+                  onMouseEnter={() => handleRowMouseEnter(ri)}
+                  onContextMenu={e => openAnnotate(e, row)}
+                  className={isRowSel ? 'row-selected' : ''}
+                  style={{ background: rowBg }}
+                >
+                  {/* Row number */}
+                  <td
+                    onClick={e => selectRow(e, ri)}
+                    style={{
+                      padding: '5px 6px',
+                      textAlign: 'center',
+                      fontSize: 10, color: 'var(--text4)',
+                      fontFamily: 'var(--font-mono)',
+                      borderBottom: '1px solid var(--row-sep)',
+                      borderRight: '1px solid var(--border2)',
+                      cursor: 'pointer',
+                      background: isRowSel ? 'var(--accent-soft)' : undefined,
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {ri + 1}
                   </td>
-                  {visibleHeaders.map(h=>(
-                    <td key={h} style={{padding:'9px 12px',borderBottom:'1px solid rgba(255,255,255,0.04)',color:String(row[h]).includes('TOTAL')||String(row[h]).includes('Total')?'var(--text)':'var(--text)',fontFamily:typeof row[h]==='number'||(!isNaN(parseFloat(row[h]))&&row[h]!=='')?'var(--font-mono)':'var(--font-body)',whiteSpace:'nowrap'}}>
-                      {fmtCell(row[h],h)}
-                    </td>
-                  ))}
-                  <td style={{padding:'0 8px',textAlign:'center',cursor:'pointer'}} onClick={e=>openAnnotate(e,row)}>
-                    {hasAnn ? (
-                      <div style={{width:8,height:8,borderRadius:'50%',background:ANN_COLOR[row._annotations[0].color]||ANN_COLOR.yellow,margin:'0 auto'}} title={row._annotations[0].note}/>
-                    ) : (
-                      <div style={{width:16,height:16,borderRadius:4,border:'1px dashed var(--border2)',margin:'0 auto',opacity:0.4,display:'flex',alignItems:'center',justifyContent:'center',fontSize:10,color:'var(--text3)'}}>+</div>
-                    )}
+
+                  {/* Data cells */}
+                  {visibleHeaders.map((h, ci) => {
+                    const isColSel = selectedCols.has(ci);
+                    const val = row[h];
+                    const isNum = typeof val === 'number' || (!isNaN(parseFloat(val)) && val !== '' && val != null);
+                    const hasAnn = (row._annotations || []).length > 0;
+                    return (
+                      <td
+                        key={h}
+                        style={{
+                          padding: '5px 10px',
+                          borderBottom: '1px solid var(--row-sep)',
+                          borderRight: ci < visibleHeaders.length - 1 ? '1px solid var(--col-sep)' : 'none',
+                          color: isNum ? 'var(--text)' : 'var(--text2)',
+                          textAlign: isNum ? 'right' : 'left',
+                          fontFamily: isNum ? 'var(--font-mono)' : 'var(--font-body)',
+                          whiteSpace: 'nowrap',
+                          background: isColSel ? 'var(--accent-soft)' : undefined,
+                          fontSize: 12,
+                        }}
+                      >
+                        {fmtCell(val, h)}
+                      </td>
+                    );
+                  })}
+
+                  {/* Actions cell (HL + annotate on hover) */}
+                  <td
+                    style={{
+                      padding: '0 4px',
+                      borderBottom: '1px solid var(--row-sep)',
+                      textAlign: 'center',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
+                      {/* Highlight dot */}
+                      <span
+                        onClick={e => { e.stopPropagation(); cycleHL(row); }}
+                        title="Highlight row"
+                        style={{
+                          display: 'inline-block',
+                          width: 7, height: 7, borderRadius: '50%',
+                          background: isHL ? HL_BG[isHL] : 'var(--border2)',
+                          cursor: 'pointer',
+                          opacity: isHL ? 1 : 0,
+                          transition: 'opacity .1s',
+                        }}
+                        className="row-action-dot"
+                      />
+                      {/* Annotation dot */}
+                      {(row._annotations || []).length > 0 && (
+                        <span
+                          onClick={e => openAnnotate(e, row)}
+                          title={row._annotations[0].note}
+                          style={{
+                            display: 'inline-block',
+                            width: 7, height: 7, borderRadius: '50%',
+                            background: 'var(--accent)',
+                            cursor: 'pointer',
+                          }}
+                        />
+                      )}
+                    </span>
                   </td>
                 </tr>
               );
             })}
-            {filtered.length===0 && (
-              <tr><td colSpan={visibleHeaders.length+2} style={{padding:32,textAlign:'center',color:'var(--text3)'}}>No data</td></tr>
-            )}
           </tbody>
         </table>
       </div>
-      <div style={{fontSize:11,color:'var(--text3)',marginTop:6}}>Left-click row dot to highlight · Right-click row to annotate</div>
+
+      {/* Hint */}
+      <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text4)' }}>
+        Click # to select row · Click header to sort · Shift+Click range · Ctrl+Click multi-select
+      </div>
+
       {modal && (
         <AnnotationModal
           tab={modal.tab} rowKey={modal.rowKey} metric={modal.metric} existing={modal.existing}
-          onClose={()=>setModal(null)}
-          onSaved={(result)=>{
-            const row=filtered.find(r=>r._rowKey===modal.rowKey);
-            if(row) onAnnotationSaved(row,result);
+          onClose={() => setModal(null)}
+          onSaved={result => {
+            const row = sorted.find(r => r._rowKey === modal.rowKey);
+            if (row) onAnnotSaved(row, result);
             setModal(null);
           }}
         />
