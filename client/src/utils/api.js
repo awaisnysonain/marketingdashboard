@@ -86,6 +86,10 @@ export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topli
 export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(r=>r.json());
 export const getNoblSubs = (start, end) => fetch(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`).then(r=>r.json());
 export const getFloProducts = (start, end) => fetch(`${B}/api/analytics/flo/products?start=${start}&end=${end}`).then(r=>r.json());
+
+// ── Store pages (comprehensive per-store data) ────────────────────
+export const getStoreNobl = (start, end) => fetch(`${B}/api/store/nobl?start=${start}&end=${end}`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
+export const getStoreFlo  = (start, end) => fetch(`${B}/api/store/flo?start=${start}&end=${end}`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
 export const getSyncStatus = () => fetch(`${B}/api/sync/status`).then(r=>r.json());
 export const triggerSync = (opts={}) => fetch(`${B}/api/sync/trigger`, {
   method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(opts),

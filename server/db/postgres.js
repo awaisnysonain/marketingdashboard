@@ -1,5 +1,9 @@
 const { Pool } = require('pg');
 
+// Force UTC so date casts (date::date, DATE(...)) are consistent
+// regardless of server OS timezone (local = UTC+5, live = UTC)
+process.env.PGTZ = 'UTC';
+
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: parseInt(process.env.DB_PORT || '5432'),
@@ -10,6 +14,13 @@ const pool = new Pool({
   max: 10,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
+});
+
+// Set timezone to UTC on every new connection
+pool.on('connect', (client) => {
+  client.query("SET timezone = 'UTC'").catch(err =>
+    console.error('[PG] Failed to set timezone:', err.message)
+  );
 });
 
 pool.on('error', (err) => {

@@ -54,7 +54,10 @@ router.get('/', async (req, res) => {
     // ── 3. Data freshness ────────────────────────────────────────────────────
     const fmtD = (d) => d ? (d instanceof Date ? d.toISOString().slice(0,10) : String(d).slice(0,10)) : null;
 
-    const [noblSummR, floSummR, noblChR, floChR, appstleR, subRevR, klavR] = await Promise.all([
+    const [
+      noblSummR, floSummR, noblChR, floChR, appstleR, subRevR, klavR,
+      adsR, ordersR, sessionsR, customersR, segmentsR, refundsR, emailSmsR, benchmarksR,
+    ] = await Promise.all([
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_brand_tw_summary_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM flo_brand_tw_summary_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_brand_tw_channel_daily`).catch(() => ({ rows: [{}] })),
@@ -62,6 +65,15 @@ router.get('/', async (req, res) => {
       pgQuery(`SELECT COUNT(*) as cnt, COUNT(CASE WHEN status='active' THEN 1 END) as active_cnt FROM appstle_subscriptions`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_air_sub_revenue_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM klaviyo_daily`).catch(() => ({ rows: [{}] })),
+      // New TW SQL tables
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_ads_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(order_date) as max_date, COUNT(*) as cnt FROM tw_orders_detail`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_sessions_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT COUNT(*) as cnt FROM tw_customers`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(segment_date) as max_date, COUNT(*) as cnt FROM tw_customer_segments`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_refunds_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_email_sms_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_benchmarks`).catch(() => ({ rows: [{}] })),
     ]);
 
     // Use keys that match exactly what SyncPage.js FRESHNESS_CARDS expects
@@ -90,6 +102,39 @@ router.get('/', async (req, res) => {
       klaviyo_emails: {
         latest_date: fmtD(klavR.rows[0]?.max_date),
         row_count:   parseInt(klavR.rows[0]?.cnt || 0),
+      },
+      // New TW SQL tables
+      tw_ads: {
+        latest_date: fmtD(adsR.rows[0]?.max_date),
+        row_count:   parseInt(adsR.rows[0]?.cnt || 0),
+      },
+      tw_orders: {
+        latest_date: fmtD(ordersR.rows[0]?.max_date),
+        row_count:   parseInt(ordersR.rows[0]?.cnt || 0),
+      },
+      tw_sessions: {
+        latest_date: fmtD(sessionsR.rows[0]?.max_date),
+        row_count:   parseInt(sessionsR.rows[0]?.cnt || 0),
+      },
+      tw_customers: {
+        latest_date: null,
+        row_count:   parseInt(customersR.rows[0]?.cnt || 0),
+      },
+      tw_segments: {
+        latest_date: fmtD(segmentsR.rows[0]?.max_date),
+        row_count:   parseInt(segmentsR.rows[0]?.cnt || 0),
+      },
+      tw_refunds: {
+        latest_date: fmtD(refundsR.rows[0]?.max_date),
+        row_count:   parseInt(refundsR.rows[0]?.cnt || 0),
+      },
+      tw_email_sms: {
+        latest_date: fmtD(emailSmsR.rows[0]?.max_date),
+        row_count:   parseInt(emailSmsR.rows[0]?.cnt || 0),
+      },
+      tw_benchmarks: {
+        latest_date: fmtD(benchmarksR.rows[0]?.max_date),
+        row_count:   parseInt(benchmarksR.rows[0]?.cnt || 0),
       },
     };
 

@@ -52,9 +52,20 @@ const STATUS_COLORS = {
 };
 
 const BACKFILL_TASKS = [
-  { key: 'klaviyo',  label: 'Klaviyo Emails' },
-  { key: 'appstle',  label: 'Appstle Sub Revenue' },
-  { key: 'tw',       label: 'TW Refresh' },
+  { key: 'klaviyo',      label: 'Klaviyo Emails',         group: 'Core' },
+  { key: 'appstle',      label: 'Appstle Sub Revenue',    group: 'Core' },
+  { key: 'tw_refresh',   label: 'TW Summary',             group: 'Core' },
+  { key: 'tw_channels',  label: 'TW Channels',            group: 'TW SQL' },
+  { key: 'tw_geo',       label: 'TW Geo / Regions',       group: 'TW SQL' },
+  { key: 'tw_ads',       label: 'TW Ads (Campaign Level)', group: 'TW SQL' },
+  { key: 'tw_orders',    label: 'TW Orders',              group: 'TW SQL' },
+  { key: 'tw_sessions',  label: 'TW Sessions / Traffic',  group: 'TW SQL' },
+  { key: 'tw_refunds',   label: 'TW Refunds',             group: 'TW SQL' },
+  { key: 'tw_email_sms', label: 'TW Email / SMS',         group: 'TW SQL' },
+  { key: 'tw_order_revenue', label: 'TW Order Revenue (Fix)',  group: 'TW SQL' },
+  { key: 'tw_customers', label: 'TW Customers (LTV)',        group: 'TW SQL' },
+  { key: 'tw_segments',  label: 'TW RFM Segments',        group: 'TW SQL' },
+  { key: 'tw_benchmarks',label: 'TW Benchmarks',          group: 'TW SQL' },
 ];
 
 // ── Sub-components ─────────────────────────────────────────────────────────
@@ -139,7 +150,9 @@ export default function SyncPage({ showToast }) {
   // Backfill form state
   const [bfFrom, setBfFrom] = useState(daysAgo(30));
   const [bfTo, setBfTo] = useState(toISO(new Date()));
-  const [bfTasks, setBfTasks] = useState({ klaviyo: true, appstle: false, tw: false });
+  const [bfTasks, setBfTasks] = useState(() =>
+    Object.fromEntries(BACKFILL_TASKS.map(t => [t.key, t.key === 'klaviyo']))
+  );
   const [bfRunning, setBfRunning] = useState(false);
   const [bfResult, setBfResult] = useState(null);
 
@@ -204,12 +217,22 @@ export default function SyncPage({ showToast }) {
   const lastSync = recent[0];
 
   const FRESHNESS_CARDS = [
-    { key: 'nobl_summary',   label: 'NOBL Summary',       icon: '📊' },
-    { key: 'flo_summary',    label: 'FLO Summary',         icon: '📊' },
-    { key: 'nobl_channels',  label: 'NOBL Channels',       icon: '📡' },
-    { key: 'flo_channels',   label: 'FLO Channels',        icon: '📡' },
-    { key: 'nobl_subs',      label: 'NOBL Subscriptions',  icon: '🔄' },
-    { key: 'klaviyo_emails', label: 'Klaviyo Emails',      icon: '📧' },
+    // Core
+    { key: 'nobl_summary',    label: 'NOBL Summary',          group: 'Core' },
+    { key: 'flo_summary',     label: 'FLO Summary',            group: 'Core' },
+    { key: 'nobl_channels',   label: 'NOBL Channels',          group: 'Core' },
+    { key: 'flo_channels',    label: 'FLO Channels',           group: 'Core' },
+    { key: 'nobl_subs',       label: 'NOBL Subscriptions',     group: 'Core' },
+    { key: 'klaviyo_emails',  label: 'Klaviyo Emails',         group: 'Core' },
+    // TW SQL
+    { key: 'tw_ads',          label: 'TW Ads (Campaigns)',     group: 'TW SQL' },
+    { key: 'tw_orders',       label: 'TW Orders',              group: 'TW SQL' },
+    { key: 'tw_sessions',     label: 'TW Sessions',            group: 'TW SQL' },
+    { key: 'tw_customers',    label: 'TW Customers',           group: 'TW SQL' },
+    { key: 'tw_segments',     label: 'TW RFM Segments',        group: 'TW SQL' },
+    { key: 'tw_refunds',      label: 'TW Refunds',             group: 'TW SQL' },
+    { key: 'tw_email_sms',    label: 'TW Email / SMS',         group: 'TW SQL' },
+    { key: 'tw_benchmarks',   label: 'TW Benchmarks',          group: 'TW SQL' },
   ];
 
   const inputStyle = {
@@ -285,22 +308,34 @@ export default function SyncPage({ showToast }) {
         {loading ? (
           <FreshnessSkeleton />
         ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
-            {FRESHNESS_CARDS.map(card => {
-              const info = freshness[card.key] || {};
-              const extra = card.key === 'nobl_subs' && info.active != null
-                ? `${Number(info.active).toLocaleString()} active` : null;
+          <>
+            {['Core', 'TW SQL'].map(group => {
+              const cards = FRESHNESS_CARDS.filter(c => c.group === group);
               return (
-                <FreshnessCard
-                  key={card.key}
-                  label={card.label}
-                  rowCount={info.row_count}
-                  latestDate={info.latest_date}
-                  extra={extra}
-                />
+                <div key={group} style={{ marginBottom: 18 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text4)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 10 }}>
+                    {group}
+                  </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+                    {cards.map(card => {
+                      const info = freshness[card.key] || {};
+                      const extra = card.key === 'nobl_subs' && info.active != null
+                        ? `${Number(info.active).toLocaleString()} active` : null;
+                      return (
+                        <FreshnessCard
+                          key={card.key}
+                          label={card.label}
+                          rowCount={info.row_count}
+                          latestDate={info.latest_date}
+                          extra={extra}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
               );
             })}
-          </div>
+          </>
         )}
       </div>
 
@@ -419,33 +454,52 @@ export default function SyncPage({ showToast }) {
 
             {/* Task checkboxes */}
             <div style={{ marginBottom: 20 }}>
-              <label style={{ display: 'block', fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.4px', marginBottom: 10 }}>
-                Tasks to Run
-              </label>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10 }}>
-                {BACKFILL_TASKS.map(t => (
-                  <label
-                    key={t.key}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
-                      padding: '8px 14px', borderRadius: 8,
-                      background: bfTasks[t.key] ? 'rgba(59,130,246,.1)' : 'var(--bg3)',
-                      border: `1px solid ${bfTasks[t.key] ? 'rgba(59,130,246,.35)' : 'var(--border)'}`,
-                      transition: 'all .15s', userSelect: 'none',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={bfTasks[t.key]}
-                      onChange={e => setBfTasks(prev => ({ ...prev, [t.key]: e.target.checked }))}
-                      style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
-                    />
-                    <span style={{ fontSize: 12, fontWeight: 600, color: bfTasks[t.key] ? 'var(--accent)' : 'var(--text2)' }}>
-                      {t.label}
-                    </span>
-                  </label>
-                ))}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.4px' }}>
+                  Tasks to Run
+                </label>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button type="button" onClick={() => setBfTasks(Object.fromEntries(BACKFILL_TASKS.map(t => [t.key, true])))}
+                    style={{ fontSize: 11, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: '2px 6px' }}>
+                    All
+                  </button>
+                  <button type="button" onClick={() => setBfTasks(Object.fromEntries(BACKFILL_TASKS.map(t => [t.key, false])))}
+                    style={{ fontSize: 11, color: 'var(--text3)', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: '2px 6px' }}>
+                    None
+                  </button>
+                </div>
               </div>
+              {['Core', 'TW SQL'].map(group => (
+                <div key={group} style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text4)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 8 }}>
+                    {group}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {BACKFILL_TASKS.filter(t => t.group === group).map(t => (
+                      <label
+                        key={t.key}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+                          padding: '7px 13px', borderRadius: 8,
+                          background: bfTasks[t.key] ? 'rgba(59,130,246,.1)' : 'var(--bg3)',
+                          border: `1px solid ${bfTasks[t.key] ? 'rgba(59,130,246,.35)' : 'var(--border)'}`,
+                          transition: 'all .15s', userSelect: 'none',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={!!bfTasks[t.key]}
+                          onChange={e => setBfTasks(prev => ({ ...prev, [t.key]: e.target.checked }))}
+                          style={{ accentColor: 'var(--accent)', width: 14, height: 14 }}
+                        />
+                        <span style={{ fontSize: 12, fontWeight: 600, color: bfTasks[t.key] ? 'var(--accent)' : 'var(--text2)' }}>
+                          {t.label}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
 
             {/* Result message */}

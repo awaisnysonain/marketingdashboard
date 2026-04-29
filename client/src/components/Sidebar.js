@@ -3,11 +3,17 @@ import { Icons, sheetIcon } from './Icons';
 
 export const CORE_TABS = [
   { id: 'Overview',      icon: Icons.LayoutDashboard, label: 'Overview'       },
-  { id: 'NOBL Air',      icon: Icons.Plane,           label: 'NOBL Air'       },
+  { id: 'NOBL Air',      icon: Icons.Plane,           label: 'NOBL Travel'    },
   { id: 'Pilates FLO',   icon: Icons.Activity,        label: 'Pilates FLO'    },
   { id: 'Channels',      icon: Icons.BarChart2,       label: 'Channels'       },
   { id: 'Subscriptions', icon: Icons.CreditCard,      label: 'Subscriptions'  },
   { id: 'Live Data',     icon: Icons.Zap,             label: 'Live Data'      },
+];
+
+// Dedicated store pages — full per-store data (channels, regions, products, subs, email)
+export const STORE_TABS = [
+  { id: 'Store:NOBL', icon: Icons.Store, label: 'NOBL Travel'  },
+  { id: 'Store:FLO',  icon: Icons.Store, label: 'Pilates FLO'  },
 ];
 
 /* ── Confirm delete dialog ─────────────────────────────────────────── */
@@ -160,6 +166,7 @@ function SectionLabel({ label, collapsed, action }) {
 export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard, onDeleteDynamic, collapsed, onCollapse }) {
   const dynDashboards = (dynamicTabs || []).filter(t => t.type === 'dashboard');
   const dynSheets     = (dynamicTabs || []).filter(t => t.type === 'sheet');
+  const storeActive   = STORE_TABS.some(t => t.id === active);
 
   return (
     <aside style={{
@@ -207,6 +214,14 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
         {collapsed && <div style={{ height: 8 }} />}
         <div>
           {CORE_TABS.map(tab => (
+            <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
+          ))}
+        </div>
+
+        {/* Stores */}
+        <SectionLabel label="Stores" collapsed={collapsed} />
+        <div>
+          {STORE_TABS.map(tab => (
             <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
           ))}
         </div>

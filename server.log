@@ -1,12 +1,6 @@
+[DB] Removed stale lock file
 [Cron] Daily sync scheduled: 06:00 UTC (11:00 AM GMT+5)
-[UNCAUGHT] listen EADDRINUSE: address already in use :::3001 Error: listen EADDRINUSE: address already in use :::3001
-    at Server.setupListenHandle [as _listen2] (node:net:2008:16)
-    at listenInCluster (node:net:2065:12)
-    at Server.listen (node:net:2170:7)
-    at app.listen (E:\nobl-dashboard\node_modules\express\lib\application.js:635:24)
-    at Object.<anonymous> (E:\nobl-dashboard\server\index.js:601:5)
-    at Module._compile (node:internal/modules/cjs/loader:1829:14)
-    at Object..js (node:internal/modules/cjs/loader:1969:10)
-    at Module.load (node:internal/modules/cjs/loader:1552:32)
-    at Module._load (node:internal/modules/cjs/loader:1354:12)
-    at wrapModuleLoad (node:internal/modules/cjs/loader:255:19)
+
+  NOBL Analytics Dashboard → http://localhost:3001
+
+[PG] Tables initialized

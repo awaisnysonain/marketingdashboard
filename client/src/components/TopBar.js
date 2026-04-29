@@ -4,6 +4,7 @@ import { Icons } from './Icons';
 const PAGE_INFO = {
   'Overview':      'All brands — real-time analytics',
   'NOBL Air':      'nobltravel.com — revenue, spend & subscriptions',
+  'NOBL Travel':   'nobltravel.com — revenue, spend & subscriptions',
   'Pilates FLO':   'pilatesflo.com — product & channel performance',
   'Channels':      'META · Google · TikTok · Snapchat · more',
   'Subscriptions': 'Appstle — subscription revenue & MRR',

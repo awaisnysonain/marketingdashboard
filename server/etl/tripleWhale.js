@@ -113,19 +113,17 @@ function extractDailyMap(metrics, metricId, baseYear) {
 
 /**
  * Refresh summary rows for a brand between startDate and endDate.
- * Writes to the appropriate PG table via upsert.
+ * Writes to tw_summary_daily and tw_channel_daily via upsert.
  *
- * Metrics pulled from TW:
- *   sales              → total_revenue  (Order Revenue)
- *   facebookAds +
- *   googleAds   +
- *   tiktokAds   +
- *   snapchatAds +
- *   pinterestAds       → total_spend    (sum of channel spends)
- *   mer                → mer
- *   orders             → total_orders
- *   newCustomersOrders → new_customer_orders
- *   orders - newCust   → returning_customer_orders
+ * Revenue rules (canonical, matches TW UI):
+ *   order_revenue   = sales metric        (Shopify + Amazon, before refunds)
+ *   amazon_revenue  = amazonSales metric  (Amazon portion)
+ *   shopify_revenue = sales - amazonSales (Shopify-only)
+ *   total_sales     = netSales metric     (after refunds)
+ *   refund_amount   = totalRefunds metric
+ *   total_spend     = blendedAds metric   (all Shopify-connected ad platforms)
+ *
+ * For FLO: order_revenue = Gross Sales + Shipping + Taxes − Discounts (same formula)
  *
  * @param {'NOBL'|'FLO'|'FLO_EU'} brand
  * @param {string} startDate  YYYY-MM-DD
@@ -148,12 +146,8 @@ async function refreshSummary(brand, startDate, endDate) {
       ? process.env.FLO_EU_TW_API_KEY
       : process.env.FLO_TW_API_KEY;
 
-  // Insert directly into the underlying table (the brand-specific names are views)
-  const pgTable = 'tw_summary_daily';
-
   console.log(`[TW] Refreshing ${brand} summary ${startDate} → ${endDate}`);
 
-  // Fetch all metrics for the range
   let metrics;
   try {
     metrics = await fetchTWSummaryPage(shopDomain, apiKey, startDate, endDate);
@@ -171,31 +165,60 @@ async function refreshSummary(brand, startDate, endDate) {
 
   const baseYear = parseInt(startDate.slice(0, 4), 10);
 
-  // Extract daily maps for each metric we care about
-  const revenueMap   = extractDailyMap(metrics, 'sales', baseYear);
-  const merMap       = extractDailyMap(metrics, 'mer', baseYear);
-  const ordersMap    = extractDailyMap(metrics, 'orders', baseYear);
-  const ncOrdersMap  = extractDailyMap(metrics, 'newCustomersOrders', baseYear);
+  // ── Revenue metrics ───────────────────────────────────────────────
+  //  blendedSales = "Blended Sales" = Shopify + Amazon, before refunds
+  //               = same as blended_stats_tvf(include_amazon=TRUE).order_revenue
+  //               = the canonical "Order Revenue" shown in TW UI
+  //  sales        = TW pixel-attributed revenue (different, do NOT use for revenue KPIs)
+  const orderRevMap    = extractDailyMap(metrics, 'blendedSales',   baseYear); // ← CANONICAL
+  const twAttrRevMap   = extractDailyMap(metrics, 'sales',          baseYear); // TW attributed (kept for reference)
+  const amazonRevMap   = extractDailyMap(metrics, 'amazonSales',    baseYear); // Amazon portion
+  const amazonNetMap   = extractDailyMap(metrics, 'amazonNetSales', baseYear); // Amazon net (after refunds)
+  const netSalesMap    = extractDailyMap(metrics, 'netSales',       baseYear); // Shopify net (after refunds)
+  const refundsMap     = extractDailyMap(metrics, 'totalRefunds',   baseYear); // Shopify returns
+  const amazonRefMap   = extractDailyMap(metrics, 'amazonRefunds',  baseYear); // Amazon returns
+  const merMap         = extractDailyMap(metrics, 'mer',            baseYear);
+  const ordersMap      = extractDailyMap(metrics, 'orders',         baseYear);
+  const ncOrdersMap    = extractDailyMap(metrics, 'newCustomersOrders', baseYear);
 
-  // Sum all available channel ad spends per day
-  const SPEND_IDS = ['facebookAds', 'googleAds', 'tiktokAds', 'snapchatAds', 'pinterestAds',
-                     'bingAdSpend', 'twitterAds', 'redditSpend'];
-  const spendMap = {};
+  // ── Spend — use blendedAds (all Shopify-connected platforms, excl. Amazon) ─
+  // Falls back to summing individual channels if blendedAds is missing
+  const blendedAdsMap  = extractDailyMap(metrics, 'blendedAds', baseYear);
+  const SPEND_IDS = [
+    'facebookAds', 'googleAds', 'tiktokAds', 'snapchatAds', 'pinterestAds',
+    'bingAdSpend', 'twitterAds', 'redditSpend', 'applovinSpend',
+  ];
+  const channelSpendMap = {};
   for (const id of SPEND_IDS) {
     const m = extractDailyMap(metrics, id, baseYear);
     for (const [date, val] of Object.entries(m)) {
-      spendMap[date] = (spendMap[date] ?? 0) + val;
+      channelSpendMap[date] = (channelSpendMap[date] ?? 0) + val;
     }
   }
 
-  // Union all dates that appear in any metric
+  // ── Channel revenue maps (TW-attributed, per platform) ───────────
+  const CHANNEL_DEFS = [
+    { key: 'META',      spendId: 'facebookAds',   revId: 'facebookConversionValue', purchId: 'facebookPurchases' },
+    { key: 'GOOGLE',    spendId: 'googleAds',      revId: 'googleConversionValue',  purchId: null },
+    { key: 'TIKTOK',    spendId: 'tiktokAds',      revId: 'tiktokConversionValue',  purchId: 'tiktokPurchases' },
+    { key: 'SNAPCHAT',  spendId: 'snapchatAds',    revId: 'snapchatConversionValue',purchId: 'snapchatConversions' },
+    { key: 'PINTEREST', spendId: 'pinterestAds',   revId: 'pinterestConversionValue',purchId: 'pinterestPurchases' },
+    { key: 'BING',      spendId: 'bingAdSpend',    revId: 'bingConversionValue',    purchId: 'bingConversions' },
+    { key: 'APPLOVIN',  spendId: 'applovinSpend',  revId: 'applovinConversionValue',purchId: 'applovinConversions' },
+  ];
+  const channelMaps = CHANNEL_DEFS.map(def => ({
+    ...def,
+    spend: extractDailyMap(metrics, def.spendId, baseYear),
+    rev:   extractDailyMap(metrics, def.revId,   baseYear),
+    purch: def.purchId ? extractDailyMap(metrics, def.purchId, baseYear) : {},
+  }));
+
+  // ── Collect all dates ─────────────────────────────────────────────
   const allDates = new Set([
-    ...Object.keys(revenueMap),
+    ...Object.keys(orderRevMap),
     ...Object.keys(ordersMap),
     ...Object.keys(merMap),
   ]);
-
-  // Also fill the full requested range with zeros
   const start = new Date(startDate);
   const end   = new Date(endDate);
   for (let d = new Date(start); d <= end; d.setUTCDate(d.getUTCDate() + 1)) {
@@ -203,34 +226,99 @@ async function refreshSummary(brand, startDate, endDate) {
   }
 
   let written = 0;
+
   for (const date of [...allDates].sort()) {
-    const totalRevenue   = revenueMap[date]  ?? 0;
-    const totalSpend     = spendMap[date]    ?? 0;
-    const mer            = merMap[date]      ?? null;
-    const totalOrders    = ordersMap[date]   ?? 0;
-    const ncOrders       = ncOrdersMap[date] ?? 0;
-    const rcOrders       = Math.max(0, (ordersMap[date] ?? 0) - ncOrders);
+    const twAttrRev     = twAttrRevMap[date]  ?? 0;  // TW pixel-attributed (sales metric)
+    const orderRevenue  = orderRevMap[date]   ?? 0;  // Canonical: blendedSales (Shopify+Amazon)
+    const amazonRev     = amazonRevMap[date]  ?? 0;
+    const shopifyRev    = Math.max(0, orderRevenue - amazonRev);
+    const totalSales    = netSalesMap[date]   ?? 0;
+    const refundAmt     = refundsMap[date]    ?? 0;
+    // Blended spend is preferred; fall back to sum of channels
+    const totalSpend    = (blendedAdsMap[date] && blendedAdsMap[date] > 0)
+      ? blendedAdsMap[date]
+      : (channelSpendMap[date] ?? 0);
+    const mer           = merMap[date]        ?? null;
+    const totalOrders   = ordersMap[date]     ?? 0;
+    const ncOrders      = ncOrdersMap[date]   ?? 0;
+    const rcOrders      = Math.max(0, totalOrders - ncOrders);
 
     try {
       await pgRun(`
         INSERT INTO tw_summary_daily
-          (brand, date, total_revenue, total_spend, mer,
+          (brand, date,
+           total_revenue, order_revenue, shopify_revenue, amazon_revenue,
+           total_sales, refund_amount,
+           total_spend, mer,
            total_orders, new_customer_orders, returning_customer_orders)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         ON CONFLICT (brand, date) DO UPDATE SET
-          total_revenue              = EXCLUDED.total_revenue,
-          total_spend                = EXCLUDED.total_spend,
-          mer                        = EXCLUDED.mer,
-          total_orders               = EXCLUDED.total_orders,
-          new_customer_orders        = EXCLUDED.new_customer_orders,
-          returning_customer_orders  = EXCLUDED.returning_customer_orders,
-          updated_at                 = NOW()
-      `, [brand, date, totalRevenue, totalSpend, mer, totalOrders, ncOrders, rcOrders]);
+          total_revenue             = EXCLUDED.total_revenue,
+          order_revenue             = EXCLUDED.order_revenue,
+          shopify_revenue           = EXCLUDED.shopify_revenue,
+          amazon_revenue            = EXCLUDED.amazon_revenue,
+          total_sales               = EXCLUDED.total_sales,
+          refund_amount             = EXCLUDED.refund_amount,
+          total_spend               = EXCLUDED.total_spend,
+          mer                       = EXCLUDED.mer,
+          total_orders              = EXCLUDED.total_orders,
+          new_customer_orders       = EXCLUDED.new_customer_orders,
+          returning_customer_orders = EXCLUDED.returning_customer_orders,
+          updated_at                = NOW()
+      `, [
+        brand, date,
+        parseFloat(twAttrRev.toFixed(4)),      // $3  total_revenue  (TW pixel-attributed)
+        parseFloat(orderRevenue.toFixed(4)),   // $4  order_revenue  (blendedSales — canonical)
+        parseFloat(shopifyRev.toFixed(4)),     // $5  shopify_revenue
+        parseFloat(amazonRev.toFixed(4)),      // $6  amazon_revenue
+        parseFloat(totalSales.toFixed(4)),     // $7  total_sales
+        parseFloat(refundAmt.toFixed(4)),      // $8  refund_amount
+        parseFloat(totalSpend.toFixed(4)),     // $9  total_spend
+        mer != null ? parseFloat(mer.toFixed(6)) : null, // $10 mer
+        Math.round(totalOrders),               // $11 total_orders
+        Math.round(ncOrders),                  // $12 new_customer_orders
+        Math.round(rcOrders),                  // $13 returning_customer_orders
+      ]);
       written++;
     } catch (e) {
       const msg = `Upsert ${brand}/${date}: ${e.message}`;
       console.error('[TW]', msg);
       errors.push(msg);
+    }
+
+    // ── Upsert channel rows for this date ─────────────────────────
+    for (const ch of channelMaps) {
+      const spend = ch.spend[date] ?? 0;
+      if (spend <= 0) continue; // skip channels with no spend on this day
+
+      const rev   = ch.rev[date]   ?? 0;
+      const purch = ch.purch[date] ?? 0;
+      const roas  = spend > 0 ? parseFloat((rev / spend).toFixed(4)) : null;
+      const cac   = purch > 0 ? parseFloat((spend / purch).toFixed(4)) : null;
+
+      try {
+        await pgRun(`
+          INSERT INTO tw_channel_daily
+            (brand, date, channel, spend_1d, revenue_1d, purchases_1d, roas_1d, cac)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+          ON CONFLICT (brand, date, channel) DO UPDATE SET
+            spend_1d     = EXCLUDED.spend_1d,
+            revenue_1d   = EXCLUDED.revenue_1d,
+            purchases_1d = EXCLUDED.purchases_1d,
+            roas_1d      = EXCLUDED.roas_1d,
+            cac          = EXCLUDED.cac,
+            updated_at   = NOW()
+        `, [
+          brand, date, ch.key,
+          parseFloat(spend.toFixed(4)),
+          parseFloat(rev.toFixed(4)),
+          Math.round(purch),
+          roas,
+          cac,
+        ]);
+      } catch (e) {
+        errors.push(`channel ${brand}/${date}/${ch.key}: ${e.message}`);
+      }
     }
   }
 

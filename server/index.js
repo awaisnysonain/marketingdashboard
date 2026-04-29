@@ -21,12 +21,13 @@ const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 
-const { pgRun } = require('./db/postgres');
+const { pgRun, pgQuery } = require('./db/postgres');
 const analyticsRouter = require('./routes/analytics');
 const { router: dashRouter, SCHEMA_CONTEXT, getClarifyPrompt } = require('./routes/aiDashboards');
 const syncStatusRouter = require('./routes/syncStatus');
 const syncEngine = require('./etl/syncEngine');
-const twRouter   = require('./routes/triplewhale');
+const twRouter    = require('./routes/triplewhale');
+const storeRouter = require('./routes/store');
 
 // ── OpenAI setup ────────────────────────────────────────────────
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
@@ -179,6 +180,208 @@ async function initPostgresTables() {
         created_at TIMESTAMPTZ DEFAULT NOW()
       )
     `);
+
+    // ── New TW SQL tables ─────────────────────────────────────────
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_ads_daily (
+        id            BIGSERIAL PRIMARY KEY,
+        brand         TEXT        NOT NULL,
+        date          DATE        NOT NULL,
+        platform      TEXT        NOT NULL,
+        campaign_id   TEXT        NOT NULL DEFAULT '',
+        campaign_name TEXT,
+        adset_id      TEXT,
+        adset_name    TEXT,
+        ad_id         TEXT        NOT NULL,
+        ad_name       TEXT,
+        impressions   BIGINT      DEFAULT 0,
+        clicks        BIGINT      DEFAULT 0,
+        spend         NUMERIC(14,4) DEFAULT 0,
+        purchases     INT         DEFAULT 0,
+        revenue       NUMERIC(14,4) DEFAULT 0,
+        link_clicks   BIGINT      DEFAULT 0,
+        add_to_cart   BIGINT      DEFAULT 0,
+        initiate_checkout BIGINT  DEFAULT 0,
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, date, platform, ad_id)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_brand_date    ON tw_ads_daily (brand, date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_brand_platform ON tw_ads_daily (brand, platform)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_orders_detail (
+        id                    BIGSERIAL PRIMARY KEY,
+        brand                 TEXT        NOT NULL,
+        order_id              TEXT        NOT NULL,
+        order_number          INT,
+        order_date            DATE,
+        created_at_ts         TIMESTAMPTZ,
+        customer_id           TEXT,
+        financial_status      TEXT,
+        fulfillment_status    TEXT,
+        total_price           NUMERIC(14,4) DEFAULT 0,
+        subtotal_price        NUMERIC(14,4) DEFAULT 0,
+        total_discounts       NUMERIC(14,4) DEFAULT 0,
+        total_tax             NUMERIC(14,4) DEFAULT 0,
+        shipping_price        NUMERIC(14,4) DEFAULT 0,
+        country               TEXT,
+        province              TEXT,
+        city                  TEXT,
+        utm_source            TEXT,
+        utm_medium            TEXT,
+        utm_campaign          TEXT,
+        is_first_order        BOOLEAN     DEFAULT FALSE,
+        customer_order_number INT,
+        created_at            TIMESTAMPTZ DEFAULT NOW(),
+        updated_at            TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, order_id)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_orders_brand_date     ON tw_orders_detail (brand, order_date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_orders_brand_customer  ON tw_orders_detail (brand, customer_id)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_sessions_daily (
+        id                   BIGSERIAL PRIMARY KEY,
+        brand                TEXT        NOT NULL,
+        date                 DATE        NOT NULL,
+        total_sessions       BIGINT      DEFAULT 0,
+        new_sessions         BIGINT      DEFAULT 0,
+        returning_sessions   BIGINT      DEFAULT 0,
+        bounced_sessions     BIGINT      DEFAULT 0,
+        bounce_rate          NUMERIC(8,4),
+        converted_sessions   BIGINT      DEFAULT 0,
+        conversion_rate      NUMERIC(8,4),
+        avg_duration_seconds INT,
+        revenue              NUMERIC(14,4) DEFAULT 0,
+        device_mobile        BIGINT      DEFAULT 0,
+        device_desktop       BIGINT      DEFAULT 0,
+        device_tablet        BIGINT      DEFAULT 0,
+        total_pageviews      BIGINT      DEFAULT 0,
+        created_at           TIMESTAMPTZ DEFAULT NOW(),
+        updated_at           TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, date)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_sessions_brand_date ON tw_sessions_daily (brand, date DESC)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_customers (
+        id                   BIGSERIAL PRIMARY KEY,
+        brand                TEXT        NOT NULL,
+        customer_id          TEXT        NOT NULL,
+        total_orders         INT         DEFAULT 0,
+        total_spent          NUMERIC(14,4) DEFAULT 0,
+        average_order_value  NUMERIC(14,4),
+        first_order_date     DATE,
+        last_order_date      DATE,
+        days_since_last_order INT,
+        country              TEXT,
+        cohort_month         DATE,
+        first_order_source   TEXT,
+        accepts_marketing    BOOLEAN     DEFAULT FALSE,
+        created_at           TIMESTAMPTZ DEFAULT NOW(),
+        updated_at           TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, customer_id)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_customers_brand         ON tw_customers (brand)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_customers_brand_country  ON tw_customers (brand, country)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_customers_cohort         ON tw_customers (brand, cohort_month)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_customer_segments (
+        id                   BIGSERIAL PRIMARY KEY,
+        brand                TEXT        NOT NULL,
+        customer_id          TEXT        NOT NULL,
+        segment_date         DATE        NOT NULL,
+        rfm_segment          TEXT,
+        recency_score        INT,
+        frequency_score      INT,
+        monetary_score       INT,
+        days_since_last_order INT,
+        total_orders         INT         DEFAULT 0,
+        total_spent          NUMERIC(14,4) DEFAULT 0,
+        churn_risk           TEXT,
+        churn_probability    NUMERIC(8,4),
+        segment_label        TEXT,
+        created_at           TIMESTAMPTZ DEFAULT NOW(),
+        updated_at           TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, customer_id, segment_date)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_segments_brand_date ON tw_customer_segments (brand, segment_date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_segments_rfm        ON tw_customer_segments (brand, rfm_segment)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_refunds_daily (
+        id                 BIGSERIAL PRIMARY KEY,
+        brand              TEXT        NOT NULL,
+        date               DATE        NOT NULL,
+        refund_count       INT         DEFAULT 0,
+        refund_amount      NUMERIC(14,4) DEFAULT 0,
+        avg_refund_amount  NUMERIC(14,4),
+        avg_days_to_refund NUMERIC(8,2),
+        units_refunded     INT         DEFAULT 0,
+        created_at         TIMESTAMPTZ DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, date)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_refunds_brand_date ON tw_refunds_daily (brand, date DESC)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_email_sms_daily (
+        id             BIGSERIAL PRIMARY KEY,
+        brand          TEXT        NOT NULL,
+        date           DATE        NOT NULL,
+        platform       TEXT        NOT NULL DEFAULT '',
+        channel        TEXT        NOT NULL DEFAULT 'email',
+        campaign_name  TEXT        NOT NULL DEFAULT '',
+        message_type   TEXT        NOT NULL DEFAULT 'campaign',
+        sent           BIGINT      DEFAULT 0,
+        delivered      BIGINT      DEFAULT 0,
+        opens          BIGINT      DEFAULT 0,
+        unique_opens   BIGINT      DEFAULT 0,
+        clicks         BIGINT      DEFAULT 0,
+        unique_clicks  BIGINT      DEFAULT 0,
+        unsubscribes   BIGINT      DEFAULT 0,
+        conversions    BIGINT      DEFAULT 0,
+        revenue        NUMERIC(14,4) DEFAULT 0,
+        open_rate      NUMERIC(8,4),
+        click_rate     NUMERIC(8,4),
+        created_at     TIMESTAMPTZ DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, date, platform, campaign_name, message_type)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_email_brand_date     ON tw_email_sms_daily (brand, date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_email_brand_platform  ON tw_email_sms_daily (brand, platform)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_benchmarks (
+        id             BIGSERIAL PRIMARY KEY,
+        brand          TEXT        NOT NULL,
+        date           DATE        NOT NULL,
+        vertical       TEXT        NOT NULL DEFAULT '',
+        revenue_tier   TEXT,
+        metric_name    TEXT        NOT NULL,
+        metric_value   NUMERIC(14,6),
+        percentile_25  NUMERIC(14,6),
+        percentile_50  NUMERIC(14,6),
+        percentile_75  NUMERIC(14,6),
+        percentile_90  NUMERIC(14,6),
+        sample_size    INT,
+        benchmark_type TEXT        DEFAULT 'performance',
+        created_at     TIMESTAMPTZ DEFAULT NOW(),
+        updated_at     TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, date, vertical, metric_name)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_benchmarks_brand_date ON tw_benchmarks (brand, date DESC)`);
+
     console.log('[PG] Tables initialized');
   } catch (e) {
     console.error('[PG] Table init failed:', e.message);
@@ -316,22 +519,254 @@ app.delete('/api/highlights', (req, res) => {
   res.json({ ok:true });
 });
 
-// ── AI Chat ─────────────────────────────────────────────────────
+// ── AI Chat (Smart — DB query capable) ──────────────────────────
+const SMART_AI_SYSTEM = `You are the executive analytics AI for NOBL Air and Pilates FLO. You have DIRECT access to the PostgreSQL analytics database via the query_database tool. Use it freely — don't ask for permission, just query and answer.
+
+━━━ COMPANIES ━━━
+NOBL TRAVEL (nobltravel.com): Premium luggage & travel accessories. AirTag holders, carry-ons, check-in bags. Sells via Shopify + Amazon. Has NOBL Air subscription product (Appstle). Channels: Meta, Google, AppLovin, TikTok, Snapchat, Pinterest, Bing, X.
+
+⚠️ CRITICAL RULE — NOBL TRAVEL + EU ARE ONE COMBINED ENTITY:
+NOBL Travel operates ONE Shopify store that serves ALL regions including Europe (EU).
+Due to TripleWhale regional tracking, EU appears as region='EU' in geo tables — but it is NOT a separate brand.
+When querying NOBL data: WHERE brand='NOBL' already includes EU in all summary/channel metrics.
+NEVER show NOBL without EU. NEVER compare NOBL vs NOBL EU. They are ALWAYS summed together.
+EU contributes ~0.5–1% of NOBL revenue and appears as a region breakdown in tw_geo_daily — that is the ONLY place to see EU separately, and only for breakdown purposes.
+
+PILATES FLO (pilatesflo.com): Pilates equipment — Portable Reformer, Home Reformer (metal), Studio Reformer (wooden). Sells via Shopify US + EU store (afmjag-r2.myshopify.com). FLO EU IS a separate Shopify store with its own brand tracking. EU revenue in EUR × 1.16 = USD.
+
+━━━ DATABASE TABLES ━━━
+tw_summary_daily(id, brand, date, total_revenue, total_spend, mer, total_orders, new_customer_orders, returning_customer_orders, order_revenue, shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count)
+  → brand = 'NOBL' or 'FLO' | date is a DATE column (use date BETWEEN $1::date AND $2::date)
+  → order_revenue = canonical revenue (Shopify+Amazon orders, before refunds) — USE THIS
+  → total_revenue = TW attributed revenue — AVOID using for KPIs
+  → total_sales = order_revenue - refund_amount (net, after refunds)
+  → amazon_revenue ≈ $10-15k/day for NOBL; shopify_revenue = rest
+  → Note: order_revenue populated by tw_order_revenue ETL task (NULL until backfill runs)
+
+tw_channel_daily(id, brand, date, channel, spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac)
+  → channel values: 'META','GOOGLE','APPLOVIN','TIKTOK','SNAPCHAT','BING','PINTEREST','X'
+  → Latest: 2026-04-22
+
+tw_channel_daily_all(id, brand, date, tw_channel, spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac)
+  → tw_channel values: 'facebook-ads','google-ads','applovin','tiktok-ads','snapchat-ads','bing','pinterest-ads','twitter-ads'
+
+tw_geo_daily(id, brand, date, region, revenue_actual, spend_actual, mer)
+  → region values: 'US','CA','AUS','DUBAI','EU','TOTAL'
+  → Use this for regional MER, revenue by country
+
+tw_store_summary_daily(id, brand, store_key, shop_id, date, total_revenue, total_spend, mer)
+  → store_key: 'NOBL_MAIN','FLO_MAIN','FLO_EU'
+
+klaviyo_daily(id, date, brand, emails_sent, emails_opened, emails_clicked, open_rate, click_rate, revenue)
+  → brand = 'NOBL' or 'FLO'
+
+appstle_subscriptions(id, subscription_id, customer_id, status, product_title, sku, price, billing_interval, created_at, updated_at, next_billing_date)
+  → status: 'active','paused','cancelled'
+  → This is NOBL Air subscription data
+
+nobl_air_sub_revenue_daily(id, date, revenue, orders, aov, created_at)
+  → Daily NOBL Air subscription revenue
+
+etl_run_log(id, run_id, brand, task, start_date, end_date, status, rows_written, error_message, started_at, finished_at)
+  → Track ETL sync health
+
+tw_ads_daily(id, brand, date, platform, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name, impressions, clicks, spend, purchases, revenue, link_clicks, add_to_cart, initiate_checkout)
+  → Campaign/adset/ad level performance from TW ads_table
+  → platform values same as tw_channel_daily (META, GOOGLE, etc.)
+  → UNIQUE(brand, date, platform, ad_id)
+
+tw_orders_detail(id, brand, order_id, order_number, order_date, created_at_ts, customer_id, financial_status, fulfillment_status, total_price, subtotal_price, total_discounts, total_tax, shipping_price, country, province, city, utm_source, utm_medium, utm_campaign, is_first_order, customer_order_number)
+  → Order-level detail from TW orders_table
+  → financial_status: 'paid','partially_refunded','refunded'
+  → is_first_order: boolean — true = new customer order
+
+tw_sessions_daily(id, brand, date, total_sessions, new_sessions, returning_sessions, bounced_sessions, bounce_rate, converted_sessions, conversion_rate, avg_duration_seconds, revenue, device_mobile, device_desktop, device_tablet, total_pageviews)
+  → Daily aggregated session/traffic data from TW sessions_table
+  → bounce_rate and conversion_rate are decimals (0.xx format)
+
+tw_customers(id, brand, customer_id, total_orders, total_spent, average_order_value, first_order_date, last_order_date, days_since_last_order, country, cohort_month, first_order_source, accepts_marketing)
+  → Customer LTV snapshot from TW customers_table
+  → cohort_month: DATE of first purchase month
+
+tw_customer_segments(id, brand, customer_id, segment_date, rfm_segment, recency_score, frequency_score, monetary_score, days_since_last_order, total_orders, total_spent, churn_risk, churn_probability, segment_label)
+  → RFM segmentation snapshot from TW customer_segmentation_table
+  → rfm_segment / segment_label: e.g. 'Champions','Loyal','At Risk','Lost'
+  → churn_risk: 'low','medium','high'
+  → Refreshed daily (segment_date = today)
+
+tw_refunds_daily(id, brand, date, refund_count, refund_amount, avg_refund_amount, avg_days_to_refund, units_refunded)
+  → Daily refund aggregates from TW refunds_table
+  → Refund rate = refund_amount / revenue from tw_summary_daily on same date
+
+tw_email_sms_daily(id, brand, date, platform, channel, campaign_name, message_type, sent, delivered, opens, unique_opens, clicks, unique_clicks, unsubscribes, conversions, revenue, open_rate, click_rate)
+  → Email/SMS campaign performance from TW email_sms_table
+  → channel: 'email' or 'sms'
+  → open_rate / click_rate are decimals (unique_opens/delivered, unique_clicks/delivered)
+
+tw_benchmarks(id, brand, date, vertical, revenue_tier, metric_name, metric_value, percentile_25, percentile_50, percentile_75, percentile_90, sample_size, benchmark_type)
+  → Industry benchmark data from TW benchmarks_table (monthly)
+  → Compare brand metrics against industry percentiles
+
+━━━ REVENUE — TWO METRICS, USE THE CORRECT ONE ━━━
+⚠️ CRITICAL: total_revenue ≠ actual revenue. There are TWO revenue fields:
+
+order_revenue  (CANONICAL — USE THIS for MER, AOV, all KPIs)
+  = SUM of all actual Shopify + Amazon orders (total_price), BEFORE refunds
+  = "Order Revenue" as shown in TW UI: "Revenue from orders after discounts, before refunds"
+  = Shopify + Amazon combined. shopify_revenue and amazon_revenue show the split.
+  ⚠️ FALLBACK: If order_revenue IS NULL (backfill not run yet), use total_revenue
+
+total_revenue  (TW ATTRIBUTED — secondary, do NOT use for MER)
+  = TripleWhale pixel-attributed/blended revenue
+  = DIFFERENT from Shopify orders — attribution windows cause discrepancies
+  = Example: Apr 28 NOBL: total_revenue=$515,707 but order_revenue=$531,679
+
+total_sales
+  = order_revenue - refund_amount (net revenue actually kept)
+  = What you "take to the bank"
+
+shopify_revenue  = Shopify-only orders (order_revenue minus Amazon)
+amazon_revenue   = Amazon channel only (NOBL has ~$10-15k/day from Amazon)
+
+━━━ KEY METRICS & FORMULAS ━━━
+MER = COALESCE(order_revenue, total_revenue) / total_spend  [target ≥2.0, red <1.8]
+ROAS = channel_revenue / channel_spend
+NC ROAS = new_customer_revenue / spend
+NVP% = new_visitors / total_visitors [target ≥50%]
+CAC = spend / new_customer_orders
+AOV = COALESCE(order_revenue, total_revenue) / total_orders
+NC Rate = new_customer_orders / total_orders
+Refund Rate = refund_amount / order_revenue
+Net MER = total_sales / total_spend (after refunds)
+
+━━━ THRESHOLDS (color coding) ━━━
+MER Global/US/CA/AU/EU: red <1.8, yellow 1.8–2.0, green ≥2.0
+MER Dubai/UAE: red <1.6, yellow 1.6–1.8, green ≥1.8
+ROAS Meta: red <1.6, yellow 1.6–1.8, green ≥1.8
+ROAS Google: red <2.0, yellow 2.0–3.0, green ≥3.0
+ROAS AppLovin: red <2.0, yellow 2.0–2.2, green ≥2.2
+ROAS TikTok/Snap/Pinterest: red <1.8, yellow 1.8–2.0, green ≥2.0
+NVP%: red <45%, yellow 45–50%, green ≥50%
+Refund Rate: red >13%, yellow 6–13%, green ≤6%
+Returning Customer%: red <17%, yellow 17–23%, green ≥23%
+
+━━━ CHANNELS ━━━
+In tw_channel_daily: META, GOOGLE, APPLOVIN, TIKTOK, SNAPCHAT, BING, PINTEREST, X
+In tw_channel_daily_all: facebook-ads, google-ads, applovin, tiktok-ads, snapchat-ads, bing, pinterest-ads, twitter-ads
+
+━━━ REGIONS ━━━
+US = United States, CA = Canada, AUS = Australia, DUBAI = UAE/Dubai, EU = European Union, TOTAL = all regions combined
+
+━━━ BEHAVIOR RULES ━━━
+1. NEVER ask clarifying questions — just answer with the data
+2. If the user asks about a metric, query the database and show the actual numbers
+3. Always show specific numbers, not vague answers
+4. When returning data for charts/tables, format it as clean JSON in chartData
+5. Be concise — executives want bullet points and numbers
+6. Today is 2026-04-29. "Yesterday" = 2026-04-27 (latest available)
+7. For date filtering: use DATE(date AT TIME ZONE 'UTC') = 'YYYY-MM-DD'::date
+8. Return chartHint as: "line_chart", "bar_chart", "table", or "kpi_cards" based on what data you return`;
+
+const DB_TOOL = {
+  type: 'function',
+  function: {
+    name: 'query_database',
+    description: 'Execute a SQL query against the PostgreSQL analytics database. Use this to answer any question about metrics, trends, channel performance, etc.',
+    parameters: {
+      type: 'object',
+      properties: {
+        sql: { type: 'string', description: 'The PostgreSQL SQL query to execute. Always LIMIT results to 200 rows max.' },
+        description: { type: 'string', description: 'Brief description of what this query fetches' }
+      },
+      required: ['sql']
+    }
+  }
+};
+
 app.post('/api/ai/chat', async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
   try {
-    const { messages = [], context = '' } = req.body;
-    const systemContent = context
-      ? `${AI_SYSTEM_PROMPT}\n\n--- CURRENT CONTEXT ---\n${context}`
-      : AI_SYSTEM_PROMPT;
+    const { messages = [], activeTab = '' } = req.body;
 
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [{ role: 'system', content: systemContent }, ...messages],
-      max_tokens: 1200,
-      temperature: 0.7,
+    const systemMsg = {
+      role: 'system',
+      content: SMART_AI_SYSTEM + (activeTab ? `\n\nUser is currently viewing: "${activeTab}" tab.` : '')
+    };
+
+    const allMessages = [systemMsg, ...messages];
+    let queryResult = null;
+    let chartHint = null;
+
+    // Round 1: let AI decide if it needs to query
+    const round1 = await openai.chat.completions.create({
+      model: 'gpt-4o',
+      messages: allMessages,
+      tools: [DB_TOOL],
+      tool_choice: 'auto',
+      max_tokens: 2000,
+      temperature: 0.2,
     });
-    res.json({ reply: response.choices[0].message.content });
+
+    const r1msg = round1.choices[0].message;
+
+    // If AI wants to query the database
+    if (r1msg.tool_calls?.length) {
+      const toolCall = r1msg.tool_calls[0];
+      const { sql, description } = JSON.parse(toolCall.function.arguments);
+
+      let dbRows = [], dbColumns = [], dbError = null;
+      try {
+        // Safety: block destructive queries
+        const upper = sql.trim().toUpperCase();
+        if (/^(DROP|DELETE|TRUNCATE|UPDATE|INSERT|ALTER|CREATE)\s/.test(upper)) {
+          throw new Error('Only SELECT queries are allowed');
+        }
+        const result = await pgQuery(sql + (sql.trim().toUpperCase().includes('LIMIT') ? '' : ' LIMIT 200'));
+        dbColumns = result.fields?.map(f => f.name) || Object.keys(result.rows[0] || {});
+        dbRows = result.rows.map(r => dbColumns.map(c => r[c]));
+        queryResult = { columns: dbColumns, rows: dbRows, description, sql };
+      } catch (e) {
+        dbError = e.message;
+        console.error('[AI DB Query]', e.message, '\nSQL:', sql);
+      }
+
+      // Round 2: feed results back to AI for final answer
+      const toolResultContent = dbError
+        ? `Query error: ${dbError}`
+        : `Query returned ${dbRows.length} rows.\nColumns: ${dbColumns.join(', ')}\nData (first 20 rows): ${JSON.stringify(dbRows.slice(0, 20))}`;
+
+      const round2 = await openai.chat.completions.create({
+        model: 'gpt-4o',
+        messages: [
+          ...allMessages,
+          r1msg,
+          { role: 'tool', tool_call_id: toolCall.id, content: toolResultContent }
+        ],
+        max_tokens: 1500,
+        temperature: 0.2,
+      });
+
+      let reply = round2.choices[0].message.content || '';
+
+      // Extract chartHint if AI included it
+      const hintMatch = reply.match(/CHART_HINT:\s*(line_chart|bar_chart|table|kpi_cards)/i);
+      if (hintMatch) {
+        chartHint = hintMatch[1].toLowerCase();
+        reply = reply.replace(/CHART_HINT:\s*(line_chart|bar_chart|table|kpi_cards)/i, '').trim();
+      } else if (dbRows.length > 0) {
+        // Auto-detect chart type
+        if (dbColumns.includes('date') || dbColumns.some(c => c.includes('date'))) chartHint = 'line_chart';
+        else if (dbRows.length <= 15 && dbColumns.length <= 4) chartHint = 'kpi_cards';
+        else if (dbRows.length > 1 && dbColumns.some(c => c.includes('channel') || c.includes('region') || c.includes('brand'))) chartHint = 'bar_chart';
+        else chartHint = 'table';
+      }
+
+      return res.json({ reply, queryResult, chartHint });
+    }
+
+    // No DB query needed — just return the text
+    res.json({ reply: r1msg.content || '', queryResult: null, chartHint: null });
+
   } catch(e) {
     console.error('[AI Chat]', e.message);
     res.status(500).json({ error: e.message });
@@ -483,7 +918,8 @@ app.post('/api/sync/trigger', requireAppAuth, async (req, res) => {
 app.use('/api/sync/status', requireAppAuth, syncStatusRouter);
 
 // ── TripleWhale live data ─────────────────────────────────────────
-app.use('/api/tw', requireAppAuth, twRouter);
+app.use('/api/tw',    requireAppAuth, twRouter);
+app.use('/api/store', requireAppAuth, storeRouter);
 
 // ── Daily cron: 11:00 AM GMT+5 = 06:00 UTC ───────────────────────
 // Fetches yesterday's data from all APIs and loads it into the DB.
@@ -499,7 +935,14 @@ try {
     console.log(`[Cron] ▶ Daily sync for ${yStr} → ${runId}`);
     syncEngine.runSync({
       runId,
-      tasks:     ['klaviyo', 'appstle', 'tw_refresh'],
+      tasks: [
+        'klaviyo', 'appstle', 'tw_refresh',
+        'tw_channels', 'tw_geo',
+        'tw_ads', 'tw_orders', 'tw_sessions',
+        'tw_refunds', 'tw_email_sms',
+        'tw_order_revenue',          // ← canonical revenue: Shopify+Amazon, before refunds
+        'tw_customers', 'tw_segments', 'tw_benchmarks',
+      ],
       startDate: yStr,
       endDate:   yStr,
       brands:    ['NOBL', 'FLO'],

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, Component } from 'react';
 import { appStatus, appLogout, triggerSync, getSyncStatus } from './utils/api';
 import TopBar from './components/TopBar';
-import Sidebar, { CORE_TABS } from './components/Sidebar';
+import Sidebar, { CORE_TABS, STORE_TABS } from './components/Sidebar';
 import { Icons } from './components/Icons';
 import AiAssistant from './components/AiAssistant';
 import LoginPage from './pages/LoginPage';
@@ -15,6 +15,8 @@ import AiBuilderPage     from './pages/AiBuilderPage';
 import SyncPage          from './pages/SyncPage';
 import GenericDashPage   from './pages/GenericDashPage';
 import LivePage          from './pages/LivePage';
+import StoreNoblPage     from './pages/StoreNoblPage';
+import StoreFLOPage      from './pages/StoreFLOPage';
 
 function getInitialTheme() {
   try { return localStorage.getItem('nobl-theme') || 'dark'; } catch { return 'dark'; }
@@ -30,6 +32,9 @@ const CORE_PAGE_MAP = {
   'Channels':      ChannelsPage,
   'Subscriptions': SubsPage,
   'Live Data':     LivePage,
+  // Store pages — comprehensive per-store views with all daily data
+  'Store:NOBL':    StoreNoblPage,
+  'Store:FLO':     StoreFLOPage,
 };
 
 export default function App() {
