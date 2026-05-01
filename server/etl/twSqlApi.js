@@ -15,8 +15,11 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
  * ══════════════════════════════════════════════════════════════════
  */
 
+// Working TW SQL endpoint per Brad's Apps Script (the /willy/ path is dead, but
+// /orcabase/api/sql works for our keys). Body shape:
+//   { period: { startDate, endDate }, currency, shopId, query }
 const TW_SQL_URL = process.env.TW_SQL_URL
-  || 'https://api.triplewhale.com/api/v2/willy/run-query';
+  || 'https://api.triplewhale.com/api/v2/orcabase/api/sql';
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -39,6 +42,12 @@ function brandCreds(brand) {
         shopId: process.env.FLO_TW_SHOP_ID,
         apiKey: process.env.FLO_TW_API_KEY,
       };
+    case 'NOBL_EU':
+      // Separate TW workspace pointed at the same nobltravel.myshopify.com shop.
+      return {
+        shopId: process.env.NOBL_EU_TW_SHOP_ID || process.env.NOBL_TW_SHOP_ID,
+        apiKey: process.env.NOBL_EU_TW_API_KEY,
+      };
     case 'NOBL':
     default:
       return {
@@ -56,12 +65,21 @@ function brandCreds(brand) {
  * @param {number} maxRetries
  * @returns {Promise<Array<object>>}  array of row objects
  */
-async function twSqlQuery(brand, sql, maxRetries = 3) {
+async function twSqlQuery(brand, sql, opts = {}, maxRetries = 3) {
   const { shopId, apiKey } = brandCreds(brand);
 
   if (!shopId || !apiKey) {
     throw new Error(`[TW SQL] Missing credentials for brand ${brand}`);
   }
+
+  // Body shape per Brad's Apps Script: { period: {startDate, endDate}, currency, shopId, query }
+  const body = {
+    query:    sql,
+    shopId,
+    currency: opts.currency || 'USD',
+    period:   opts.period || undefined,
+  };
+  if (!body.period) delete body.period;
 
   console.log(`[TW SQL] ${brand} query (${sql.slice(0, 80).replace(/\s+/g,' ')}...)`);
 
@@ -72,8 +90,9 @@ async function twSqlQuery(brand, sql, maxRetries = 3) {
         headers: {
           'Content-Type': 'application/json',
           'x-api-key':    apiKey,
+          'accept':       'application/json',
         },
-        body:   JSON.stringify({ query: sql, shopId }),
+        body:   JSON.stringify(body),
         signal: AbortSignal.timeout(180_000),  // 3-minute timeout per query
       });
 
@@ -95,12 +114,9 @@ async function twSqlQuery(brand, sql, maxRetries = 3) {
 
       const json = await res.json();
 
-      // TW Willy API can return rows under different keys depending on version
-      const rows = json.data
-        || json.rows
-        || json.results
-        || json.result
-        || (Array.isArray(json) ? json : null);
+      // The orcabase endpoint returns the rows array DIRECTLY, not wrapped.
+      const rows = Array.isArray(json) ? json
+        : (json.data || json.rows || json.results || json.result || null);
 
       if (!rows) {
         console.warn(`[TW SQL] Unexpected response shape:`, Object.keys(json).join(', '));
@@ -127,9 +143,9 @@ async function twSqlQuery(brand, sql, maxRetries = 3) {
  * Convenience: run a query and return rows, returning [] instead of throwing.
  * Use when partial data is acceptable (fire-and-forget style syncs).
  */
-async function twSqlSafe(brand, sql) {
+async function twSqlSafe(brand, sql, opts = {}) {
   try {
-    return await twSqlQuery(brand, sql);
+    return await twSqlQuery(brand, sql, opts);
   } catch (e) {
     console.error(`[TW SQL safe] ${brand}:`, e.message);
     return [];
@@ -142,9 +158,11 @@ async function twSqlSafe(brand, sql) {
  */
 async function testTwSql(brand = 'NOBL') {
   try {
-    const rows = await twSqlQuery(brand, `
-      SELECT toDate(now()) AS today, 'ok' AS status LIMIT 1
-    `, 1);
+    const today = new Date().toISOString().slice(0,10);
+    const rows = await twSqlQuery(brand,
+      `SELECT toDate(now()) AS today, 'ok' AS status LIMIT 1`,
+      { period: { startDate: today, endDate: today } },
+      1);
     return { ok: true, brand, rows };
   } catch (e) {
     return { ok: false, brand, error: e.message };

@@ -3,9 +3,20 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 const KLAVIYO_BASE = 'https://a.klaviyo.com/api';
 const KLAVIYO_REVISION = '2024-02-15';
 
-function klaviyoHeaders() {
+function getKlaviyoApiKey(brand = 'NOBL') {
+  const brandKey = `${String(brand || '').toUpperCase()}_KLAVIYO_API_KEY`;
+  if (brandKey === 'NOBL_KLAVIYO_API_KEY') {
+    return process.env.NOBL_KLAVIYO_API_KEY || process.env.KLAVIYO_API_KEY || null;
+  }
+  return process.env[brandKey] || null;
+}
+
+function klaviyoHeaders(brand) {
+  const apiKey = getKlaviyoApiKey(brand);
+  if (!apiKey) throw new Error(`Missing ${String(brand || '').toUpperCase()}_KLAVIYO_API_KEY`);
+
   return {
-    'Authorization': `Klaviyo-API-Key ${process.env.KLAVIYO_API_KEY}`,
+    'Authorization': `Klaviyo-API-Key ${apiKey}`,
     'revision': KLAVIYO_REVISION,
     'Content-Type': 'application/json',
   };
@@ -18,14 +29,14 @@ function sleep(ms) {
 /**
  * Generic Klaviyo GET with retry + exponential backoff.
  */
-async function klaviyoGet(path, maxRetries = 3) {
+async function klaviyoGet(path, maxRetries = 3, brand = 'NOBL') {
   const url = path.startsWith('http') ? path : `${KLAVIYO_BASE}${path}`;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const res = await fetch(url, {
         method: 'GET',
-        headers: klaviyoHeaders(),
+        headers: klaviyoHeaders(brand),
         signal: AbortSignal.timeout(30_000),
       });
 
@@ -56,14 +67,14 @@ async function klaviyoGet(path, maxRetries = 3) {
 /**
  * Generic Klaviyo POST with retry.
  */
-async function klaviyoPost(path, bodyObj, maxRetries = 3) {
+async function klaviyoPost(path, bodyObj, maxRetries = 3, brand = 'NOBL') {
   const url = `${KLAVIYO_BASE}${path}`;
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: klaviyoHeaders(),
+        headers: klaviyoHeaders(brand),
         body: JSON.stringify(bodyObj),
         signal: AbortSignal.timeout(30_000),
       });
@@ -94,12 +105,12 @@ async function klaviyoPost(path, bodyObj, maxRetries = 3) {
  * Paginate through all pages of a Klaviyo cursor-paginated endpoint.
  * Returns all items[].
  */
-async function klaviyoPaginateAll(startPath) {
+async function klaviyoPaginateAll(startPath, brand = 'NOBL') {
   const items = [];
   let nextUrl = startPath.startsWith('http') ? startPath : `${KLAVIYO_BASE}${startPath}`;
 
   while (nextUrl) {
-    const json = await klaviyoGet(nextUrl);
+    const json = await klaviyoGet(nextUrl, 3, brand);
     const data = json.data ?? [];
     items.push(...data);
     nextUrl = json.links?.next ?? null;
@@ -109,7 +120,7 @@ async function klaviyoPaginateAll(startPath) {
 }
 
 // Module-level cache so we only fetch metric IDs once per process
-let _metricIdsCache = null;
+const _metricIdsCache = new Map();
 
 /**
  * Find metric IDs for email events we care about.
@@ -117,11 +128,12 @@ let _metricIdsCache = null;
  * Returns { sent, opened, clicked, revenue } metric IDs (strings).
  * Result is cached for the lifetime of the process.
  */
-async function getEmailMetricIds() {
-  if (_metricIdsCache) return _metricIdsCache;
+async function getEmailMetricIds(brand = 'NOBL') {
+  const normalizedBrand = String(brand || 'NOBL').toUpperCase();
+  if (_metricIdsCache.has(normalizedBrand)) return _metricIdsCache.get(normalizedBrand);
 
   // Fetch all metrics — no filter since integration filter doesn't work reliably
-  const metrics = await klaviyoPaginateAll('/metrics/');
+  const metrics = await klaviyoPaginateAll('/metrics/', normalizedBrand);
 
   const find = (names) => {
     const lc = names.map(n => n.toLowerCase());
@@ -136,8 +148,8 @@ async function getEmailMetricIds() {
     revenue: find(['Placed Order',   'Order Placed']),
   };
 
-  console.log('[Klaviyo] Metric IDs resolved:', ids);
-  _metricIdsCache = ids;
+  console.log(`[Klaviyo] ${normalizedBrand} metric IDs resolved:`, ids);
+  _metricIdsCache.set(normalizedBrand, ids);
   return ids;
 }
 
@@ -145,7 +157,7 @@ async function getEmailMetricIds() {
  * Fetch metric aggregate values for a single metric over a date range.
  * Returns a map of { 'YYYY-MM-DD': value }.
  */
-async function fetchMetricAggregates(metricId, startDate, endDate, measurement = 'count') {
+async function fetchMetricAggregates(metricId, startDate, endDate, measurement = 'count', brand = 'NOBL') {
   if (!metricId) return {};
 
   const body = {
@@ -166,18 +178,20 @@ async function fetchMetricAggregates(metricId, startDate, endDate, measurement =
   };
 
   try {
-    const json = await klaviyoPost('/metric-aggregates/', body);
-    const dates = json?.data?.attributes?.dates ?? [];
-    const values = json?.data?.attributes?.values ?? [];
+    const json = await klaviyoPost('/metric-aggregates/', body, 3, brand);
+    const attrs = json?.data?.attributes ?? {};
+    const dates = attrs.dates ?? [];
+    const values = attrs.values ?? attrs.data?.[0]?.measurements?.[measurement] ?? [];
 
     const result = {};
     dates.forEach((d, i) => {
       const dateStr = d.slice(0, 10);
-      result[dateStr] = (result[dateStr] || 0) + (values[i]?.[0] ?? 0);
+      const value = Array.isArray(values[i]) ? values[i]?.[0] : values[i];
+      result[dateStr] = (result[dateStr] || 0) + (value ?? 0);
     });
     return result;
   } catch (e) {
-    console.error(`[Klaviyo] fetchMetricAggregates(${metricId}) error:`, e.message);
+    console.error(`[Klaviyo] ${brand} fetchMetricAggregates(${metricId}) error:`, e.message);
     return {};
   }
 }
@@ -193,14 +207,20 @@ async function fetchMetricAggregates(metricId, startDate, endDate, measurement =
 async function syncKlaviyoDaily(brand, startDate, endDate) {
   const { pgRun } = require('../db/postgres');
   const errors = [];
+  const normalizedBrand = String(brand || 'NOBL').toUpperCase();
+  if (!getKlaviyoApiKey(normalizedBrand)) {
+    const msg = `Missing ${normalizedBrand}_KLAVIYO_API_KEY`;
+    console.warn(`[Klaviyo] ${msg}; skipping ${normalizedBrand}`);
+    return { rows: 0, errors: [] };
+  }
 
-  console.log(`[Klaviyo] Syncing ${brand} ${startDate} → ${endDate}`);
+  console.log(`[Klaviyo] Syncing ${normalizedBrand} ${startDate} → ${endDate}`);
 
   // Step 1: discover metric IDs
   let metricIds;
   try {
-    metricIds = await getEmailMetricIds();
-    console.log('[Klaviyo] Metric IDs:', metricIds);
+    metricIds = await getEmailMetricIds(normalizedBrand);
+    console.log(`[Klaviyo] ${normalizedBrand} metric IDs:`, metricIds);
   } catch (e) {
     const msg = `Failed to fetch metric IDs: ${e.message}`;
     console.error('[Klaviyo]', msg);
@@ -210,10 +230,10 @@ async function syncKlaviyoDaily(brand, startDate, endDate) {
 
   // Step 2: fetch aggregates for each metric in parallel
   const [sentMap, openedMap, clickedMap, revenueMap] = await Promise.all([
-    fetchMetricAggregates(metricIds.sent,    startDate, endDate, 'count'),
-    fetchMetricAggregates(metricIds.opened,  startDate, endDate, 'count'),
-    fetchMetricAggregates(metricIds.clicked, startDate, endDate, 'count'),
-    fetchMetricAggregates(metricIds.revenue, startDate, endDate, 'sum_value'),
+    fetchMetricAggregates(metricIds.sent,    startDate, endDate, 'count',     normalizedBrand),
+    fetchMetricAggregates(metricIds.opened,  startDate, endDate, 'count',     normalizedBrand),
+    fetchMetricAggregates(metricIds.clicked, startDate, endDate, 'count',     normalizedBrand),
+    fetchMetricAggregates(metricIds.revenue, startDate, endDate, 'sum_value', normalizedBrand),
   ]);
 
   // Step 3: build the union of all dates and upsert
@@ -253,17 +273,17 @@ async function syncKlaviyoDaily(brand, startDate, endDate) {
           open_rate      = EXCLUDED.open_rate,
           click_rate     = EXCLUDED.click_rate,
           revenue        = EXCLUDED.revenue
-      `, [date, brand, sent, opened, clicked, openRate, clickRate, revenue]);
+      `, [date, normalizedBrand, sent, opened, clicked, openRate, clickRate, revenue]);
       written++;
     } catch (e) {
-      const msg = `Row upsert ${date}/${brand}: ${e.message}`;
+      const msg = `Row upsert ${date}/${normalizedBrand}: ${e.message}`;
       console.error('[Klaviyo]', msg);
       errors.push(msg);
     }
   }
 
-  console.log(`[Klaviyo] ${brand}: ${written} rows upserted, ${errors.length} errors`);
+  console.log(`[Klaviyo] ${normalizedBrand}: ${written} rows upserted, ${errors.length} errors`);
   return { rows: written, errors };
 }
 
-module.exports = { syncKlaviyoDaily, getEmailMetricIds, fetchMetricAggregates, klaviyoGet };
+module.exports = { syncKlaviyoDaily, getEmailMetricIds, fetchMetricAggregates, klaviyoGet, getKlaviyoApiKey };

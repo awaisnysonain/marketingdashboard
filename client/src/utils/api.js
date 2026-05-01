@@ -85,6 +85,53 @@ export const getNoblTopline = (start, end) => fetch(`${B}/api/analytics/nobl/top
 export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(r=>r.json());
 export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(r=>r.json());
 export const getNoblSubs = (start, end) => fetch(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`).then(r=>r.json());
+export const getNoblAirSubscribers = (start, end) =>
+  fetch(`${B}/api/analytics/nobl/air-subscribers?start=${start}&end=${end}`).then(r => r.json());
+
+export const getNoblAirPerformance = async (start, end, rollingDays = 14, forecastDays = 14) => {
+  const res = await fetch(
+    `${B}/api/analytics/nobl/air-performance?start=${start}&end=${end}&rollingDays=${rollingDays}&forecastDays=${forecastDays}`
+  );
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const body = await res.text();
+    const looksLikeHtml = body.trim().startsWith('<');
+    throw new Error(
+      looksLikeHtml
+        ? 'API route not available yet. Please restart the server so /api/analytics/nobl/air-performance is registered.'
+        : 'Unexpected response format from server.'
+    );
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+};
+export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
+  const res = await fetch(`${B}/api/analytics/nobl/air-meta-adsets?start=${start}&end=${end}&limit=${limit}`);
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const body = await res.text();
+    const looksLikeHtml = body.trim().startsWith('<');
+    throw new Error(
+      looksLikeHtml
+        ? 'API route not available in the running app. Please restart the server and hard-refresh the dashboard.'
+        : 'Unexpected response format from server.'
+    );
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+};
+export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL') =>
+  fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${brand}`).then(r => {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  });
+export const getNoblAirAttribution = (start, end, level = 'ad') =>
+  fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}`).then(r => {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  });
 export const getFloProducts = (start, end) => fetch(`${B}/api/analytics/flo/products?start=${start}&end=${end}`).then(r=>r.json());
 
 // ── Store pages (comprehensive per-store data) ────────────────────

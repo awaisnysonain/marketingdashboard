@@ -121,7 +121,7 @@ export default function NoblPage({ showToast }) {
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, fontFamily: 'var(--font-head)', color: '#6366f1' }}>NOBL Air</h1>
           <p style={{ fontSize: 13, color: 'var(--text3)', margin: '4px 0 0' }}>Analytics dashboard for NOBL Air brand</p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
+        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="nobl" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (

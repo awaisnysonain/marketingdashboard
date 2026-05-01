@@ -3,11 +3,14 @@ import { Icons, sheetIcon } from './Icons';
 
 export const CORE_TABS = [
   { id: 'Overview',      icon: Icons.LayoutDashboard, label: 'Overview'       },
-  { id: 'NOBL Air',      icon: Icons.Plane,           label: 'NOBL Travel'    },
-  { id: 'Pilates FLO',   icon: Icons.Activity,        label: 'Pilates FLO'    },
   { id: 'Channels',      icon: Icons.BarChart2,       label: 'Channels'       },
+  { id: 'Meta Ads',      icon: Icons.Crosshair,       label: 'Meta Ads'       },
   { id: 'Subscriptions', icon: Icons.CreditCard,      label: 'Subscriptions'  },
   { id: 'Live Data',     icon: Icons.Zap,             label: 'Live Data'      },
+];
+
+const FIXED_DASHBOARD_TABS = [
+  { id: 'NOBL Air Performance', icon: Icons.Activity, label: 'NOBL Air Performance' },
 ];
 
 // Dedicated store pages — full per-store data (channels, regions, products, subs, email)
@@ -65,16 +68,123 @@ function ConfirmDelete({ label, onConfirm, onCancel }) {
   );
 }
 
-/* ── Nav item ──────────────────────────────────────────────────────── */
-function NavItem({ id, label, icon: IconComp, active, collapsed, onClick, onDelete, isDynamic }) {
-  const [hov, setHov] = useState(false);
-  const [confirmId, setConfirmId] = useState(null);
-  const isAct = active === id;
+/* ── Three-dots menu ───────────────────────────────────────────────── */
+function DashboardMenu({ onRename, onDuplicate, onShare, onDelete, onClose }) {
+  return (
+    <>
+      {/* Click-outside catcher */}
+      <div
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, zIndex: 999 }}
+      />
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          position: 'absolute', right: 6, top: '100%', marginTop: 2, zIndex: 1000,
+          background: 'var(--bg2)', border: '1px solid var(--border2)',
+          borderRadius: 'var(--radius)', boxShadow: 'var(--shadow)',
+          minWidth: 160, padding: '4px 0',
+        }}
+      >
+        {[
+          { label: 'Rename',    icon: '✎', action: onRename },
+          { label: 'Duplicate', icon: '⎘', action: onDuplicate },
+          { label: 'Share…',    icon: '↗', action: onShare },
+          { label: 'Delete',    icon: '✕', action: onDelete, danger: true },
+        ].map((item, i, arr) => (
+          <React.Fragment key={item.label}>
+            {i === arr.length - 1 && <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />}
+            <button
+              onClick={() => { onClose(); item.action?.(); }}
+              style={{
+                width: '100%', textAlign: 'left',
+                padding: '7px 12px', fontSize: 12,
+                background: 'none', border: 'none',
+                color: item.danger ? 'var(--danger)' : 'var(--text2)',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+                fontFamily: 'var(--font-body)',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
+              onMouseLeave={e => e.currentTarget.style.background = 'none'}
+            >
+              <span style={{ width: 14, opacity: 0.7 }}>{item.icon}</span>
+              {item.label}
+            </button>
+          </React.Fragment>
+        ))}
+      </div>
+    </>
+  );
+}
 
-  function requestDelete(e) {
-    e.stopPropagation();
-    setConfirmId(id);
-  }
+/* ── Rename / Share modals ─────────────────────────────────────────── */
+function RenameModal({ initial, onSave, onCancel }) {
+  const [val, setVal] = useState(initial || '');
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} style={{
+          background: 'var(--bg2)', border: '1px solid var(--border2)',
+          borderRadius: 'var(--radius-lg)', padding: '22px 24px', width: 360 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Rename dashboard</div>
+        <input
+          autoFocus value={val} onChange={e => setVal(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') onSave(val.trim()); }}
+          style={{ width: '100%', padding: '8px 10px', fontSize: 13,
+                   background: 'var(--bg3)', border: '1px solid var(--border2)',
+                   borderRadius: 'var(--radius)', color: 'var(--text)',
+                   marginBottom: 18, fontFamily: 'var(--font-body)' }}
+        />
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+          <button onClick={onCancel} style={{ padding: '6px 14px', fontSize: 12,
+              background: 'none', border: '1px solid var(--border2)',
+              borderRadius: 'var(--radius)', color: 'var(--text2)', cursor: 'pointer' }}>Cancel</button>
+          <button onClick={() => onSave(val.trim())} disabled={!val.trim()} style={{
+              padding: '6px 14px', fontSize: 12, fontWeight: 600,
+              background: 'var(--accent)', border: '1px solid var(--accent)',
+              borderRadius: 'var(--radius)', color: '#fff', cursor: 'pointer',
+              opacity: val.trim() ? 1 : 0.5 }}>Save</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ShareModal({ label, onCancel }) {
+  // Placeholder UI — full sharing will land in a follow-up session.
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} style={{
+          background: 'var(--bg2)', border: '1px solid var(--border2)',
+          borderRadius: 'var(--radius-lg)', padding: '22px 24px', width: 420 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Share "{label}"</div>
+        <div style={{ fontSize: 11.5, color: 'var(--text3)', lineHeight: 1.6, marginBottom: 16 }}>
+          Sharing with other team members (Google Docs–style permissions + access requests)
+          is coming in the next update. For now, dashboards are private to your account.
+        </div>
+        <input placeholder="email@nysonian.com" disabled style={{ width: '100%',
+            padding: '8px 10px', fontSize: 13, background: 'var(--bg3)',
+            border: '1px solid var(--border2)', borderRadius: 'var(--radius)',
+            color: 'var(--text3)', marginBottom: 16, fontFamily: 'var(--font-body)' }} />
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button onClick={onCancel} style={{ padding: '6px 14px', fontSize: 12,
+              background: 'var(--bg3)', border: '1px solid var(--border2)',
+              borderRadius: 'var(--radius)', color: 'var(--text2)', cursor: 'pointer' }}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ── Nav item ──────────────────────────────────────────────────────── */
+function NavItem({ id, label, icon: IconComp, active, collapsed, onClick, onDelete, onRename, onDuplicate, isDynamic }) {
+  const [hov, setHov] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmId, setConfirmId] = useState(null);
+  const [renaming, setRenaming] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const isAct = active === id;
 
   return (
     <>
@@ -84,6 +194,16 @@ function NavItem({ id, label, icon: IconComp, active, collapsed, onClick, onDele
           onConfirm={() => { setConfirmId(null); onDelete?.(id); }}
           onCancel={() => setConfirmId(null)}
         />
+      )}
+      {renaming && (
+        <RenameModal
+          initial={label}
+          onSave={(newLabel) => { setRenaming(false); if (newLabel && newLabel !== label) onRename?.(id, newLabel); }}
+          onCancel={() => setRenaming(false)}
+        />
+      )}
+      {sharing && (
+        <ShareModal label={label} onCancel={() => setSharing(false)} />
       )}
       <div
         style={{ position: 'relative' }}
@@ -122,24 +242,35 @@ function NavItem({ id, label, icon: IconComp, active, collapsed, onClick, onDele
           )}
         </button>
 
-        {/* Delete button (dynamic tabs only) */}
-        {isDynamic && !collapsed && hov && (
+        {/* Three-dots menu (dynamic tabs only) */}
+        {isDynamic && !collapsed && (hov || menuOpen) && (
           <button
-            onClick={requestDelete}
-            title="Remove"
+            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
+            title="More options"
             style={{
               position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
-              background: 'var(--bg4)', border: '1px solid var(--border2)',
-              borderRadius: 4, width: 18, height: 18,
+              background: menuOpen ? 'var(--bg4)' : 'var(--bg4)',
+              border: '1px solid var(--border2)',
+              borderRadius: 4, width: 20, height: 20,
               display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', color: 'var(--text3)',
+              cursor: 'pointer', color: 'var(--text2)',
+              fontSize: 14, lineHeight: 0.5,
               transition: 'color .12s',
             }}
-            onMouseEnter={e => e.currentTarget.style.color = 'var(--danger)'}
-            onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
+            onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
+            onMouseLeave={e => e.currentTarget.style.color = 'var(--text2)'}
           >
-            <Icons.X size={9} />
+            ⋯
           </button>
+        )}
+        {menuOpen && (
+          <DashboardMenu
+            onClose={() => setMenuOpen(false)}
+            onRename={() => setRenaming(true)}
+            onDuplicate={() => onDuplicate?.(id)}
+            onShare={() => setSharing(true)}
+            onDelete={() => setConfirmId(id)}
+          />
         )}
       </div>
     </>
@@ -163,7 +294,7 @@ function SectionLabel({ label, collapsed, action }) {
 }
 
 /* ── Main sidebar ──────────────────────────────────────────────────── */
-export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard, onDeleteDynamic, collapsed, onCollapse }) {
+export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard, onDeleteDynamic, onRenameDynamic, onDuplicateDynamic, collapsed, onCollapse }) {
   const dynDashboards = (dynamicTabs || []).filter(t => t.type === 'dashboard');
   const dynSheets     = (dynamicTabs || []).filter(t => t.type === 'sheet');
   const storeActive   = STORE_TABS.some(t => t.id === active);
@@ -250,6 +381,9 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
         />
 
         <div>
+          {FIXED_DASHBOARD_TABS.map(tab => (
+            <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
+          ))}
           {dynDashboards.length === 0 && !collapsed && (
             <button
               onClick={onAddDashboard}
@@ -274,7 +408,11 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
               label={tab.label || tab.id}
               icon={Icons.LayoutGrid}
               active={active} collapsed={collapsed}
-              onClick={onChange} onDelete={onDeleteDynamic} isDynamic
+              onClick={onChange}
+              onDelete={onDeleteDynamic}
+              onRename={onRenameDynamic}
+              onDuplicate={onDuplicateDynamic}
+              isDynamic
             />
           ))}
         </div>
@@ -290,7 +428,11 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
                   label={tab.label || tab.id}
                   icon={sheetIcon(tab.label || tab.id)}
                   active={active} collapsed={collapsed}
-                  onClick={onChange} onDelete={onDeleteDynamic} isDynamic
+                  onClick={onChange}
+                  onDelete={onDeleteDynamic}
+                  onRename={onRenameDynamic}
+                  onDuplicate={onDuplicateDynamic}
+                  isDynamic
                 />
               ))}
             </div>

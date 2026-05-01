@@ -5,12 +5,30 @@ import AnnotationModal from './AnnotationModal';
 const HL_BG = { yellow: 'var(--hl-yellow)', green: 'var(--hl-green)', red: 'var(--hl-red)', blue: 'var(--hl-blue)' };
 const HL_CYCLE = ['yellow', 'green', 'red', 'blue', null];
 
+function defaultColWidth(header) {
+  const h = String(header).toLowerCase();
+  if (h.includes('campaign')) return 240;
+  if (h.includes('adset') || h.includes('ad set')) return 220;
+  if (h === 'ad' || h.includes('ad name')) return 260;
+  if (h.includes('revenue') || h.includes('spend') || h.includes('cac') || h.includes('cpc') || h.includes('cpm')) return 120;
+  if (h.includes('roas') || h.includes('ctr') || h.includes('rate')) return 90;
+  if (h.includes('orders') || h.includes('purchases') || h.includes('clicks') || h.includes('impressions')) return 120;
+  if (h.includes('date')) return 110;
+  return 160;
+}
+
+function isDateSortColumn(header) {
+  const h = String(header || '').trim().toLowerCase();
+  return h === 'date' || h === 'day' || h.endsWith(' date') || h.includes('created at') || h.includes('updated at');
+}
+
 export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight = '480px', searchable = true }) {
   const [search, setSearch]       = useState('');
   const [localRows, setLocalRows] = useState(rows);
   const [modal, setModal]         = useState(null);
   const [sortBy, setSortBy]       = useState(null);
   const [sortDir, setSortDir]     = useState('asc');
+  const [colWidths, setColWidths] = useState({});
 
   // Selection
   const [selectedRows, setSelectedRows] = useState(new Set());
@@ -19,10 +37,41 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
   const [anchorCol, setAnchorCol]       = useState(null);
   const [selecting, setSelecting]       = useState(false);
   const selStartRef = useRef(null);
+  const resizeRef = useRef(null);
 
   React.useEffect(() => { setLocalRows(rows); }, [rows]);
 
   const visibleHeaders = headers.filter(h => !h.startsWith('_'));
+
+  React.useEffect(() => {
+    setColWidths(prev => {
+      const next = {};
+      for (const h of visibleHeaders) next[h] = prev[h] || defaultColWidth(h);
+      return next;
+    });
+  }, [headers]);
+
+  React.useEffect(() => {
+    function onMove(e) {
+      const resize = resizeRef.current;
+      if (!resize) return;
+      const width = Math.max(70, resize.startWidth + e.clientX - resize.startX);
+      setColWidths(prev => ({ ...prev, [resize.header]: width }));
+    }
+    function onUp() { resizeRef.current = null; }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, []);
+
+  function startColumnResize(e, header) {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeRef.current = { header, startX: e.clientX, startWidth: colWidths[header] || defaultColWidth(header) };
+  }
 
   // Filter
   const filtered = search
@@ -41,6 +90,7 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
     : filtered;
 
   function handleSort(h) {
+    if (!isDateSortColumn(h)) return;
     if (sortBy === h) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortBy(h); setSortDir('asc'); }
   }
@@ -202,11 +252,16 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
         background: 'var(--bg2)',
       }}>
         <table style={{
-          width: '100%',
+          width: 'max-content', minWidth: '100%',
           borderCollapse: 'collapse',
           fontSize: 12,
-          tableLayout: 'auto',
+          tableLayout: 'fixed',
         }}>
+          <colgroup>
+            <col style={{ width: 32 }} />
+            {visibleHeaders.map(h => <col key={h} style={{ width: colWidths[h] || defaultColWidth(h) }} />)}
+            <col style={{ width: 28 }} />
+          </colgroup>
 
           {/* HEAD */}
           <thead>
@@ -239,16 +294,24 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
                       color: isSelCol ? 'var(--accent)' : isSort ? 'var(--text)' : 'var(--text3)',
                       background: isSelCol ? 'var(--accent-soft)' : undefined,
                       whiteSpace: 'nowrap', cursor: 'pointer',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                      width: colWidths[h] || defaultColWidth(h), maxWidth: colWidths[h] || defaultColWidth(h),
                       userSelect: 'none',
                       letterSpacing: '.01em',
+                      position: 'relative',
                     }}
                   >
-                    {h}
-                    {isSort && (
-                      <span style={{ marginLeft: 4, fontSize: 9, opacity: .7 }}>
-                        {sortDir === 'asc' ? '▲' : '▼'}
-                      </span>
-                    )}
+                    <span style={{ display:'block', overflow:'hidden', textOverflow:'ellipsis', paddingRight:10 }}>
+                      {h}
+                    </span>
+                    <span
+                      onMouseDown={e => startColumnResize(e, h)}
+                      onClick={e => e.stopPropagation()}
+                      title="Drag to resize column"
+                      style={{ position:'absolute', top:0, right:-3, width:8, height:'100%', cursor:'col-resize', zIndex:5, borderRight:'1px solid transparent' }}
+                      onMouseEnter={e => { e.currentTarget.style.borderRightColor = 'var(--accent)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderRightColor = 'transparent'; }}
+                    />
                   </th>
                 );
               })}
@@ -317,6 +380,8 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
                           textAlign: isNum ? 'right' : 'left',
                           fontFamily: isNum ? 'var(--font-mono)' : 'var(--font-body)',
                           whiteSpace: 'nowrap',
+                          overflow: 'hidden', textOverflow: 'ellipsis',
+                          width: colWidths[h] || defaultColWidth(h), maxWidth: colWidths[h] || defaultColWidth(h),
                           background: isColSel ? 'var(--accent-soft)' : undefined,
                           fontSize: 12,
                         }}

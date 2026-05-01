@@ -97,7 +97,7 @@ export default function FloPage({ showToast }) {
           <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:'#14b8a6' }}>Pilates FLO</h1>
           <p style={{ fontSize:13, color:'var(--text3)', margin:'4px 0 0' }}>Analytics dashboard for Pilates FLO brand</p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
+        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="flo" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (

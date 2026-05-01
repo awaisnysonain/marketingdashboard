@@ -1,0 +1,450 @@
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  AreaChart, Area, ComposedChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+} from 'recharts';
+import { getNoblAirPerformance, getNoblAirSubscribers, getNoblAirAttribution, fmt$, fmtNum, fmtPct } from '../utils/api';
+import DateRangePicker from '../components/DateRangePicker';
+import KpiCard from '../components/KpiCard';
+import SheetTable from '../components/SheetTable';
+
+/* ────────────── helpers ────────────── */
+function toISO(d) { return d.toISOString().slice(0, 10); }
+function startOfMonthISO() {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+}
+function fmtDateLabel(s) {
+  if (!s) return '';
+  const [, mo, dy] = String(s).slice(0, 10).split('-');
+  return `${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][parseInt(mo,10)-1]} ${parseInt(dy,10)}`;
+}
+
+const TIER_COLORS = {
+  49:  '#94a3b8',
+  79:  '#60a5fa',
+  89:  '#3b82f6',
+  99:  '#6366f1',
+  109: '#8b5cf6',
+  119: '#a855f7',
+  129: '#ec4899',
+  139: '#f43f5e',
+  149: '#f97316',
+  159: '#eab308',
+};
+const STATUS_COLORS = {
+  active:    '#22c55e',
+  cancelled: '#ef4444',
+  paused:    '#f59e0b',
+  trialing:  '#3b82f6',
+  expired:   '#64748b',
+  unknown:   '#94a3b8',
+};
+
+/* ────────────── headers (full table) ────────────── */
+const HEADERS = [
+  'Date', 'Total Orders', 'Air Orders', 'Attach Rate', 'TTP Rate', 'Activation Rate',
+  '$0 Air', 'Paid Air', 'Rebill', 'Same-Day Cancel',
+  'Tag Net Sales', 'Sub Net Sales', 'Rebill Revenue', 'New Sub Revenue', 'Combined Net Revenue',
+  'New $79', 'New $99', 'New $119', 'New $129', 'New $139', 'New $149',
+  'Rebill $79', 'Rebill $99', 'Rebill $119', 'Rebill $129', 'Rebill $139', 'Rebill $149',
+];
+
+const AIR_ATTR_HEADERS = [
+  'Ad', 'Ad Set', 'Campaign', 'Air Orders', 'Attributed Air Orders', 'Attributed Air Revenue',
+];
+
+function toTableRow(r) {
+  return {
+    'Date': r.date,
+    'Total Orders': r.total_orders,
+    'Air Orders': r.air_orders,
+    'Attach Rate': r.attach_rate,
+    'TTP Rate': r.ttp_rate,
+    'Activation Rate': r.activation_rate,
+    '$0 Air': r.zero_air_orders,
+    'Paid Air': r.paid_air_orders,
+    'Rebill': r.rebill_orders,
+    'Same-Day Cancel': r.same_day_cancels,
+    'Tag Net Sales': r.tag_net_sales,
+    'Sub Net Sales': r.sub_net_sales,
+    'Rebill Revenue': r.rebill_revenue,
+    'New Sub Revenue': r.new_sub_revenue,
+    'Combined Net Revenue': r.combined_net_revenue,
+    'New $79':   r.new_79,
+    'New $99':   r.new_99,
+    'New $119':  r.new_119,
+    'New $129':  r.new_129,
+    'New $139':  r.new_139,
+    'New $149':  r.new_149,
+    'Rebill $79':  r.rebill_79,
+    'Rebill $99':  r.rebill_99,
+    'Rebill $119': r.rebill_119,
+    'Rebill $129': r.rebill_129,
+    'Rebill $139': r.rebill_139,
+    'Rebill $149': r.rebill_149,
+    _date: r.date,
+  };
+}
+
+function shortName(s, max = 28) {
+  const name = String(s || 'Unknown');
+  return name.length > max ? `${name.slice(0, max - 1)}…` : name;
+}
+
+function toAirAttributionTableRow(r) {
+  return {
+    'Ad': r.ad_name || 'Unknown ad',
+    'Ad Set': r.adset_name || 'Unknown ad set',
+    'Campaign': r.campaign_name,
+    'Air Orders': r.air_orders,
+    'Attributed Air Orders': r.attributed_air_orders,
+    'Attributed Air Revenue': r.attributed_air_revenue,
+    _ad: r.ad_id || `${r.campaign_id}-${r.adset_id}-${r.ad_name}`,
+  };
+}
+
+/* ────────────── PAGE ────────────── */
+export default function NoblAirPerformancePage() {
+  // Default range: NOBL Air launched Mar 2026 — show Mar 1 → today
+  const [range, setRange] = useState({ start: '2026-03-01', end: toISO(new Date()) });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [data, setData] = useState({ rows: [], totals: {} });
+  const [subData, setSubData] = useState(null);
+  const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
+
+  const load = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      const [perf, subs, attr] = await Promise.all([
+        getNoblAirPerformance(range.start, range.end, 14, 0),
+        getNoblAirSubscribers(range.start, range.end),
+        getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message })),
+      ]);
+      setData({ rows: perf?.rows || [], totals: perf?.totals || {} });
+      setSubData(subs || null);
+      setAirAttr(attr || { rows: [], totals: {}, error: null });
+    } catch (e) {
+      setError(e.message || 'Failed to load');
+    } finally {
+      setLoading(false);
+    }
+  }, [range]);
+
+  useEffect(() => { load(); }, [load]);
+
+  /* ── chart-friendly rows (asc date) ── */
+  const chartRows = useMemo(
+    () => [...(data.rows || [])].reverse(),
+    [data.rows]
+  );
+
+  const tableRows = useMemo(
+    () => (data.rows || []).map(toTableRow),
+    [data.rows]
+  );
+
+  const airAttrRows = useMemo(
+    () => (airAttr?.rows || []).map(toAirAttributionTableRow),
+    [airAttr]
+  );
+  const airAttrChartRows = useMemo(
+    () => (airAttr?.rows || []).slice(0, 10).map(r => ({ ...r, chart_label: shortName(r.ad_name || r.adset_name, 24) })),
+    [airAttr]
+  );
+
+  /* ── KPIs from totals (use the doc's TTP from subscriber cohort, not from daily) ── */
+  const kpi = useMemo(() => {
+    const t = data.totals || {};
+    const ttp = subData?.ttp_cohort?.ttp_rate;
+    const attach = t.attach_rate;
+    const activation = (attach != null && ttp != null) ? attach * ttp : null;
+    return {
+      totalOrders: t.total_orders || 0,
+      airOrders: t.air_orders || 0,
+      attachRate: attach,
+      ttpRate: ttp,                 // ← from nobl_air_subscribers cohort
+      activationRate: activation,
+      paidAirOrders: t.paid_air_orders || 0,
+      zeroAirOrders: t.zero_air_orders || 0,
+      sameDayCancels: subData?.ttp_cohort?.same_day_cancels || t.same_day_cancels || 0,
+      combinedNetRevenue: t.combined_net_revenue || 0,
+      rebillRevenue: t.rebill_revenue || 0,
+      newSubRevenue: t.sub_net_sales || 0,
+      activeSubs: subData?.active_count || 0,
+      activeArr:  subData?.active_arr || 0,
+    };
+  }, [data.totals, subData]);
+
+  const tierData = useMemo(
+    () => (subData?.tiers || []).map(t => ({
+      ...t,
+      label: `$${t.tier}`,
+      color: TIER_COLORS[t.tier] || '#94a3b8',
+    })),
+    [subData]
+  );
+  const statusData = useMemo(
+    () => (subData?.status || []).map(s => ({
+      name: s.status || 'unknown',
+      value: s.n,
+      color: STATUS_COLORS[s.status] || '#94a3b8',
+    })),
+    [subData]
+  );
+
+  return (
+    <div>
+      {/* ── Header ── */}
+      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, gap:12, flexWrap:'wrap' }}>
+        <div>
+          <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:'#6366f1' }}>
+            NOBL Air Performance
+          </h1>
+          <p style={{ margin:'4px 0 0', fontSize:13, color:'var(--text3)' }}>
+            Subscription product launched March 2026 · attach rate, TTP, tier mix, revenue split
+          </p>
+        </div>
+        <DateRangePicker
+          start={range.start}
+          end={range.end}
+          onChange={setRange}
+          scope="nobl-air-performance"
+        />
+      </div>
+
+      {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
+        <>
+          {/* ── Top KPI row ── */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
+            <KpiCard label="Air Orders"            value={fmtNum(kpi.airOrders)}            color="nobl" />
+            <KpiCard label="Attach Rate"           value={fmtPct(kpi.attachRate || 0)}      color="teal" />
+            <KpiCard label="TTP Rate"              value={fmtPct(kpi.ttpRate || 0)}         color="purple" />
+            <KpiCard label="Activation Rate"       value={fmtPct(kpi.activationRate || 0)}  color="green" />
+            <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" />
+            <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" />
+            <KpiCard label="Active Subscribers"    value={fmtNum(kpi.activeSubs)}           color="green" />
+            <KpiCard label="Active ARR (est.)"     value={fmt$(kpi.activeArr)}              color="purple" />
+          </div>
+
+          {/* ── Secondary KPI row ── */}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
+            <KpiCard label="Total Orders"      value={fmtNum(kpi.totalOrders)}      color="text" />
+            <KpiCard label="Paid Air Orders"   value={fmtNum(kpi.paidAirOrders)}    color="nobl" />
+            <KpiCard label="$0 Air Orders"     value={fmtNum(kpi.zeroAirOrders)}    color="warn" />
+            <KpiCard label="Same-Day Cancels"  value={fmtNum(kpi.sameDayCancels)}   color="red" />
+            <KpiCard label="New Sub Revenue"   value={fmt$(kpi.newSubRevenue)}      color="blue" />
+          </div>
+
+          {/* ── Row 1: revenue trend + attach/TTP trend ── */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
+            <Card title="Combined Net Revenue Trend">
+              <ResponsiveContainer width="100%" height={250}>
+                <AreaChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                  <defs>
+                    <linearGradient id="revGradAir" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
+                  <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={70} stroke="var(--border2)" />
+                  <Tooltip
+                    formatter={(v, n) => [fmt$(v), n]}
+                    labelFormatter={fmtDateLabel}
+                    contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
+                  />
+                  <Area type="monotone" dataKey="combined_net_revenue" name="Combined Net Revenue" stroke="#6366f1" fill="url(#revGradAir)" strokeWidth={2} dot={false} />
+                </AreaChart>
+              </ResponsiveContainer>
+            </Card>
+
+            <Card title="Attach / TTP / Activation">
+              <ResponsiveContainer width="100%" height={250}>
+                <ComposedChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                  <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
+                  <YAxis yAxisId="orders" tick={{ fontSize:11 }} width={48} stroke="var(--border2)" />
+                  <YAxis yAxisId="rates"  orientation="right" tick={{ fontSize:11 }} width={48} stroke="var(--border2)" tickFormatter={(v) => `${Math.round(v * 100)}%`} />
+                  <Tooltip
+                    formatter={(v, n) =>
+                      ['attach_rate','ttp_rate','activation_rate'].includes(n)
+                        ? [fmtPct(v), n]
+                        : [fmtNum(v), n]
+                    }
+                    labelFormatter={fmtDateLabel}
+                    contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
+                  />
+                  <Legend wrapperStyle={{ fontSize:12 }} />
+                  <Bar  yAxisId="orders" dataKey="air_orders"      name="Air Orders"      fill="#6366f1" radius={[2,2,0,0]} />
+                  <Line yAxisId="rates"  dataKey="attach_rate"     name="Attach Rate"     stroke="#14b8a6" strokeWidth={2} dot={false} />
+                  <Line yAxisId="rates"  dataKey="ttp_rate"        name="TTP Rate"        stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  <Line yAxisId="rates"  dataKey="activation_rate" name="Activation Rate" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </Card>
+          </div>
+
+          {/* ── Row 2: tier mix bar + status pie ── */}
+          <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16, marginBottom:16 }}>
+            <Card title="Subscriber Tier Mix" subtitle="Active / Cancelled / Paused per tier">
+              {tierData.length === 0 ? <Empty msg="No tier data" /> : (
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={tierData} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="label" tick={{ fontSize:11 }} stroke="var(--border2)" />
+                    <YAxis tick={{ fontSize:11 }} stroke="var(--border2)" width={50} />
+                    <Tooltip formatter={(v, n) => [fmtNum(v), n]}
+                      contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
+                    <Legend wrapperStyle={{ fontSize:12 }} />
+                    <Bar dataKey="active"    name="Active"    stackId="s" fill="#22c55e" />
+                    <Bar dataKey="cancelled" name="Cancelled" stackId="s" fill="#ef4444" />
+                    <Bar dataKey="paused"    name="Paused"    stackId="s" fill="#f59e0b" />
+                  </BarChart>
+                </ResponsiveContainer>
+              )}
+            </Card>
+
+            <Card title="Subscriber Status">
+              {statusData.length === 0 ? <Empty msg="No status data" /> : (
+                <ResponsiveContainer width="100%" height={260}>
+                  <PieChart>
+                    <Pie data={statusData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={90} paddingAngle={2}>
+                      {statusData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
+                    </Pie>
+                    <Tooltip
+                      formatter={(v, n) => [fmtNum(v), n]}
+                      contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
+                    />
+                    <Legend verticalAlign="bottom" wrapperStyle={{ fontSize:11 }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </Card>
+          </div>
+
+          {/* ── Row 3: revenue composition stacked bar ── */}
+          <Card title="Revenue Composition (Tag + Sub + Rebill)" style={{ marginBottom:16 }}>
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
+                <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={70} stroke="var(--border2)" />
+                <Tooltip
+                  formatter={(v, n) => [fmt$(v), n]}
+                  labelFormatter={fmtDateLabel}
+                  contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
+                />
+                <Legend wrapperStyle={{ fontSize:12 }} />
+                <Bar dataKey="tag_net_sales"  name="Tag (Hardware)"   stackId="rev" fill="#22c55e" />
+                <Bar dataKey="sub_net_sales"  name="New Subscriptions" stackId="rev" fill="#6366f1" />
+                <Bar dataKey="rebill_revenue" name="Rebills"           stackId="rev" fill="#f59e0b" />
+              </BarChart>
+            </ResponsiveContainer>
+          </Card>
+
+          {/* ── NOBL Air ad attribution ── */}
+          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Exact NOBL Air orders from Triple Whale order-level attribution" style={{ marginBottom:16 }}>
+            {airAttr?.error ? (
+              <div style={{ color:'var(--danger)', fontSize:13 }}>NOBL Air ad attribution unavailable: {airAttr.error}</div>
+            ) : airAttrRows.length === 0 ? <Empty msg="No NOBL Air ad attribution data yet. Run tw_air_attribution sync for this date range." /> : (
+              <>
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
+                  <KpiCard label="Air Orders" value={fmtNum(airAttr.totals?.air_orders || 0)} />
+                  <KpiCard label="Attributed Air Orders" value={fmtNum(airAttr.totals?.attributed_air_orders || 0)} />
+                  <KpiCard label="Attributed Air Revenue" value={fmt$(airAttr.totals?.attributed_air_revenue || 0)} />
+                </div>
+
+                <ResponsiveContainer width="100%" height={320}>
+                  <ComposedChart data={airAttrChartRows} margin={{ top:4, right:16, left:0, bottom:72 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="chart_label" tick={{ fontSize:10 }} stroke="var(--border2)" angle={-30} textAnchor="end" interval={0} height={72} />
+                    <YAxis yAxisId="orders" tick={{ fontSize:11 }} width={56} stroke="var(--border2)" />
+                    <YAxis yAxisId="revenue" orientation="right" tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+                    <Tooltip
+                      formatter={(v, n) => n === 'Attributed Air Revenue' ? [fmt$(v), n] : [fmtNum(v), n]}
+                      contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
+                    />
+                    <Legend wrapperStyle={{ fontSize:12 }} />
+                    <Bar yAxisId="orders" dataKey="attributed_air_orders" name="Attributed Air Orders" fill="#1877f2" radius={[2,2,0,0]} />
+                    <Line yAxisId="revenue" dataKey="attributed_air_revenue" name="Attributed Air Revenue" stroke="#22c55e" strokeWidth={2} dot={{ r:3 }} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+
+                <SheetTable
+                  headers={AIR_ATTR_HEADERS}
+                  rows={airAttrRows}
+                  keyField="_ad"
+                  maxHeight="520px"
+                  defaultSortField="Attributed Air Orders"
+                  defaultSortDir="desc"
+                />
+              </>
+            )}
+          </Card>
+
+          {/* ── Daily detail table ── */}
+          <Card title="Daily Detail" subtitle="Mirrors the technical doc's Daily Input tab">
+            <SheetTable
+              headers={HEADERS}
+              rows={tableRows}
+              keyField="_date"
+              maxHeight="620px"
+              defaultSortField="Date"
+              defaultSortDir="desc"
+            />
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ────────────── helper components ────────────── */
+function Card({ title, subtitle, children, style }) {
+  return (
+    <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, ...style }}>
+      <div style={{ fontSize:14, fontWeight:700, marginBottom: subtitle ? 4 : 14 }}>{title}</div>
+      {subtitle && <div style={{ fontSize:11.5, color:'var(--text3)', marginBottom:14 }}>{subtitle}</div>}
+      {children}
+    </div>
+  );
+}
+
+function Empty({ msg }) {
+  return (
+    <div style={{ height:240, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', fontSize:12 }}>
+      {msg}
+    </div>
+  );
+}
+
+function Skeleton() {
+  return (
+    <div>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
+        {[...Array(8)].map((_, i) => (
+          <div key={i} style={{ height:80, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
+        ))}
+      </div>
+      <div style={{ height:260, borderRadius:12, background:'var(--bg2)', marginBottom:16, animation:'pulse 1.5s ease-in-out infinite' }} />
+      <div style={{ height:260, borderRadius:12, background:'var(--bg2)', marginBottom:16, animation:'pulse 1.5s ease-in-out infinite' }} />
+    </div>
+  );
+}
+
+function ErrorBox({ msg, onRetry }) {
+  return (
+    <div style={{ textAlign:'center', padding:'40px 0' }}>
+      <div style={{ color:'var(--danger)', marginBottom:12, fontSize:14 }}>Failed to load: {msg}</div>
+      <button
+        onClick={onRetry}
+        style={{ padding:'8px 20px', background:'var(--accent)', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontWeight:600 }}
+      >
+        Retry
+      </button>
+    </div>
+  );
+}

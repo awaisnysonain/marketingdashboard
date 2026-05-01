@@ -132,19 +132,10 @@ function extractDailyMap(metrics, metricId, baseYear) {
  */
 async function refreshSummary(brand, startDate, endDate) {
   const { pgRun } = require('../db/postgres');
+  const { brandCreds } = require('./twSqlApi');
   const errors = [];
 
-  const shopDomain = brand === 'NOBL'
-    ? process.env.NOBL_TW_SHOP_ID
-    : brand === 'FLO_EU'
-      ? process.env.FLO_EU_TW_SHOP_ID
-      : process.env.FLO_TW_SHOP_ID;
-
-  const apiKey = brand === 'NOBL'
-    ? process.env.NOBL_TW_API_KEY
-    : brand === 'FLO_EU'
-      ? process.env.FLO_EU_TW_API_KEY
-      : process.env.FLO_TW_API_KEY;
+  const { shopId: shopDomain, apiKey } = brandCreds(brand);
 
   console.log(`[TW] Refreshing ${brand} summary ${startDate} → ${endDate}`);
 
@@ -267,14 +258,21 @@ async function refreshSummary(brand, startDate, endDate) {
           updated_at                = NOW()
       `, [
         brand, date,
-        parseFloat(twAttrRev.toFixed(4)),      // $3  total_revenue  (TW pixel-attributed)
-        parseFloat(orderRevenue.toFixed(4)),   // $4  order_revenue  (blendedSales — canonical)
+        // total_revenue ← CANONICAL Shopify+Amazon revenue (blendedSales).
+        // Previously stored TW's pixel-attributed `sales` metric here, which does NOT
+        // match the TW UI and double-counts via attribution. Per the technical doc,
+        // blendedSales (= order_revenue) is the truth for revenue KPIs.
+        parseFloat(orderRevenue.toFixed(4)),   // $3  total_revenue  (= Shopify + Amazon)
+        parseFloat(orderRevenue.toFixed(4)),   // $4  order_revenue  (same — kept for clarity)
         parseFloat(shopifyRev.toFixed(4)),     // $5  shopify_revenue
         parseFloat(amazonRev.toFixed(4)),      // $6  amazon_revenue
-        parseFloat(totalSales.toFixed(4)),     // $7  total_sales
+        parseFloat(totalSales.toFixed(4)),     // $7  total_sales (post-refunds, NET)
         parseFloat(refundAmt.toFixed(4)),      // $8  refund_amount
-        parseFloat(totalSpend.toFixed(4)),     // $9  total_spend
-        mer != null ? parseFloat(mer.toFixed(6)) : null, // $10 mer
+        parseFloat(totalSpend.toFixed(4)),     // $9  total_spend (blendedAds)
+        // Recompute MER off the canonical numbers so it matches the UI even if TW's MER lags
+        (totalSpend > 0)
+          ? parseFloat((orderRevenue / totalSpend).toFixed(6))
+          : (mer != null ? parseFloat(mer.toFixed(6)) : null),  // $10 mer
         Math.round(totalOrders),               // $11 total_orders
         Math.round(ncOrders),                  // $12 new_customer_orders
         Math.round(rcOrders),                  // $13 returning_customer_orders

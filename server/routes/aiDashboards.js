@@ -3,73 +3,102 @@ const router = express.Router();
 const { pgQuery } = require('../db/postgres');
 
 // ── Schema context string for AI prompts ──────────────────────────
+// IMPORTANT: this MUST match the actual PG schema. Verified 2026-05-01.
 const SCHEMA_CONTEXT = `
-AVAILABLE DATABASE TABLES (PostgreSQL):
+AVAILABLE DATABASE TABLES (PostgreSQL — these are the EXACT names; do NOT invent variants):
 
-1. nobl_brand_tw_summary_daily — NOBL Air daily brand totals
-   Columns: date, brand, total_revenue, total_spend, mer, total_orders, new_customer_orders, returning_customer_orders
-   NOTE: mer = total_revenue / total_spend (already computed by TW)
-   NOTE: total_orders = new_customer_orders + returning_customer_orders
+1. tw_summary_daily — Daily totals per brand (brand-level rollup, both NOBL and FLO)
+   Columns: date, brand ('NOBL'|'FLO'), total_revenue, total_spend, mer, total_orders,
+            new_customer_orders, returning_customer_orders, order_revenue,
+            shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
+   NOTE: ALWAYS filter by brand. NOBL includes EU automatically.
 
-2. flo_brand_tw_summary_daily — Pilates FLO daily brand totals
-   Columns: date, brand, total_revenue, total_spend, mer, total_orders, new_customer_orders, returning_customer_orders
-
-3. nobl_brand_tw_channel_daily — NOBL Air channel breakdown
-   Columns: date, brand, channel (META/GOOGLE/TIKTOK/SNAPCHAT/PINTEREST/APPLOVIN/BING/X),
+2. tw_channel_daily — Channel breakdown per brand per day
+   Columns: date, brand, channel ('META'|'GOOGLE'|'TIKTOK'|'SNAPCHAT'|'PINTEREST'|'APPLOVIN'|'BING'|'X'),
             spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d,
             new_cust_orders, cac, portable_cac, wooden_cac, metal_cac
+   NOTE: revenue_1d is multi-touch attributed; do NOT sum across channels for total revenue
+         (use tw_summary_daily.total_revenue for brand-level revenue truth).
 
-4. flo_brand_tw_channel_daily — FLO channel breakdown
-   Columns: same as nobl_brand_tw_channel_daily
+3. tw_store_summary_daily — Per-store rollup (NOBL_MAIN, FLO_MAIN, FLO_EU separately)
+   Columns: date, store_key, brand, total_revenue, total_spend, mer, total_orders, etc.
 
-5. nobl_brand_tw_geo_daily — NOBL Air geographic breakdown
-   Columns: date, brand, region (TOTAL/US/CA/AUS/DUBAI/EU), revenue_actual, spend_actual, mer
-
-6. flo_brand_tw_geo_daily — FLO geographic breakdown
-   Columns: same as nobl_brand_tw_geo_daily
-
-7. flo_brand_tw_product_daily — FLO product-line performance
-   Columns: date, brand, product_line (portable/wooden/metal),
+4. tw_product_daily — FLO product-line breakdown ONLY (NOBL doesn't populate this)
+   Columns: date, brand, product_line ('portable'|'wooden'|'metal'),
             spend, new_cust_orders, revenue,
             meta_spend, google_spend, tiktok_spend, snap_spend,
             pinterest_spend, bing_spend, applovin_spend
+   NOTE: For NOBL product breakdown, use shopify_product_daily instead.
 
-8. nobl_air_sub_revenue_daily — NOBL Air subscription revenue
-   Columns: date, shopify_sub_gross, shopify_sub_disc, shopify_sub_refunds,
-            rebill_revenue, new_sub_revenue, sub_revenue_actual
+5. klaviyo_daily — Email/SMS marketing performance
+   Columns: date, brand, emails_sent, emails_opened, emails_clicked,
+            open_rate, click_rate, revenue
 
-9. appstle_subscriptions — individual subscriber records
-   Columns: id, appstle_id, created_at_appstle, total_successful_orders,
-            last_order_date, last_order_amount, status (active/cancelled/trialing/converted),
-            customer_name, customer_email, next_billing_date, activated_on, cancelled_on
+6. nobl_air_daily — NOBL Air subscription product daily metrics (mirrors the doc's "Daily Input")
+   Columns: date, total_orders, air_orders, paid_air_orders, zero_air_orders, rebill_orders,
+            same_day_cancels, attach_rate, ttp_rate, activation_rate,
+            tag_gross, tag_discounts, tag_net_sales, tag_refunds,
+            sub_gross, sub_discounts, sub_net_sales, sub_refunds,
+            rebill_revenue, new_sub_revenue,
+            combined_gross, combined_net_sales, combined_net_revenue,
+            new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+            rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119,
+            rebill_129, rebill_139, rebill_149, rebill_159
 
-COMPUTED METRICS (use in columns as SQL expressions with aliases):
-- MER:  "total_revenue / NULLIF(total_spend, 0) AS mer"  (only if mer not already in table)
-- AOV:  "total_revenue / NULLIF(total_orders, 0) AS aov" (summary tables)
-- NC%:  "new_customer_orders * 100.0 / NULLIF(total_orders, 0) AS nc_pct" (summary tables)
-- ROAS: "revenue_1d / NULLIF(spend_1d, 0) AS roas_1d"   (channel tables)
-- CAC:  "spend_1d / NULLIF(new_cust_orders, 0) AS cac"  (channel tables)
-- CVR:  "purchases_1d / NULLIF(new_cust_orders, 0) AS cvr" (channel tables)
-- AOV_CH: "revenue_1d / NULLIF(purchases_1d, 0) AS aov" (channel tables)
+7. nobl_air_subscribers — Individual NOBL Air subscriber records (one per Appstle contract)
+   Columns: appstle_id, customer_email, customer_name, order_name,
+            status ('active'|'cancelled'|'paused'|...), contract_amount (the tier $79/$99/...),
+            order_amount, billing_policy_interval, currency_code,
+            created_at, updated_at, starts_at, ends_at, next_billing_date, last_billing_date,
+            cancelled_on, is_mature, is_converted, is_same_day_cancel
 
-Date range: Data available from 2025-01-01. All amounts in USD.
+8. shopify_product_daily — Per-product daily aggregation (BOTH brands, from Shopify line items)
+   Columns: brand, date, product_title, sku_prefix, units_sold, order_count,
+            gross_revenue, discounts, net_revenue, refunds
+
+9. shopify_orders_raw — Per-order detail (use sparingly — 100K+ rows)
+   Columns: brand, store_key, order_id, order_name, created_at, date_key, customer_id,
+            customer_email, customer_name, total_price, subtotal_price, total_discounts,
+            shipping_country, shipping_state, financial_status, fulfillment_status,
+            has_air, has_luggage, is_rebill, has_paid_air, has_zero_air,
+            tag_gross, tag_discounts, tag_refunds, sub_gross, sub_discounts, sub_refunds
+
+COMPUTED METRICS (use as SQL expressions with aliases):
+- MER:        total_revenue / NULLIF(total_spend, 0) AS mer
+- AOV:        total_revenue / NULLIF(total_orders, 0) AS aov
+- NC%:        new_customer_orders * 100.0 / NULLIF(total_orders, 0) AS nc_pct
+- ROAS:       revenue_1d / NULLIF(spend_1d, 0) AS roas
+- CAC:        spend_1d / NULLIF(new_cust_orders, 0) AS cac
+- CVR:        purchases_1d / NULLIF(new_cust_orders, 0) AS cvr
+- Attach %:   attach_rate * 100 (already a fraction in nobl_air_daily)
+- TTP %:      ttp_rate * 100 (already a fraction in nobl_air_daily)
+- Activation: activation_rate * 100 (already a fraction)
+
+Data available from 2024-01-01. All amounts in USD. Today = ${new Date().toISOString().slice(0,10)}.
 `;
 
 // ── Dashboard generation system prompts ───────────────────────────
 function getClarifyPrompt(today) {
-  return `You are an AI dashboard builder for the Nysonian Marketing Hub (NOBL Air & Pilates FLO).
+  return `You are an AI dashboard builder for the Nysonian Marketing Hub (NOBL Travel + NOBL Air subscription, and Pilates FLO).
 
 Today's date is ${today}.
 
-When a user requests a dashboard, FIRST ask 2-4 short clarifying questions:
-1. Which brand: NOBL Air, Pilates FLO, or both?
-2. Time period: last 7/30/60/90 days, specific month, YTD, or custom dates?
-3. Key metrics: revenue, spend, MER, ROAS, channel breakdown, product breakdown, subscriptions?
-4. Any specific filter: single channel, region, product line?
+YOUR MOST IMPORTANT RULE: If the user's request already specifies the BRAND, TIME PERIOD, and a clear METRIC focus, generate the dashboard JSON IMMEDIATELY without asking any clarifying questions.
 
-Ask as a numbered list. Keep it short and friendly. Once you have their answers, say exactly:
+Examples of requests where you should generate immediately:
+- "show me META channel for NOBL last 30 days"  → brand=NOBL, time=30d, focus=META channel
+- "FLO product line breakdown this month"       → brand=FLO, time=current month, focus=product
+- "NOBL Air attach rate trend last 90 days"     → brand=NOBL Air, time=90d, focus=attach rate
+- "Compare revenue NOBL vs FLO YTD"             → both brands, time=YTD, focus=revenue
+- "TTP by tier"                                 → NOBL Air, default 90d, focus=TTP/tiers
+
+ONLY ask clarifying questions if the request is genuinely ambiguous (e.g. "show me a dashboard"
+with no brand or metric). When you do ask, ask ONLY the missing pieces — never ask things the
+user already specified.
+
+When generating, output exactly:
 "Got it! Generating your dashboard now..."
-Then output ONLY a valid JSON config (no markdown, no explanation) in this format:
+Then on a new line, output ONLY a valid JSON config (no markdown, no explanation, no code fences) in this format:
 
 {
   "title": "...",
@@ -150,29 +179,45 @@ Detail table:
 }
 
 RULES:
-- ONLY use columns that exist in the table you selected (see schema above)
-- Use COALESCE(SUM(...), 0) for all aggregated numeric KPI columns to avoid nulls
-- Use "DYNAMIC_TODAY" for end_date, "DYNAMIC_START" for default start (30 days ago)
-- For specific periods like "April 2026", use "2026-04-01" / "2026-04-30"
-- For channel tables: spend column is "spend_1d", revenue is "revenue_1d"
-- For summary tables: spend column is "total_spend", revenue is "total_revenue"
-- Use field aliases that EXACTLY match the "field" in items/series/columns arrays
-- Include 3–5 sections. Always include at least one KPI row and one chart
-- Respond ONLY with the JSON when generating (no markdown, no text before/after)
-- Colors: NOBL=#3b5bdb, FLO=#2f9e6c, META=#1877f2, GOOGLE=#ea4335, TIKTOK=#000000, SNAPCHAT=#f59e0b`;
+- Use ONLY the EXACT table names from the schema above (tw_summary_daily, tw_channel_daily,
+  tw_product_daily, klaviyo_daily, nobl_air_daily, nobl_air_subscribers,
+  shopify_product_daily, shopify_orders_raw, tw_store_summary_daily).
+  Never invent variants like "nobl_brand_*" or "flo_brand_*" — those don't exist.
+- For brand filtering, add { "brand": "NOBL" } or { "brand": "FLO" } in filters.
+- Use COALESCE(SUM(...), 0) for aggregated numeric KPI columns to avoid nulls.
+- Use "DYNAMIC_TODAY" for end_date, "DYNAMIC_START" for default start (30 days ago),
+  or specific ISO dates ("2026-04-01"/"2026-04-30") for fixed periods.
+- For channel tables: spend column = "spend_1d", revenue (attributed) = "revenue_1d"
+- For summary tables: spend = "total_spend", revenue = "total_revenue"
+- For NOBL Air metrics: use nobl_air_daily (no brand filter — that table is NOBL Air only).
+- Use field aliases that EXACTLY match the "field" in items/series/columns arrays.
+- Include 3–5 sections. Always include at least one KPI row and one chart.
+- Respond ONLY with the JSON when generating (no markdown, no text before/after the JSON).
+
+CHANNEL/BRAND COLORS:
+- NOBL=#3b5bdb, FLO=#2f9e6c
+- META=#1877f2, GOOGLE=#ea4335, TIKTOK=#000000, SNAPCHAT=#f59e0b
+- APPLOVIN=#9333ea, BING=#0ea5e9, PINTEREST=#e60023, X=#1f2937
+
+COMMON PATTERNS:
+- "META for NOBL 30d"  → table=tw_channel_daily, filters={brand:'NOBL', channel:'META', start:DYNAMIC_START}
+- "NOBL Air attach"    → table=nobl_air_daily, columns=[date, attach_rate]
+- "TTP by tier"        → table=nobl_air_subscribers, group by contract_amount, compute is_converted/is_mature ratio
+- "Top NOBL products"  → table=shopify_product_daily, filters={brand:'NOBL'}, group by product_title`;
 }
 
 // ── Allowed tables and their allowed columns ──────────────────────
+// Only real tables in PG. AI's selection is constrained to this map.
 const ALLOWED_TABLES = {
-  nobl_brand_tw_summary_daily:  ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders'],
-  flo_brand_tw_summary_daily:   ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders'],
-  nobl_brand_tw_channel_daily:  ['date','brand','channel','spend_1d','revenue_1d','purchases_1d','roas_1d','spend_7d','new_cust_orders','cac','portable_cac','wooden_cac','metal_cac'],
-  flo_brand_tw_channel_daily:   ['date','brand','channel','spend_1d','revenue_1d','purchases_1d','roas_1d','spend_7d','new_cust_orders','cac','portable_cac','wooden_cac','metal_cac'],
-  nobl_brand_tw_geo_daily:      ['date','brand','region','revenue_actual','spend_actual','mer'],
-  flo_brand_tw_geo_daily:       ['date','brand','region','revenue_actual','spend_actual','mer'],
-  flo_brand_tw_product_daily:   ['date','brand','product_line','spend','new_cust_orders','revenue','meta_spend','google_spend','tiktok_spend','snap_spend','pinterest_spend','bing_spend','applovin_spend'],
-  nobl_air_sub_revenue_daily:   ['date','shopify_sub_gross','shopify_sub_disc','shopify_sub_refunds','rebill_revenue','new_sub_revenue','sub_revenue_actual'],
-  appstle_subscriptions:        ['id','appstle_id','created_at_appstle','total_successful_orders','last_order_date','last_order_amount','status','customer_name','customer_email','next_billing_date','activated_on','cancelled_on'],
+  tw_summary_daily:        ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders','order_revenue','shopify_revenue','amazon_revenue','total_sales','refund_amount','refund_count'],
+  tw_channel_daily:        ['date','brand','channel','spend_1d','revenue_1d','purchases_1d','roas_1d','spend_7d','new_cust_orders','cac','portable_cac','wooden_cac','metal_cac'],
+  tw_store_summary_daily:  ['date','store_key','brand','total_revenue','total_spend','mer','total_orders'],
+  tw_product_daily:        ['date','brand','product_line','spend','new_cust_orders','revenue','meta_spend','google_spend','tiktok_spend','snap_spend','pinterest_spend','bing_spend','applovin_spend'],
+  klaviyo_daily:           ['date','brand','emails_sent','emails_opened','emails_clicked','open_rate','click_rate','revenue'],
+  nobl_air_daily:          ['date','total_orders','air_orders','paid_air_orders','zero_air_orders','rebill_orders','same_day_cancels','attach_rate','ttp_rate','activation_rate','tag_gross','tag_discounts','tag_net_sales','tag_refunds','sub_gross','sub_discounts','sub_net_sales','sub_refunds','rebill_revenue','new_sub_revenue','combined_gross','combined_net_sales','combined_net_revenue','new_49','new_79','new_89','new_99','new_109','new_119','new_129','new_139','new_149','new_159','rebill_49','rebill_79','rebill_89','rebill_99','rebill_109','rebill_119','rebill_129','rebill_139','rebill_149','rebill_159'],
+  nobl_air_subscribers:    ['appstle_id','customer_email','customer_name','order_name','status','contract_amount','order_amount','billing_policy_interval','currency_code','created_at','updated_at','starts_at','ends_at','next_billing_date','last_billing_date','cancelled_on','is_mature','is_converted','is_same_day_cancel'],
+  shopify_product_daily:   ['brand','date','product_title','sku_prefix','units_sold','order_count','gross_revenue','discounts','net_revenue','refunds'],
+  shopify_orders_raw:      ['brand','store_key','order_id','order_name','created_at','date_key','customer_id','customer_email','customer_name','total_price','subtotal_price','total_discounts','total_tax','shipping_country','shipping_state','shipping_city','financial_status','fulfillment_status','has_air','has_luggage','is_rebill','has_paid_air','has_zero_air','tag_gross','tag_discounts','tag_refunds','sub_gross','sub_discounts','sub_refunds'],
 };
 
 function validateTable(name) {
@@ -326,11 +371,21 @@ function buildSectionQuery(query, defaultWindowDays = 30) {
   // ── Build SQL ────────────────────────────────────────────────────
   let sql = `SELECT ${processedCols.join(', ')} FROM "${table}"`;
 
+  // Determine the right date column per table
+  // Most tables use `date`. Exceptions:
+  //   - shopify_orders_raw: date_key (DATE) or created_at (TIMESTAMPTZ)
+  //   - nobl_air_subscribers: created_at (TIMESTAMPTZ)
+  let dateCol = 'date';
+  if (table === 'shopify_orders_raw') dateCol = 'date_key';
+  else if (table === 'nobl_air_subscribers') dateCol = 'DATE(created_at)';
+
   // WHERE
   const whereParts = [];
-  if (filters.start_date) { whereParts.push(`date >= $${paramIdx++}`); params.push(filters.start_date); }
-  if (filters.end_date)   { whereParts.push(`date <= $${paramIdx++}`); params.push(filters.end_date);   }
-  if (filters.brand)      { whereParts.push(`brand = $${paramIdx++}`); params.push(filters.brand);      }
+  if (filters.start_date) { whereParts.push(`${dateCol} >= $${paramIdx++}`); params.push(filters.start_date); }
+  if (filters.end_date)   { whereParts.push(`${dateCol} <= $${paramIdx++}`); params.push(filters.end_date);   }
+  if (filters.brand && (ALLOWED_TABLES[table] || []).includes('brand')) {
+    whereParts.push(`brand = $${paramIdx++}`); params.push(filters.brand);
+  }
   if (filters.channel) {
     if (Array.isArray(filters.channel)) {
       whereParts.push(`channel = ANY($${paramIdx++})`); params.push(filters.channel);

@@ -44,6 +44,23 @@ function expandRect(a, b) {
   };
 }
 
+function defaultColWidth(header) {
+  const h = String(header).toLowerCase();
+  if (h.includes('campaign')) return 240;
+  if (h.includes('ad set')) return 220;
+  if (h === 'ad' || h.includes('ad name')) return 260;
+  if (h.includes('revenue') || h.includes('spend') || h.includes('cac') || h.includes('cpc') || h.includes('cpm')) return 120;
+  if (h.includes('roas') || h.includes('ctr') || h.includes('rate')) return 90;
+  if (h.includes('orders') || h.includes('purchases') || h.includes('clicks') || h.includes('impressions')) return 120;
+  if (h.includes('date')) return 110;
+  return 160;
+}
+
+function isDateSortColumn(header) {
+  const h = String(header || '').trim().toLowerCase();
+  return h === 'date' || h === 'day' || h.endsWith(' date') || h.includes('created at') || h.includes('updated at');
+}
+
 // ─── component ───────────────────────────────────────────────────────────────
 export default function SheetTable({
   headers = [],            // string[] — visible column names
@@ -59,17 +76,43 @@ export default function SheetTable({
 }) {
   // ── search & sort
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState(defaultSortField);
+  const [sortBy, setSortBy] = useState(() => isDateSortColumn(defaultSortField) ? defaultSortField : null);
   const [sortDir, setSortDir] = useState(defaultSortDir);
 
   // ── cell selection state
   const [sel, setSel] = useState(new Set());        // Set of "r:c" keys
   const [anchor, setAnchor] = useState(null);       // { r, c }
   const [dragging, setDragging] = useState(false);
+  const [colWidths, setColWidths] = useState({});
   const dragStart = useRef(null);
+  const resizeRef = useRef(null);
 
   // ref to table div for copy-to-clipboard
   const tableRef = useRef(null);
+
+  useEffect(() => {
+    setColWidths(prev => {
+      const next = {};
+      for (const h of headers) next[h] = prev[h] || defaultColWidth(h);
+      return next;
+    });
+  }, [headers]);
+
+  useEffect(() => {
+    function onMove(e) {
+      const resize = resizeRef.current;
+      if (!resize) return;
+      const width = Math.max(70, resize.startWidth + e.clientX - resize.startX);
+      setColWidths(prev => ({ ...prev, [resize.header]: width }));
+    }
+    function onUp() { resizeRef.current = null; }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+  }, []);
 
   // ── filter
   const filtered = search
@@ -88,6 +131,7 @@ export default function SheetTable({
     : filtered;
 
   function handleSort(h) {
+    if (!isDateSortColumn(h)) return;
     if (sortBy === h) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortBy(h); setSortDir('asc'); }
   }
@@ -171,6 +215,16 @@ export default function SheetTable({
   }
 
   function handleMouseUp() { setDragging(false); }
+
+  function startColumnResize(e, header) {
+    e.preventDefault();
+    e.stopPropagation();
+    resizeRef.current = {
+      header,
+      startX: e.clientX,
+      startWidth: colWidths[header] || defaultColWidth(header),
+    };
+  }
 
   // ── Ctrl+C copy
   useEffect(() => {
@@ -293,7 +347,11 @@ export default function SheetTable({
           background: 'var(--bg2)',
         }}
       >
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'auto' }}>
+        <table style={{ width: 'max-content', minWidth: '100%', borderCollapse: 'collapse', fontSize: 12, tableLayout: 'fixed' }}>
+          <colgroup>
+            <col style={{ width: 36 }} />
+            {headers.map(h => <col key={h} style={{ width: colWidths[h] || defaultColWidth(h) }} />)}
+          </colgroup>
           {/* HEAD */}
           <thead>
             <tr style={{ background: 'var(--bg3)', position: 'sticky', top: 0, zIndex: 3 }}>
@@ -326,14 +384,29 @@ export default function SheetTable({
                       color: allColSel ? '#fff' : isSort ? 'var(--text)' : 'var(--text3)',
                       background: allColSel ? 'var(--accent)' : someColSel ? 'var(--accent-soft)' : undefined,
                       whiteSpace: 'nowrap', cursor: 'pointer',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
                       letterSpacing: '.01em',
+                      width: colWidths[h] || defaultColWidth(h),
+                      maxWidth: colWidths[h] || defaultColWidth(h),
                       position: stickyFirstCol && ci === 0 ? 'sticky' : undefined,
                       left: stickyFirstCol && ci === 0 ? 36 : undefined,
                       zIndex: stickyFirstCol && ci === 0 ? 3 : undefined,
                     }}
                   >
-                    {h}
-                    {isSort && <span style={{ marginLeft: 4, fontSize: 9, opacity: .6 }}>{sortDir === 'asc' ? '▲' : '▼'}</span>}
+                    <span style={{ display:'block', overflow:'hidden', textOverflow:'ellipsis', paddingRight:10 }}>
+                      {h}
+                    </span>
+                    <span
+                      onMouseDown={e => startColumnResize(e, h)}
+                      onClick={e => e.stopPropagation()}
+                      title="Drag to resize column"
+                      style={{
+                        position:'absolute', top:0, right:-3, width:8, height:'100%', cursor:'col-resize', zIndex:5,
+                        borderRight:'1px solid transparent',
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.borderRightColor = 'var(--accent)'; }}
+                      onMouseLeave={e => { e.currentTarget.style.borderRightColor = 'transparent'; }}
+                    />
                   </th>
                 );
               })}
@@ -399,6 +472,10 @@ export default function SheetTable({
                           textAlign: num ? 'right' : 'left',
                           fontFamily: num ? 'var(--font-mono)' : 'var(--font-body)',
                           whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          width: colWidths[h] || defaultColWidth(h),
+                          maxWidth: colWidths[h] || defaultColWidth(h),
                           fontSize: compact ? 11 : 12,
                           cursor: 'cell',
                           position: 'relative',
@@ -428,7 +505,7 @@ export default function SheetTable({
 
       {/* ── keyboard hint ── */}
       <div style={{ fontSize: 10, color: 'var(--text4)' }}>
-        Click to select · Shift+click range · Ctrl+click multi · Drag to paint · Ctrl+C copy
+        Click to select · Shift+click range · Ctrl+click multi · Drag column edge to resize · Ctrl+C copy
       </div>
     </div>
   );

@@ -32,6 +32,18 @@ function toDateStr(d) {
   return String(d).slice(0, 10);
 }
 
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function chunksOf(items, size) {
+  const chunks = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
 /**
  * Map TW platform names → our channel keys
  */
@@ -109,7 +121,7 @@ async function syncTWChannels(brand, startDate, endDate) {
     ORDER BY date, platform
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWChannels ${brand}: no rows for ${startDate}→${endDate}`);
     return { rows: 0, errors };
@@ -175,7 +187,7 @@ async function syncTWGeo(brand, startDate, endDate) {
     ORDER BY date, country
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWGeo ${brand}: no rows for ${startDate}→${endDate}`);
     return { rows: 0, errors };
@@ -244,50 +256,74 @@ async function syncTWGeo(brand, startDate, endDate) {
 async function syncTWAds(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
-  const dr = chDateRange('date', startDate, endDate);
+  const dr = chDateRange('event_date', startDate, endDate);
 
   const sql = `
     SELECT
-      date,
-      platform,
-      campaign_id,
-      campaign_name,
-      adset_id,
-      adset_name,
-      ad_id,
-      ad_name,
-      SUM(impressions)   AS impressions,
-      SUM(clicks)        AS clicks,
-      SUM(spend)         AS spend,
-      SUM(purchases)     AS purchases,
-      SUM(revenue)       AS revenue,
-      SUM(link_clicks)   AS link_clicks,
-      SUM(add_to_cart)   AS add_to_cart,
-      SUM(initiate_checkout) AS initiate_checkout
-    FROM ads_table
+      pjt.event_date AS date,
+      pjt.channel AS platform,
+      pjt.campaign_id,
+      pjt.campaign_name,
+      pjt.adset_id,
+      pjt.adset_name,
+      pjt.ad_id,
+      pjt.ad_name,
+      SUM(pjt.impressions)          AS impressions,
+      SUM(pjt.clicks)               AS clicks,
+      SUM(pjt.spend)                AS spend,
+      SUM(pjt.orders_quantity)      AS purchases,
+      SUM(pjt.order_revenue)        AS revenue,
+      SUM(pjt.outbound_clicks)      AS link_clicks,
+      SUM(pjt.add_to_carts)         AS add_to_cart,
+      SUM(pjt.checkouts)            AS initiate_checkout
+    FROM pixel_joined_tvf() AS pjt
     WHERE ${dr}
-      AND spend > 0
-    GROUP BY date, platform, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name
-    ORDER BY date DESC, spend DESC
+      AND pjt.channel = 'facebook-ads'
+      AND pjt.model = 'Triple Attribution'
+      AND pjt.attribution_window = '1_day'
+    GROUP BY pjt.event_date, pjt.channel, pjt.campaign_id, pjt.campaign_name, pjt.adset_id, pjt.adset_name, pjt.ad_id, pjt.ad_name
+    HAVING SUM(pjt.spend) > 0
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWAds ${brand}: no rows`);
     return { rows: 0, errors };
   }
 
-  for (const r of rows) {
-    const date     = toDateStr(r.date);
-    const platform = normalizePlatform(r.platform);
-    const adId     = String(r.ad_id || `${r.campaign_id}_${r.adset_id}_${r.date}`);
+  for (const batch of chunksOf(rows, 500)) {
+    const values = [];
+    const params = [];
+    let p = 1;
+
+    for (const r of batch) {
+      const date     = toDateStr(r.date);
+      const platform = normalizePlatform(r.platform);
+      const adId     = String(r.ad_id || `${r.campaign_id}_${r.adset_id}_${r.date}`);
+      values.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+      params.push(
+        brand, date, platform,
+        String(r.campaign_id || ''), String(r.campaign_name || ''),
+        String(r.adset_id    || ''), String(r.adset_name    || ''),
+        adId, String(r.ad_name || ''),
+        parseInt(r.impressions       || 0),
+        parseInt(r.clicks            || 0),
+        parseFloat(r.spend           || 0),
+        parseInt(r.purchases         || 0),
+        parseFloat(r.revenue         || 0),
+        parseInt(r.link_clicks       || 0),
+        parseInt(r.add_to_cart       || 0),
+        parseInt(r.initiate_checkout || 0),
+      );
+    }
+
     try {
       await pgRun(`
         INSERT INTO tw_ads_daily
           (brand, date, platform, campaign_id, campaign_name, adset_id, adset_name,
            ad_id, ad_name, impressions, clicks, spend, purchases, revenue,
            link_clicks, add_to_cart, initiate_checkout)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+        VALUES ${values.join(', ')}
         ON CONFLICT (brand, date, platform, ad_id) DO UPDATE SET
           campaign_name      = EXCLUDED.campaign_name,
           adset_name         = EXCLUDED.adset_name,
@@ -301,27 +337,137 @@ async function syncTWAds(brand, startDate, endDate) {
           add_to_cart        = EXCLUDED.add_to_cart,
           initiate_checkout  = EXCLUDED.initiate_checkout,
           updated_at         = NOW()
-      `, [
-        brand, date, platform,
-        String(r.campaign_id || ''), String(r.campaign_name || ''),
-        String(r.adset_id    || ''), String(r.adset_name    || ''),
-        adId, String(r.ad_name || ''),
-        parseInt(r.impressions       || 0),
-        parseInt(r.clicks            || 0),
-        parseFloat(r.spend           || 0),
-        parseInt(r.purchases         || 0),
-        parseFloat(r.revenue         || 0),
-        parseInt(r.link_clicks       || 0),
-        parseInt(r.add_to_cart       || 0),
-        parseInt(r.initiate_checkout || 0),
-      ]);
-      written++;
+      `, params);
+      written += batch.length;
     } catch (e) {
-      errors.push(`ads ${brand}/${date}/${platform}/${adId}: ${e.message}`);
+      errors.push(`ads ${brand}: ${e.message}`);
     }
   }
 
   console.log(`[twFullSync] syncTWAds ${brand}: ${written} rows upserted`);
+  return { rows: written, errors };
+}
+
+async function ensureTWAirAttributionTable() {
+  await pgRun(`
+    CREATE TABLE IF NOT EXISTS tw_air_order_attribution (
+      id                 BIGSERIAL PRIMARY KEY,
+      brand              TEXT        NOT NULL,
+      date               DATE        NOT NULL,
+      order_id           TEXT        NOT NULL,
+      order_name         TEXT,
+      channel            TEXT        NOT NULL,
+      model              TEXT        NOT NULL,
+      attribution_window TEXT        NOT NULL,
+      campaign_id        TEXT        NOT NULL DEFAULT '',
+      campaign_name      TEXT,
+      adset_id           TEXT        NOT NULL DEFAULT '',
+      adset_name         TEXT,
+      ad_id              TEXT        NOT NULL DEFAULT '',
+      ad_name            TEXT,
+      linear_weight      NUMERIC(14,6) DEFAULT 1,
+      order_revenue      NUMERIC(14,4) DEFAULT 0,
+      created_at         TIMESTAMPTZ DEFAULT NOW(),
+      updated_at         TIMESTAMPTZ DEFAULT NOW(),
+      UNIQUE (brand, order_id, channel, model, attribution_window, campaign_id, adset_id, ad_id)
+    )
+  `);
+  await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_brand_date ON tw_air_order_attribution (brand, date DESC)`);
+  await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_channel ON tw_air_order_attribution (brand, channel, date DESC)`);
+  await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_adset ON tw_air_order_attribution (brand, adset_id, date DESC)`);
+}
+
+async function syncTWAirOrderAttribution(brand, startDate, endDate) {
+  const errors = [];
+  let written = 0;
+
+  if (brand !== 'NOBL') {
+    return { rows: 0, errors };
+  }
+
+  await ensureTWAirAttributionTable();
+
+  const sql = `
+    SELECT DISTINCT
+      event_date AS date,
+      order_id,
+      order_name,
+      channel,
+      model,
+      attribution_window,
+      campaign_id,
+      campaign_name,
+      adset_id,
+      adset_name,
+      ad_id,
+      ad_name,
+      linear_weight,
+      order_revenue
+    FROM pixel_orders_table ARRAY JOIN products_info AS pi
+    WHERE event_date >= toDate('${startDate}') AND event_date < toDate('${addDays(endDate, 1)}')
+      AND model = 'Triple Attribution'
+      AND attribution_window = '1_day'
+      AND lowerUTF8(tupleElement(pi, 'product_name')) LIKE '%nobl air%'
+  `;
+
+  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
+  if (!rows.length) {
+    console.log(`[twFullSync] syncTWAirOrderAttribution ${brand}: no rows`);
+    return { rows: 0, errors };
+  }
+
+  for (const batch of chunksOf(rows, 500)) {
+    const values = [];
+    const params = [];
+    let p = 1;
+
+    for (const r of batch) {
+      const date = toDateStr(r.date || r.event_date);
+      values.push(`($${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++},$${p++})`);
+      params.push(
+        brand,
+        date,
+        String(r.order_id || ''),
+        String(r.order_name || ''),
+        String(r.channel || ''),
+        String(r.model || ''),
+        String(r.attribution_window || ''),
+        String(r.campaign_id || ''),
+        String(r.campaign_name || ''),
+        String(r.adset_id || ''),
+        String(r.adset_name || ''),
+        String(r.ad_id || ''),
+        String(r.ad_name || ''),
+        parseFloat(r.linear_weight || 1),
+        parseFloat(r.order_revenue || 0),
+      );
+    }
+
+    try {
+      await pgRun(`
+        INSERT INTO tw_air_order_attribution
+          (brand, date, order_id, order_name, channel, model, attribution_window,
+           campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name,
+           linear_weight, order_revenue)
+        VALUES ${values.join(', ')}
+        ON CONFLICT (brand, order_id, channel, model, attribution_window, campaign_id, adset_id, ad_id)
+        DO UPDATE SET
+          date               = EXCLUDED.date,
+          order_name         = EXCLUDED.order_name,
+          campaign_name      = EXCLUDED.campaign_name,
+          adset_name         = EXCLUDED.adset_name,
+          ad_name            = EXCLUDED.ad_name,
+          linear_weight      = EXCLUDED.linear_weight,
+          order_revenue      = EXCLUDED.order_revenue,
+          updated_at         = NOW()
+      `, params);
+      written += batch.length;
+    } catch (e) {
+      errors.push(`air_attr ${brand}: ${e.message}`);
+    }
+  }
+
+  console.log(`[twFullSync] syncTWAirOrderAttribution ${brand}: ${written} rows upserted`);
   return { rows: written, errors };
 }
 
@@ -1018,6 +1164,7 @@ module.exports = {
   syncTWChannels,
   syncTWGeo,
   syncTWAds,
+  syncTWAirOrderAttribution,
   syncTWOrders,
   syncTWSessions,
   syncTWCustomers,

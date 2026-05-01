@@ -1,13 +1,18 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 
 const { pgQuery, pgRun } = require('../db/postgres');
-const { syncKlaviyoDaily } = require('./klaviyo');
-const { syncAppstleSubRevenue } = require('./appstle');
-const { refreshSummary } = require('./tripleWhale');
+const { syncKlaviyoDaily, getKlaviyoApiKey } = require('./klaviyo');
+const { syncNoblAirSubs } = require('./noblAirSubs'); // legacy — kept for backward compat
+const { syncShopifyOrders } = require('./shopifyOrders');
+const { syncAppstleContracts } = require('./appstleContracts');
+const { aggregateNoblAir, aggregateProductDaily } = require('./noblAirAggregate');
+// Use the new SQL-based TW ETL (matches Brad's queries — Triple Attribution + Amazon + EU)
+const { refreshSummary } = require('./tripleWhaleSQL');
 const {
   syncTWChannels,
   syncTWGeo,
   syncTWAds,
+  syncTWAirOrderAttribution,
   syncTWOrders,
   syncTWSessions,
   syncTWCustomers,
@@ -172,6 +177,11 @@ async function runSync(options = {}) {
   // ── Klaviyo ──────────────────────────────────────────────────────────────
   if (tasks.includes('klaviyo')) {
     for (const brand of brands) {
+      if (!getKlaviyoApiKey(brand)) {
+        console.warn(`[SyncEngine] Skipping Klaviyo ${brand}: missing ${String(brand).toUpperCase()}_KLAVIYO_API_KEY`);
+        continue;
+      }
+
       const chunks = weeklyChunks(startDate, endDate);
 
       for (const chunk of chunks) {
@@ -191,15 +201,16 @@ async function runSync(options = {}) {
     }
   }
 
-  // ── Appstle / Subscription Revenue ───────────────────────────────────────
+  // ── NOBL Air subscriptions (Shopify direct — replaces old Appstle/tag-filter ETL) ─
   if (tasks.includes('appstle')) {
     const chunks = weeklyChunks(startDate, endDate);
 
     for (const chunk of chunks) {
       const logId = await logStart(runId, 'NOBL', 'appstle', chunk.start, chunk.end);
       try {
-        const r = await syncAppstleSubRevenue(chunk.start, chunk.end);
-        await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+        const r = await syncNoblAirSubs(chunk.start, chunk.end);
+        const status = r.errors.length ? 'error' : 'success';
+        await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
         results.push({ task: 'appstle', brand: 'NOBL', chunk, rows: r.rows });
         if (r.errors.length) errors.push(...r.errors);
       } catch (e) {
@@ -294,6 +305,25 @@ async function runSync(options = {}) {
           errors.push(msg);
           await logFinish(logId, 'error', 0, e.message);
         }
+      }
+    }
+  }
+
+  // ── TW NOBL Air order-level attribution ──────────────────────────────────
+  if (tasks.includes('tw_air_attribution')) {
+    const chunks = weeklyChunks(startDate, endDate);
+    for (const chunk of chunks) {
+      const logId = await logStart(runId, 'NOBL', 'tw_air_attribution', chunk.start, chunk.end);
+      try {
+        const r = await syncTWAirOrderAttribution('NOBL', chunk.start, chunk.end);
+        await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+        results.push({ task: 'tw_air_attribution', brand: 'NOBL', chunk, rows: r.rows });
+        if (r.errors.length) errors.push(...r.errors);
+      } catch (e) {
+        const msg = `tw_air_attribution NOBL ${chunk.start}-${chunk.end}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
       }
     }
   }
@@ -455,6 +485,77 @@ async function runSync(options = {}) {
           errors.push(msg);
           await logFinish(logId, 'error', 0, e.message);
         }
+      }
+    }
+  }
+
+  // ── Shopify orders direct (NOBL + FLO) ──────────────────────────────
+  if (tasks.includes('shopify_orders')) {
+    const chunks = weeklyChunks(startDate, endDate);
+    for (const brand of brands) {
+      for (const chunk of chunks) {
+        const logId = await logStart(runId, brand, 'shopify_orders', chunk.start, chunk.end);
+        try {
+          const r = await syncShopifyOrders(brand, chunk.start, chunk.end);
+          const status = r.errors.length ? 'error' : 'success';
+          await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
+          results.push({ task: 'shopify_orders', brand, chunk, rows: r.rows });
+          if (r.errors.length) errors.push(...r.errors);
+        } catch (e) {
+          const msg = `shopify_orders ${brand} ${chunk.start}-${chunk.end}: ${e.message}`;
+          console.error('[SyncEngine]', msg);
+          errors.push(msg);
+          await logFinish(logId, 'error', 0, e.message);
+        }
+      }
+    }
+  }
+
+  // ── Appstle contracts (full sync, no chunking — gets all 18,775+) ────
+  if (tasks.includes('appstle_contracts')) {
+    const logId = await logStart(runId, 'NOBL', 'appstle_contracts', startDate, endDate);
+    try {
+      const r = await syncAppstleContracts();
+      const status = r.errors.length ? 'error' : 'success';
+      await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
+      results.push({ task: 'appstle_contracts', brand: 'NOBL', rows: r.rows });
+      if (r.errors.length) errors.push(...r.errors);
+    } catch (e) {
+      const msg = `appstle_contracts: ${e.message}`;
+      console.error('[SyncEngine]', msg);
+      errors.push(msg);
+      await logFinish(logId, 'error', 0, e.message);
+    }
+  }
+
+  // ── NOBL Air daily aggregation (re-runs SQL CTE over the range) ──────
+  if (tasks.includes('nobl_air_aggregate')) {
+    const logId = await logStart(runId, 'NOBL', 'nobl_air_aggregate', startDate, endDate);
+    try {
+      const r = await aggregateNoblAir(startDate, endDate);
+      await logFinish(logId, 'success', r.rows);
+      results.push({ task: 'nobl_air_aggregate', brand: 'NOBL', rows: r.rows });
+    } catch (e) {
+      const msg = `nobl_air_aggregate: ${e.message}`;
+      console.error('[SyncEngine]', msg);
+      errors.push(msg);
+      await logFinish(logId, 'error', 0, e.message);
+    }
+  }
+
+  // ── Product daily aggregation (NOBL + FLO from Shopify orders) ───────
+  if (tasks.includes('product_daily')) {
+    for (const brand of brands) {
+      const logId = await logStart(runId, brand, 'product_daily', startDate, endDate);
+      try {
+        const r = await aggregateProductDaily(brand, startDate, endDate);
+        await logFinish(logId, 'success', r.rows);
+        results.push({ task: 'product_daily', brand, rows: r.rows });
+      } catch (e) {
+        const msg = `product_daily ${brand}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
       }
     }
   }

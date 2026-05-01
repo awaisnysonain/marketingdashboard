@@ -6,6 +6,7 @@ import {
 import { getNoblSubs, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
+import SheetTable from '../components/SheetTable';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return toISO(d); }
@@ -16,6 +17,23 @@ function fmtDateLabel(s) {
 }
 
 const STATUS_COLORS = { active: 'var(--success)', cancelled: 'var(--danger)', trialing: 'var(--warn)', converted: '#6366f1' };
+
+const DAILY_HEADERS = [
+  'Date', 'Sub Gross', 'Sub Discounts', 'Sub Refunds', 'New Sub Revenue', 'Rebill Revenue', 'Total Sub Revenue',
+];
+
+function toDailyRow(r) {
+  return {
+    'Date': r.date,
+    'Sub Gross': r.shopify_sub_gross,
+    'Sub Discounts': r.shopify_sub_disc,
+    'Sub Refunds': r.shopify_sub_refunds,
+    'New Sub Revenue': r.new_sub_revenue,
+    'Rebill Revenue': r.rebill_revenue,
+    'Total Sub Revenue': r.sub_revenue_actual,
+    _date: r.date,
+  };
+}
 
 function SortTh({ label, field, sortBy, sortDir, onSort }) {
   return (
@@ -51,6 +69,7 @@ export default function SubsPage({ showToast }) {
 
   const daily = data?.daily || [];
   const summary = data?.summary || {};
+  const dailyRows = daily.map(toDailyRow);
 
   const rebillTotal = daily.reduce((s,r) => s + (r.rebill_revenue || 0), 0);
   const newSubTotal = daily.reduce((s,r) => s + (r.new_sub_revenue || 0), 0);
@@ -63,7 +82,7 @@ export default function SubsPage({ showToast }) {
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, fontFamily: 'var(--font-head)', color: '#8b5cf6' }}>Subscriptions</h1>
           <p style={{ fontSize: 13, color: 'var(--text3)', margin: '4px 0 0' }}>NOBL Air subscription program deep dive</p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
+        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="subs" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
@@ -130,6 +149,18 @@ export default function SubsPage({ showToast }) {
                 </BarChart>
               </ResponsiveContainer>
             </div>
+          </div>
+
+          <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
+            <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Subscription Detail</div>
+            <SheetTable
+              headers={DAILY_HEADERS}
+              rows={dailyRows}
+              keyField="_date"
+              maxHeight="560px"
+              defaultSortField="Date"
+              defaultSortDir="desc"
+            />
           </div>
         </>
       )}

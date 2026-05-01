@@ -17,6 +17,8 @@ import GenericDashPage   from './pages/GenericDashPage';
 import LivePage          from './pages/LivePage';
 import StoreNoblPage     from './pages/StoreNoblPage';
 import StoreFLOPage      from './pages/StoreFLOPage';
+import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
+import MetaAdsPage       from './pages/MetaAdsPage';
 
 function getInitialTheme() {
   try { return localStorage.getItem('nobl-theme') || 'dark'; } catch { return 'dark'; }
@@ -28,8 +30,10 @@ function getSidebarState() {
 const CORE_PAGE_MAP = {
   'Overview':      OverviewPage,
   'NOBL Air':      NoblPage,
+  'NOBL Air Performance': NoblAirPerformancePage,
   'Pilates FLO':   FloPage,
   'Channels':      ChannelsPage,
+  'Meta Ads':      MetaAdsPage,
   'Subscriptions': SubsPage,
   'Live Data':     LivePage,
   // Store pages — comprehensive per-store views with all daily data
@@ -151,6 +155,22 @@ export default function App() {
     showToast('Removed', 'info');
   }
 
+  function handleRenameDynamic(id, newLabel) {
+    setDynamicTabs(prev => prev.map(t => t.id === id ? { ...t, label: newLabel } : t));
+    showToast('Renamed', 'success');
+  }
+
+  function handleDuplicateDynamic(id) {
+    setDynamicTabs(prev => {
+      const orig = prev.find(t => t.id === id);
+      if (!orig) return prev;
+      const newId = orig.id + '_copy_' + Date.now();
+      const copy = { ...orig, id: newId, label: (orig.label || orig.id) + ' (copy)' };
+      return [...prev, copy];
+    });
+    showToast('Duplicated', 'success');
+  }
+
   if (appUser === undefined) return <Spinner />;
   if (!appUser) return <LoginPage onLogin={setAppUser} />;
 
@@ -179,6 +199,8 @@ export default function App() {
         dynamicTabs={dynamicTabs}
         onAddDashboard={handleAddDashboard}
         onDeleteDynamic={handleDeleteDynamic}
+        onRenameDynamic={handleRenameDynamic}
+        onDuplicateDynamic={handleDuplicateDynamic}
         collapsed={sidebarCollapsed}
         onCollapse={() => setSidebarCollapsed(c => !c)}
       />
@@ -204,6 +226,8 @@ export default function App() {
             key={`${activeTab}-${showSync}-${showAiBuilder}-${pageKey}`}
             style={{
               width: '100%',
+              maxWidth: showAiBuilder ? 'none' : 1600,
+              margin: showAiBuilder ? 0 : '0 auto',
               boxSizing: 'border-box',
               padding: showAiBuilder ? 0 : '20px 24px',
               flex: showAiBuilder ? 1 : undefined,

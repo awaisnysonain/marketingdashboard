@@ -145,7 +145,7 @@ export default function StoreNoblPage({ showToast }) {
             Complete store analytics · All regions incl. EU · {range.start} → {range.end}
           </p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
+        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="storenobl" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (

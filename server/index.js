@@ -10,8 +10,6 @@ process.on('unhandledRejection', (reason) => {
 
 const express = require('express');
 const session = require('express-session');
-const FileStore = require('session-file-store')(session);
-const { Database } = require('node-sqlite3-wasm');
 const path = require('path');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -19,9 +17,9 @@ const compression = require('compression');
 const OpenAI = require('openai').default;
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
-const fs = require('fs');
 
-const { pgRun, pgQuery } = require('./db/postgres');
+const { pool: pgPool, pgRun, pgQuery } = require('./db/postgres');
+const PgSession = require('connect-pg-simple')(session);
 const analyticsRouter = require('./routes/analytics');
 const { router: dashRouter, SCHEMA_CONTEXT, getClarifyPrompt } = require('./routes/aiDashboards');
 const syncStatusRouter = require('./routes/syncStatus');
@@ -73,47 +71,8 @@ const PORT = process.env.PORT || 3001;
 // Trust proxy so express-rate-limit works correctly behind the React dev server / nginx
 app.set('trust proxy', 1);
 
-// ── SQLite setup ────────────────────────────────────────────────
-const dbLockPath = path.join(__dirname, '../data/nobl.db.lock');
-if (fs.existsSync(dbLockPath)) {
-  try { fs.rmSync(dbLockPath, { recursive: true, force: true }); console.log('[DB] Removed stale lock file'); } catch(e) {}
-}
-const db = new Database(path.join(__dirname, '../data/nobl.db'));
-db.exec(`
-  CREATE TABLE IF NOT EXISTS annotations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tab TEXT NOT NULL, row_key TEXT NOT NULL,
-    metric TEXT DEFAULT '', note TEXT NOT NULL,
-    color TEXT DEFAULT 'yellow', author TEXT DEFAULT 'user',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE INDEX IF NOT EXISTS idx_ann_tab ON annotations(tab, row_key);
-
-  CREATE TABLE IF NOT EXISTS highlights (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    tab TEXT NOT NULL, row_key TEXT NOT NULL,
-    color TEXT DEFAULT 'yellow',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_hl_key ON highlights(tab, row_key);
-
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    name TEXT NOT NULL,
-    role TEXT DEFAULT 'viewer',
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    last_login DATETIME
-  );
-`);
+// App tables (users / annotations / highlights / settings / sessions) live in Postgres now —
+// see initPostgresTables() below. SQLite has been retired.
 
 // ── PostgreSQL table init ────────────────────────────────────────
 async function initPostgresTables() {
@@ -209,6 +168,33 @@ async function initPostgresTables() {
     `);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_brand_date    ON tw_ads_daily (brand, date DESC)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_brand_platform ON tw_ads_daily (brand, platform)`);
+
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS tw_air_order_attribution (
+        id                 BIGSERIAL PRIMARY KEY,
+        brand              TEXT        NOT NULL,
+        date               DATE        NOT NULL,
+        order_id           TEXT        NOT NULL,
+        order_name         TEXT,
+        channel            TEXT        NOT NULL,
+        model              TEXT        NOT NULL,
+        attribution_window TEXT        NOT NULL,
+        campaign_id        TEXT        NOT NULL DEFAULT '',
+        campaign_name      TEXT,
+        adset_id           TEXT        NOT NULL DEFAULT '',
+        adset_name         TEXT,
+        ad_id              TEXT        NOT NULL DEFAULT '',
+        ad_name            TEXT,
+        linear_weight      NUMERIC(14,6) DEFAULT 1,
+        order_revenue      NUMERIC(14,4) DEFAULT 0,
+        created_at         TIMESTAMPTZ DEFAULT NOW(),
+        updated_at         TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, order_id, channel, model, attribution_window, campaign_id, adset_id, ad_id)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_brand_date ON tw_air_order_attribution (brand, date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_channel ON tw_air_order_attribution (brand, channel, date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_adset ON tw_air_order_attribution (brand, adset_id, date DESC)`);
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_orders_detail (
@@ -382,6 +368,57 @@ async function initPostgresTables() {
     `);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_benchmarks_brand_date ON tw_benchmarks (brand, date DESC)`);
 
+    // ── App-internal tables (formerly SQLite) ─────────────────────
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS app_users (
+        id            SERIAL PRIMARY KEY,
+        email         TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        name          TEXT NOT NULL,
+        role          TEXT DEFAULT 'viewer',
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        last_login    TIMESTAMPTZ
+      )
+    `);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS app_annotations (
+        id          SERIAL PRIMARY KEY,
+        tab         TEXT NOT NULL,
+        row_key     TEXT NOT NULL,
+        metric      TEXT DEFAULT '',
+        note        TEXT NOT NULL,
+        color       TEXT DEFAULT 'yellow',
+        author      TEXT DEFAULT 'user',
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_app_ann_tab ON app_annotations(tab, row_key)`);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS app_highlights (
+        id          SERIAL PRIMARY KEY,
+        tab         TEXT NOT NULL,
+        row_key     TEXT NOT NULL,
+        color       TEXT DEFAULT 'yellow',
+        created_at  TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE(tab, row_key)
+      )
+    `);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key         TEXT PRIMARY KEY,
+        value       TEXT NOT NULL,
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS app_oauth_tokens (
+        id          SERIAL PRIMARY KEY,
+        tokens      TEXT NOT NULL,
+        updated_at  TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+
     console.log('[PG] Tables initialized');
   } catch (e) {
     console.error('[PG] Table init failed:', e.message);
@@ -395,7 +432,7 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cors({ origin: true, credentials: true }));
 app.use(session({
-  store: new FileStore({ path: path.join(__dirname,'../data/sessions'), ttl: 30*24*60*60, retries: 0, logFn: ()=>{} }),
+  store: new PgSession({ pool: pgPool, tableName: 'session', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'dev-secret',
   resave: false, saveUninitialized: false,
   cookie: {
@@ -426,14 +463,15 @@ const authLimiter = rateLimit({
 app.use('/api', requireAppAuth);
 
 // ── App-level auth routes ─────────────────────────────────────────
-app.get('/auth/app-status', (req, res) => {
+app.get('/auth/app-status', async (req, res) => {
   if (!req.session?.userId) return res.json({ authenticated: false });
-  const user = db.prepare('SELECT id, email, name, role FROM users WHERE id=?').get([req.session.userId]);
+  const r = await pgQuery('SELECT id, email, name, role FROM app_users WHERE id=$1', [req.session.userId]);
+  const user = r.rows[0];
   if (!user) { req.session.destroy(() => {}); return res.json({ authenticated: false }); }
   res.json({ authenticated: true, user });
 });
 
-app.post('/auth/app-signup', authLimiter, (req, res) => {
+app.post('/auth/app-signup', authLimiter, async (req, res) => {
   const { email, password, name } = req.body;
   if (!email || !password || !name)
     return res.status(400).json({ error: 'Name, email, and password are required' });
@@ -442,15 +480,19 @@ app.post('/auth/app-signup', authLimiter, (req, res) => {
   const emailLow = email.toLowerCase().trim();
   if (!emailLow.endsWith('@nysonian.com'))
     return res.status(403).json({ error: 'Only @nysonian.com email addresses can create an account.' });
-  const existing = db.prepare('SELECT id FROM users WHERE email=?').get([emailLow]);
-  if (existing) return res.status(400).json({ error: 'An account with this email already exists' });
-  const count = db.prepare('SELECT COUNT(*) as n FROM users').get();
-  const role = count.n === 0 ? 'admin' : 'viewer';
-  const hash = bcrypt.hashSync(password, 12);
   try {
-    db.prepare('INSERT INTO users(email,password_hash,name,role) VALUES(?,?,?,?)').run([emailLow, hash, name.trim(), role]);
-    const user = db.prepare('SELECT id,email,name,role FROM users WHERE email=?').get([emailLow]);
-    if (!user) return res.status(500).json({ error: 'Account created but could not retrieve user' });
+    const existing = await pgQuery('SELECT id FROM app_users WHERE email=$1', [emailLow]);
+    if (existing.rows.length) return res.status(400).json({ error: 'An account with this email already exists' });
+    const countRes = await pgQuery('SELECT COUNT(*)::int AS n FROM app_users', []);
+    const role = countRes.rows[0].n === 0 ? 'admin' : 'viewer';
+    const hash = bcrypt.hashSync(password, 12);
+    const ins = await pgQuery(
+      `INSERT INTO app_users (email, password_hash, name, role)
+       VALUES ($1,$2,$3,$4)
+       RETURNING id, email, name, role`,
+      [emailLow, hash, name.trim(), role]
+    );
+    const user = ins.rows[0];
     req.session.userId = user.id;
     res.json({ ok: true, user });
   } catch(e) {
@@ -459,14 +501,15 @@ app.post('/auth/app-signup', authLimiter, (req, res) => {
   }
 });
 
-app.post('/auth/app-login', authLimiter, (req, res) => {
+app.post('/auth/app-login', authLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password)
     return res.status(400).json({ error: 'Email and password are required' });
-  const user = db.prepare('SELECT * FROM users WHERE email=?').get([email.toLowerCase().trim()]);
+  const r = await pgQuery('SELECT * FROM app_users WHERE email=$1', [email.toLowerCase().trim()]);
+  const user = r.rows[0];
   if (!user || !bcrypt.compareSync(password, user.password_hash))
     return res.status(401).json({ error: 'Invalid email or password' });
-  db.prepare('UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?').run([user.id]);
+  await pgRun('UPDATE app_users SET last_login = NOW() WHERE id=$1', [user.id]);
   req.session.userId = user.id;
   res.json({ ok: true, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
 });
@@ -483,39 +526,48 @@ app.use('/api/analytics', requireAppAuth, analyticsRouter);
 app.use('/api/dashboards', requireAppAuth, dashRouter);
 
 // ── Annotations ─────────────────────────────────────────────────
-app.get('/api/annotations', (req, res) => {
-  const rows = req.query.tab
-    ? db.prepare('SELECT * FROM annotations WHERE tab=? ORDER BY created_at DESC').all([req.query.tab])
-    : db.prepare('SELECT * FROM annotations ORDER BY created_at DESC').all();
-  res.json(rows);
+app.get('/api/annotations', async (req, res) => {
+  const r = req.query.tab
+    ? await pgQuery('SELECT * FROM app_annotations WHERE tab=$1 ORDER BY created_at DESC', [req.query.tab])
+    : await pgQuery('SELECT * FROM app_annotations ORDER BY created_at DESC', []);
+  res.json(r.rows);
 });
-app.post('/api/annotations', (req, res) => {
+app.post('/api/annotations', async (req, res) => {
   const { tab, row_key, metric, note, color, author } = req.body;
   if (!tab||!row_key||!note) return res.status(400).json({ error:'tab, row_key, note required' });
-  const r = db.prepare('INSERT INTO annotations(tab,row_key,metric,note,color,author) VALUES(?,?,?,?,?,?)')
-    .run([tab, row_key, metric||'', note, color||'yellow', author||'user']);
-  res.json(db.prepare('SELECT * FROM annotations WHERE id=?').get([r.lastInsertRowid]));
+  const r = await pgQuery(
+    `INSERT INTO app_annotations (tab, row_key, metric, note, color, author)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [tab, row_key, metric||'', note, color||'yellow', author||'user']
+  );
+  res.json(r.rows[0]);
 });
-app.put('/api/annotations/:id', (req, res) => {
+app.put('/api/annotations/:id', async (req, res) => {
   const { note, color } = req.body;
-  db.prepare('UPDATE annotations SET note=?,color=?,updated_at=CURRENT_TIMESTAMP WHERE id=?').run([note, color||'yellow', req.params.id]);
-  res.json(db.prepare('SELECT * FROM annotations WHERE id=?').get([req.params.id]));
+  const r = await pgQuery(
+    `UPDATE app_annotations SET note=$1, color=$2, updated_at=NOW() WHERE id=$3 RETURNING *`,
+    [note, color||'yellow', req.params.id]
+  );
+  res.json(r.rows[0] || null);
 });
-app.delete('/api/annotations/:id', (req, res) => {
-  db.prepare('DELETE FROM annotations WHERE id=?').run([req.params.id]);
+app.delete('/api/annotations/:id', async (req, res) => {
+  await pgRun('DELETE FROM app_annotations WHERE id=$1', [req.params.id]);
   res.json({ ok:true });
 });
 
 // ── Highlights ──────────────────────────────────────────────────
-app.post('/api/highlights', (req, res) => {
+app.post('/api/highlights', async (req, res) => {
   const { tab, row_key, color } = req.body;
   if (!tab||!row_key) return res.status(400).json({ error:'tab, row_key required' });
-  db.prepare('INSERT INTO highlights(tab,row_key,color) VALUES(?,?,?) ON CONFLICT(tab,row_key) DO UPDATE SET color=excluded.color')
-    .run([tab, row_key, color||'yellow']);
+  await pgRun(
+    `INSERT INTO app_highlights (tab, row_key, color) VALUES ($1,$2,$3)
+     ON CONFLICT (tab, row_key) DO UPDATE SET color = EXCLUDED.color`,
+    [tab, row_key, color||'yellow']
+  );
   res.json({ ok:true });
 });
-app.delete('/api/highlights', (req, res) => {
-  db.prepare('DELETE FROM highlights WHERE tab=? AND row_key=?').run([req.body.tab, req.body.row_key]);
+app.delete('/api/highlights', async (req, res) => {
+  await pgRun('DELETE FROM app_highlights WHERE tab=$1 AND row_key=$2', [req.body.tab, req.body.row_key]);
   res.json({ ok:true });
 });
 
@@ -921,35 +973,76 @@ app.use('/api/sync/status', requireAppAuth, syncStatusRouter);
 app.use('/api/tw',    requireAppAuth, twRouter);
 app.use('/api/store', requireAppAuth, storeRouter);
 
-// ── Daily cron: 11:00 AM GMT+5 = 06:00 UTC ───────────────────────
-// Fetches yesterday's data from all APIs and loads it into the DB.
+// ── Daily cron: 06:00 UTC = 11:00 AM Asia/Karachi (GMT+5) ───────
+// Each run: (1) sync yesterday + (2) backfill any missing days in last 14d
+//           (catches days where the previous cron failed or data arrived late).
 try {
   const cron = require('node-cron');
+  const { pgQuery } = require('./db/postgres');
 
-  // '0 6 * * *' = 06:00 UTC = 11:00 AM Asia/Karachi (GMT+5)
-  cron.schedule('0 6 * * *', () => {
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yStr = yesterday.toISOString().slice(0, 10);
-    const runId = `cron_daily_${yStr}_${Date.now()}`;
-    console.log(`[Cron] ▶ Daily sync for ${yStr} → ${runId}`);
-    syncEngine.runSync({
-      runId,
-      tasks: [
-        'klaviyo', 'appstle', 'tw_refresh',
-        'tw_channels', 'tw_geo',
-        'tw_ads', 'tw_orders', 'tw_sessions',
-        'tw_refunds', 'tw_email_sms',
-        'tw_order_revenue',          // ← canonical revenue: Shopify+Amazon, before refunds
-        'tw_customers', 'tw_segments', 'tw_benchmarks',
-      ],
-      startDate: yStr,
-      endDate:   yStr,
-      brands:    ['NOBL', 'FLO'],
-    }).catch(e => console.error('[Cron sync error]', e.message));
-  }, { timezone: 'UTC' });
+  async function runDailySync() {
+    const today = new Date();
+    const yStr = new Date(today.getTime() - 86400000).toISOString().slice(0, 10);
 
-  console.log('[Cron] Daily sync scheduled: 06:00 UTC (11:00 AM GMT+5)');
+    // 1. Find any missing days in the last 14 days that need backfilling.
+    //    A day is "missing" if nobl_air_daily has no row for it.
+    const lookback = 14;
+    const startBack = new Date(today.getTime() - lookback * 86400000).toISOString().slice(0, 10);
+    let missing = [];
+    try {
+      const r = await pgQuery(`
+        WITH days AS (
+          SELECT generate_series($1::date, $2::date, '1 day')::date AS d
+        )
+        SELECT d FROM days
+        WHERE NOT EXISTS (SELECT 1 FROM nobl_air_daily WHERE date = days.d)
+        ORDER BY d
+      `, [startBack, yStr]);
+      missing = r.rows.map(x => x.d.toISOString().slice(0, 10));
+    } catch (e) {
+      console.warn('[Cron] Could not scan for missing days:', e.message);
+    }
+
+    // 2. Effective range: oldest missing day → yesterday.
+    //    If nothing missing, just yesterday → yesterday.
+    const startDate = missing.length ? missing[0] : yStr;
+    const endDate = yStr;
+    const runId = `cron_daily_${endDate}_${Date.now()}`;
+    console.log(`[Cron] ▶ Daily sync ${startDate} → ${endDate} (missing=${missing.length}) → ${runId}`);
+
+    try {
+      await syncEngine.runSync({
+        runId,
+        tasks: [
+          'klaviyo',
+          'tw_refresh',          // brand-level summary (works via TW Summary API)
+          'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
+          'tw_ads',              // campaign/adset/ad performance from TW attribution
+          'tw_air_attribution',  // NOBL Air order-level attribution by ad/adset
+          'shopify_orders',      // per-order detail + product line items (NOBL + FLO)
+          'appstle_contracts',   // subscription contracts (all 18,775+)
+          'nobl_air_aggregate',  // recompute nobl_air_daily for the range
+          'product_daily',       // recompute shopify_product_daily for the range
+        ],
+        startDate, endDate,
+        brands: ['NOBL', 'FLO'],
+      });
+      console.log(`[Cron] ✓ Daily sync complete (${runId})`);
+    } catch (e) {
+      console.error('[Cron] sync error:', e.message);
+    }
+  }
+
+  cron.schedule('0 6 * * *', () => { runDailySync(); }, { timezone: 'UTC' });
+
+  // Manual trigger endpoint — POST /api/sync/trigger-daily
+  // (Useful for "run now" buttons in admin UI.)
+  app.post('/api/sync/trigger-daily', requireAppAuth, async (req, res) => {
+    runDailySync().catch(e => console.error('[Manual sync]', e));
+    res.json({ ok: true, msg: 'Sync started in background' });
+  });
+
+  console.log('[Cron] Daily sync scheduled: 06:00 UTC (11:00 AM GMT+5) with 14-day backfill window');
 } catch(e) {
   console.warn('[Cron] node-cron unavailable:', e.message);
 }

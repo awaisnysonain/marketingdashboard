@@ -136,7 +136,7 @@ export default function ChannelsPage({ showToast }) {
               }}>{b}</button>
             ))}
           </div>
-          <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
+          <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="channels" />
         </div>
       </div>
 

@@ -110,7 +110,7 @@ export default function OverviewPage({ showToast }) {
           <p style={{ fontSize:13, color:'var(--text3)', margin:'4px 0 0' }}>NOBL Air + Pilates FLO combined performance</p>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-          <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
+          <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="overview" />
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
             {lastSyncLabel && (
               <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text3)', background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:20, padding:'3px 10px' }}>

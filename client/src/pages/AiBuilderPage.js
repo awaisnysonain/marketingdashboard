@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { generateDashboard, executeDashboard, saveDashboard, fmt$, aiChat } from '../utils/api';
 import { Icons } from '../components/Icons';
+import SheetTable from '../components/SheetTable';
 
 const CHART_COLORS = ['#6366f1','#14b8a6','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#1877f2','#ea4335'];
 
@@ -93,44 +94,24 @@ function ChartSection({ section, data, type }) {
 }
 
 function TableSection({ section, data }) {
-  const [sortBy,setSortBy] = useState(null);
-  const [sortDir,setSortDir] = useState('desc');
   if (!data?.length) return <EmptyState />;
   const cols = section.columns || Object.keys(data[0]).map(f=>({field:f,label:f}));
-  const sorted = sortBy ? [...data].sort((a,b)=>{
-    const va=a[sortBy],vb=b[sortBy];
-    if (va==null) return 1; if (vb==null) return -1;
-    return sortDir==='asc' ? (va<vb?-1:1) : (vb<va?-1:1);
-  }) : data;
+  const headers = cols.map(c => c.label || c.field);
+  const rows = data.slice(0, 500).map((row, i) => {
+    const out = { _key: i };
+    cols.forEach(c => { out[c.label || c.field] = formatCell(row[c.field], c.format); });
+    return out;
+  });
   return (
-    <div style={{overflowX:'auto',maxHeight:320,overflowY:'auto'}}>
-      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
-        <thead style={{position:'sticky',top:0,background:'var(--bg3)',zIndex:1}}>
-          <tr>
-            {cols.map(c=>(
-              <th key={c.field} onClick={()=>{if(sortBy===c.field)setSortDir(d=>d==='asc'?'desc':'asc');else{setSortBy(c.field);setSortDir('desc');}}}
-                style={{padding:'7px 10px',textAlign:'right',fontSize:11,fontWeight:600,
-                  color:sortBy===c.field?'var(--accent)':'var(--text3)',cursor:'pointer',whiteSpace:'nowrap',userSelect:'none'}}>
-                {c.label||c.field} {sortBy===c.field?(sortDir==='asc'?'▲':'▼'):''}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.slice(0,200).map((row,i)=>(
-            <tr key={i} style={{background:i%2===0?'transparent':'var(--bg3)',transition:'background .1s'}}
-              onMouseEnter={e=>e.currentTarget.style.background='var(--accent-dim)'}
-              onMouseLeave={e=>e.currentTarget.style.background=i%2===0?'transparent':'var(--bg3)'}>
-              {cols.map(c=>(
-                <td key={c.field} style={{padding:'6px 10px',textAlign:'right',color:'var(--text2)'}}>
-                  {formatCell(row[c.field],c.format)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <SheetTable
+      headers={headers}
+      rows={rows}
+      keyField="_key"
+      maxHeight="320px"
+      searchable={false}
+      defaultSortField={headers[0]}
+      defaultSortDir="desc"
+    />
   );
 }
 

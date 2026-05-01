@@ -154,7 +154,7 @@ export default function StoreFLOPage({ showToast }) {
             Complete store analytics · Portable · Wooden · Metal · {range.start} → {range.end}
           </p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
+        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="storeflo" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (

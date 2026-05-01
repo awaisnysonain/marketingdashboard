@@ -1,11 +1,56 @@
+# Dependencies
 node_modules/
 client/node_modules/
+
+# Build outputs
 client/build/
-data/
+build/
+dist/
+coverage/
+
+# Environment and secrets
 .env
+.env.*
+!.env.example
+
+# Runtime data and databases
+data/
 *.db
+*.sqlite
+*.sqlite3
 *.db-shm
 *.db-wal
-*.lock
+*.db-journal
+*.lock/
+
+# Logs and process files
+*.log
+*.err
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.pid
+*.pid.lock
+
+# Caches
+.cache/
+.parcel-cache/
+.eslintcache
+.npm/
+
+# Local tool state
+.claude/*.lock
+.claude/*.local.json
+
+# OS and editor files
 .DS_Store
-{server,client
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Stray directory created by a malformed brace command
+/{server,client/

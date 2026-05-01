@@ -185,7 +185,7 @@ async function syncAppstleSubRevenue(startDate, endDate) {
 
   for (const [date, vals] of [...daily.entries()].sort()) {
     try {
-      // Update rows that exist and are still zero; insert if missing
+      // Always upsert — overwrite stale values with the latest fetch
       await pgRun(`
         INSERT INTO nobl_air_sub_revenue_daily
           (date, sub_revenue_actual, rebill_revenue, new_sub_revenue)
@@ -193,9 +193,8 @@ async function syncAppstleSubRevenue(startDate, endDate) {
         ON CONFLICT (date) DO UPDATE SET
           sub_revenue_actual = EXCLUDED.sub_revenue_actual,
           rebill_revenue     = EXCLUDED.rebill_revenue,
-          new_sub_revenue    = EXCLUDED.new_sub_revenue
-        WHERE nobl_air_sub_revenue_daily.sub_revenue_actual IS NULL
-           OR nobl_air_sub_revenue_daily.sub_revenue_actual = 0
+          new_sub_revenue    = EXCLUDED.new_sub_revenue,
+          updated_at         = NOW()
       `, [date, vals.total, vals.rebill, vals.new_sub]);
       written++;
     } catch (e) {

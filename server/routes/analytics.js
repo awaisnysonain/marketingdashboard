@@ -24,6 +24,54 @@ function getDefaultDates(req) {
   return { start, end };
 }
 
+function toNum(v) {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function firstActionValue(items, actionTypes) {
+  if (!Array.isArray(items)) return 0;
+  for (const actionType of actionTypes) {
+    const match = items.find(item => item.action_type === actionType);
+    if (match) return toNum(match.value);
+  }
+  return 0;
+}
+
+function normalizeMetaAdSet(row) {
+  const purchaseTypes = [
+    'omni_purchase',
+    'purchase',
+    'web_in_store_purchase',
+    'onsite_web_purchase',
+    'offsite_conversion.fb_pixel_purchase',
+  ];
+  const spend = toNum(row.spend);
+  const purchases = firstActionValue(row.actions, purchaseTypes);
+  const purchaseRevenue = firstActionValue(row.action_values, purchaseTypes);
+  const reportedRoas = firstActionValue(row.purchase_roas, purchaseTypes);
+  const roas = reportedRoas || (spend > 0 ? purchaseRevenue / spend : 0);
+
+  return {
+    campaign_id: row.campaign_id || '',
+    campaign_name: row.campaign_name || '',
+    adset_id: row.adset_id || '',
+    adset_name: row.adset_name || 'Unknown ad set',
+    spend,
+    impressions: Math.round(toNum(row.impressions)),
+    reach: Math.round(toNum(row.reach)),
+    clicks: Math.round(toNum(row.clicks)),
+    inline_link_clicks: Math.round(toNum(row.inline_link_clicks)),
+    ctr: toNum(row.ctr),
+    cpc: toNum(row.cpc),
+    cpm: toNum(row.cpm),
+    purchases,
+    purchase_revenue: purchaseRevenue,
+    purchase_roas: roas,
+    cost_per_purchase: purchases > 0 ? spend / purchases : null,
+  };
+}
+
 // Format rows: parse numeric fields as floats, date fields as YYYY-MM-DD strings
 function fmtRows(rows) {
   return rows.map(row => {
@@ -335,21 +383,26 @@ router.get('/nobl/subscriptions', async (req, res) => {
     const [dailyRes, summaryRes] = await Promise.all([
       pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
-                shopify_sub_gross, shopify_sub_disc, shopify_sub_refunds,
-                rebill_revenue, new_sub_revenue, sub_revenue_actual
-         FROM nobl_air_sub_revenue_daily
+                sub_gross AS shopify_sub_gross,
+                sub_discounts AS shopify_sub_disc,
+                sub_refunds AS shopify_sub_refunds,
+                rebill_revenue,
+                new_sub_revenue,
+                (sub_net_sales + rebill_revenue) AS sub_revenue_actual
+         FROM nobl_air_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
         [start, end]
       ),
       pgQuery(
         `SELECT
-           COUNT(*) as total,
-           SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) as active,
-           SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) as cancelled,
-           SUM(CASE WHEN status='trialing' THEN 1 ELSE 0 END) as trialing,
-           SUM(CASE WHEN status='converted' THEN 1 ELSE 0 END) as converted,
-           AVG(last_order_amount) as avg_order_amount
-         FROM appstle_subscriptions`,
+           COUNT(*) AS total,
+           COUNT(*) FILTER (WHERE status = 'active') AS active,
+           COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
+           COUNT(*) FILTER (WHERE status = 'paused') AS paused,
+           COUNT(*) FILTER (WHERE status = 'trialing') AS trialing,
+           COUNT(*) FILTER (WHERE is_converted) AS converted,
+           AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
+         FROM nobl_air_subscribers`,
         []
       ),
     ]);
@@ -360,6 +413,7 @@ router.get('/nobl/subscriptions', async (req, res) => {
         total: parseInt(s.total || 0),
         active: parseInt(s.active || 0),
         cancelled: parseInt(s.cancelled || 0),
+        paused: parseInt(s.paused || 0),
         trialing: parseInt(s.trialing || 0),
         converted: parseInt(s.converted || 0),
         avg_order_amount: parseFloat(s.avg_order_amount || 0),
@@ -367,6 +421,385 @@ router.get('/nobl/subscriptions', async (req, res) => {
     });
   } catch (e) {
     console.error('[Analytics /nobl/subscriptions]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /nobl/air-performance
+router.get('/nobl/air-performance', async (req, res) => {
+  const { start, end } = getDefaultDates(req);
+  const rollingDays = Math.max(7, Math.min(parseInt(req.query.rollingDays || '14', 10), 60));
+  const forecastDays = Math.max(7, Math.min(parseInt(req.query.forecastDays || '14', 10), 60));
+
+  try {
+    const dailyRes = await pgQuery(
+      `SELECT
+         TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+         total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
+         zero_air_orders, paid_air_orders, rebill_orders, same_day_cancels,
+         tag_gross, tag_discounts, tag_net_sales,
+         sub_gross, sub_discounts, sub_net_sales,
+         rebill_revenue, new_sub_revenue,
+         combined_gross, combined_net_sales,
+         tag_refunds, sub_refunds, combined_net_revenue,
+         new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+         rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159
+       FROM nobl_air_daily
+       WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+       ORDER BY date ASC`,
+      [start, end]
+    );
+
+    const daily = fmtRows(dailyRes.rows);
+    const rowsDesc = [...daily].reverse();
+
+    const totals = daily.reduce((acc, r) => ({
+      total_orders: (acc.total_orders || 0) + (r.total_orders || 0),
+      air_orders: (acc.air_orders || 0) + (r.air_orders || 0),
+      zero_air_orders: (acc.zero_air_orders || 0) + (r.zero_air_orders || 0),
+      paid_air_orders: (acc.paid_air_orders || 0) + (r.paid_air_orders || 0),
+      rebill_orders: (acc.rebill_orders || 0) + (r.rebill_orders || 0),
+      same_day_cancels: (acc.same_day_cancels || 0) + (r.same_day_cancels || 0),
+      tag_net_sales: (acc.tag_net_sales || 0) + (r.tag_net_sales || 0),
+      sub_net_sales: (acc.sub_net_sales || 0) + (r.sub_net_sales || 0),
+      rebill_revenue: (acc.rebill_revenue || 0) + (r.rebill_revenue || 0),
+      combined_net_revenue: (acc.combined_net_revenue || 0) + (r.combined_net_revenue || 0),
+    }), {});
+
+    totals.attach_rate = totals.total_orders > 0
+      ? parseFloat((totals.air_orders / totals.total_orders).toFixed(4))
+      : null;
+    totals.ttp_rate = totals.air_orders > 0
+      ? parseFloat((totals.paid_air_orders / totals.air_orders).toFixed(4))
+      : null;
+    totals.activation_rate = (totals.attach_rate != null && totals.ttp_rate != null)
+      ? parseFloat((totals.attach_rate * totals.ttp_rate).toFixed(4))
+      : null;
+
+    const trailing = daily.slice(-rollingDays);
+    const avg = (field) => {
+      if (!trailing.length) return 0;
+      return trailing.reduce((s, r) => s + (parseFloat(r[field]) || 0), 0) / trailing.length;
+    };
+    const avgRounded = (field, decimals = 2) => parseFloat(avg(field).toFixed(decimals));
+
+    const forecast = [];
+    if (daily.length > 0) {
+      const lastDate = new Date(daily[daily.length - 1].date);
+      for (let i = 1; i <= forecastDays; i += 1) {
+        const d = new Date(lastDate);
+        d.setDate(d.getDate() + i);
+        const ds = d.toISOString().slice(0, 10);
+        forecast.push({
+          date: ds,
+          total_orders: avgRounded('total_orders', 0),
+          air_orders: avgRounded('air_orders', 0),
+          attach_rate: avgRounded('attach_rate', 4),
+          ttp_rate: avgRounded('ttp_rate', 4),
+          activation_rate: avgRounded('activation_rate', 4),
+          zero_air_orders: avgRounded('zero_air_orders', 0),
+          paid_air_orders: avgRounded('paid_air_orders', 0),
+          rebill_orders: avgRounded('rebill_orders', 0),
+          same_day_cancels: avgRounded('same_day_cancels', 0),
+          tag_gross: avgRounded('tag_gross'),
+          tag_discounts: avgRounded('tag_discounts'),
+          tag_net_sales: avgRounded('tag_net_sales'),
+          sub_gross: avgRounded('sub_gross'),
+          sub_discounts: avgRounded('sub_discounts'),
+          sub_net_sales: avgRounded('sub_net_sales'),
+          rebill_revenue: avgRounded('rebill_revenue'),
+          new_sub_revenue: avgRounded('new_sub_revenue'),
+          combined_gross: avgRounded('combined_gross'),
+          combined_net_sales: avgRounded('combined_net_sales'),
+          tag_refunds: avgRounded('tag_refunds'),
+          sub_refunds: avgRounded('sub_refunds'),
+          combined_net_revenue: avgRounded('combined_net_revenue'),
+          new_49: avgRounded('new_49', 0),
+          new_79: avgRounded('new_79', 0),
+          new_89: avgRounded('new_89', 0),
+          new_99: avgRounded('new_99', 0),
+          new_109: avgRounded('new_109', 0),
+          new_119: avgRounded('new_119', 0),
+          new_129: avgRounded('new_129', 0),
+          new_139: avgRounded('new_139', 0),
+          new_149: avgRounded('new_149', 0),
+          new_159: avgRounded('new_159', 0),
+          rebill_49: avgRounded('rebill_49', 0),
+          rebill_79: avgRounded('rebill_79', 0),
+          rebill_89: avgRounded('rebill_89', 0),
+          rebill_99: avgRounded('rebill_99', 0),
+          rebill_109: avgRounded('rebill_109', 0),
+          rebill_119: avgRounded('rebill_119', 0),
+          rebill_129: avgRounded('rebill_129', 0),
+          rebill_139: avgRounded('rebill_139', 0),
+          rebill_149: avgRounded('rebill_149', 0),
+          rebill_159: avgRounded('rebill_159', 0),
+          is_forecast: true,
+          forecast_basis_days: rollingDays,
+        });
+      }
+    }
+
+    res.json({
+      rows: rowsDesc,
+      totals,
+      forecast,
+      rolling_days: rollingDays,
+      forecast_days: forecastDays,
+    });
+  } catch (e) {
+    console.error('[Analytics /nobl/air-performance]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /nobl/air-meta-adsets — live Meta ad set performance for the selected date range
+router.get('/nobl/air-meta-adsets', async (req, res) => {
+  const { start, end } = getDefaultDates(req);
+  const rowLimit = Math.max(10, Math.min(parseInt(req.query.limit || '50', 10), 100));
+  const token = process.env.META_ADS_READ_TOKEN;
+  const accountId = process.env.META_AD_ACCOUNT_ID;
+
+  if (!token || !accountId) {
+    return res.status(400).json({ error: 'Missing META_AD_ACCOUNT_ID or META_ADS_READ_TOKEN' });
+  }
+
+  try {
+    const params = new URLSearchParams({
+      access_token: token,
+      level: 'adset',
+      fields: [
+        'campaign_id', 'campaign_name', 'adset_id', 'adset_name',
+        'spend', 'impressions', 'reach', 'clicks', 'inline_link_clicks',
+        'ctr', 'cpc', 'cpm', 'actions', 'action_values', 'purchase_roas',
+      ].join(','),
+      time_range: JSON.stringify({ since: start, until: end }),
+      sort: 'spend_descending',
+      limit: '100',
+    });
+
+    let nextUrl = `https://graph.facebook.com/v20.0/${accountId}/insights?${params}`;
+    const rawRows = [];
+
+    for (let page = 0; nextUrl && page < 5 && rawRows.length < 500; page += 1) {
+      const metaRes = await fetch(nextUrl, { signal: AbortSignal.timeout(45_000) });
+      const json = await metaRes.json();
+      if (!metaRes.ok) {
+        throw new Error(json?.error?.message || `Meta API HTTP ${metaRes.status}`);
+      }
+      rawRows.push(...(Array.isArray(json.data) ? json.data : []));
+      nextUrl = json?.paging?.next || null;
+    }
+
+    const allRows = rawRows
+      .map(normalizeMetaAdSet)
+      .filter(row => row.spend > 0 || row.purchases > 0 || row.impressions > 0)
+      .sort((a, b) => b.spend - a.spend);
+    const rows = allRows.slice(0, rowLimit);
+
+    const totals = allRows.reduce((acc, row) => ({
+      spend: acc.spend + row.spend,
+      impressions: acc.impressions + row.impressions,
+      reach: acc.reach + row.reach,
+      clicks: acc.clicks + row.clicks,
+      inline_link_clicks: acc.inline_link_clicks + row.inline_link_clicks,
+      purchases: acc.purchases + row.purchases,
+      purchase_revenue: acc.purchase_revenue + row.purchase_revenue,
+    }), { spend: 0, impressions: 0, reach: 0, clicks: 0, inline_link_clicks: 0, purchases: 0, purchase_revenue: 0 });
+
+    totals.purchase_roas = totals.spend > 0 ? totals.purchase_revenue / totals.spend : 0;
+    totals.cost_per_purchase = totals.purchases > 0 ? totals.spend / totals.purchases : null;
+    totals.ctr = totals.impressions > 0 ? (totals.clicks / totals.impressions) * 100 : 0;
+    totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
+    totals.cpm = totals.impressions > 0 ? (totals.spend / totals.impressions) * 1000 : null;
+
+    res.json({ rows, totals, total_adsets: allRows.length, start, end });
+  } catch (e) {
+    console.error('[Analytics /nobl/air-meta-adsets]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /meta/ads — saved TW ad performance, grouped by campaign/adset/ad
+router.get('/meta/ads', async (req, res) => {
+  const { start, end } = getDefaultDates(req);
+  const brand = (req.query.brand || 'NOBL').toUpperCase();
+  const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'adset';
+
+  const groupFields = {
+    campaign: ['campaign_id', 'campaign_name'],
+    adset: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name'],
+    ad: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
+  }[level];
+
+  try {
+    const r = await pgQuery(`
+      SELECT
+        ${groupFields.join(', ')},
+        SUM(spend)::numeric(14,2) AS spend,
+        SUM(revenue)::numeric(14,2) AS revenue,
+        SUM(purchases)::int AS purchases,
+        SUM(impressions)::bigint AS impressions,
+        SUM(clicks)::bigint AS clicks,
+        SUM(link_clicks)::bigint AS link_clicks,
+        SUM(add_to_cart)::bigint AS add_to_cart,
+        SUM(initiate_checkout)::bigint AS initiate_checkout,
+        CASE WHEN SUM(spend) > 0 THEN SUM(revenue) / SUM(spend) ELSE NULL END AS roas,
+        CASE WHEN SUM(purchases) > 0 THEN SUM(spend) / SUM(purchases) ELSE NULL END AS cac,
+        CASE WHEN SUM(impressions) > 0 THEN SUM(clicks)::numeric / SUM(impressions) ELSE NULL END AS ctr,
+        CASE WHEN SUM(clicks) > 0 THEN SUM(spend) / SUM(clicks) ELSE NULL END AS cpc,
+        CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm
+      FROM tw_ads_daily
+      WHERE brand = $1
+        AND platform = 'META'
+        AND date BETWEEN $2::date AND $3::date
+      GROUP BY ${groupFields.join(', ')}
+      HAVING SUM(spend) > 0 OR SUM(purchases) > 0
+      ORDER BY spend DESC
+      LIMIT 500
+    `, [brand, start, end]);
+
+    const totals = r.rows.reduce((acc, row) => ({
+      spend: acc.spend + Number(row.spend || 0),
+      revenue: acc.revenue + Number(row.revenue || 0),
+      purchases: acc.purchases + Number(row.purchases || 0),
+      impressions: acc.impressions + Number(row.impressions || 0),
+      clicks: acc.clicks + Number(row.clicks || 0),
+      link_clicks: acc.link_clicks + Number(row.link_clicks || 0),
+    }), { spend: 0, revenue: 0, purchases: 0, impressions: 0, clicks: 0, link_clicks: 0 });
+
+    totals.roas = totals.spend > 0 ? totals.revenue / totals.spend : null;
+    totals.cac = totals.purchases > 0 ? totals.spend / totals.purchases : null;
+    totals.ctr = totals.impressions > 0 ? totals.clicks / totals.impressions : null;
+    totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
+    totals.cpm = totals.impressions > 0 ? totals.spend * 1000 / totals.impressions : null;
+
+    res.json({ rows: fmtRows(r.rows), totals, level, start, end });
+  } catch (e) {
+    console.error('[Analytics /meta/ads]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /nobl/air-attribution — exact NOBL Air purchases from TW order-level attribution
+router.get('/nobl/air-attribution', async (req, res) => {
+  const { start, end } = getDefaultDates(req);
+  const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'ad';
+
+  const groupFields = {
+    campaign: ['campaign_id', 'campaign_name'],
+    adset: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name'],
+    ad: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
+  }[level];
+
+  try {
+    const r = await pgQuery(`
+      SELECT
+        ${groupFields.join(', ')},
+        COUNT(DISTINCT order_id)::int AS air_orders,
+        SUM(linear_weight)::numeric(14,2) AS attributed_air_orders,
+        SUM(order_revenue * linear_weight)::numeric(14,2) AS attributed_air_revenue
+      FROM tw_air_order_attribution
+      WHERE brand = 'NOBL'
+        AND channel = 'facebook-ads'
+        AND model = 'Triple Attribution'
+        AND attribution_window = '1_day'
+        AND date BETWEEN $1::date AND $2::date
+      GROUP BY ${groupFields.join(', ')}
+      ORDER BY attributed_air_orders DESC, attributed_air_revenue DESC
+      LIMIT 500
+    `, [start, end]);
+
+    const totals = r.rows.reduce((acc, row) => ({
+      air_orders: acc.air_orders + Number(row.air_orders || 0),
+      attributed_air_orders: acc.attributed_air_orders + Number(row.attributed_air_orders || 0),
+      attributed_air_revenue: acc.attributed_air_revenue + Number(row.attributed_air_revenue || 0),
+    }), { air_orders: 0, attributed_air_orders: 0, attributed_air_revenue: 0 });
+
+    res.json({ rows: fmtRows(r.rows), totals, level, start, end });
+  } catch (e) {
+    console.error('[Analytics /nobl/air-attribution]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /nobl/air-subscribers — subscriber-level analytics from nobl_air_subscribers
+router.get('/nobl/air-subscribers', async (req, res) => {
+  const { start, end } = getDefaultDates(req);
+  try {
+    // Status counts (across all contracts)
+    const statusRes = await pgQuery(`
+      SELECT status, COUNT(*)::int AS n
+      FROM nobl_air_subscribers
+      GROUP BY status ORDER BY n DESC`);
+
+    // Tier mix (the main 10 tiers)
+    const tierRes = await pgQuery(`
+      SELECT
+        ROUND(contract_amount)::int AS tier,
+        COUNT(*)::int AS total,
+        COUNT(*) FILTER (WHERE status = 'active')::int    AS active,
+        COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
+        COUNT(*) FILTER (WHERE status = 'paused')::int    AS paused,
+        COUNT(*) FILTER (WHERE is_mature)::int           AS mature,
+        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int AS converted
+      FROM nobl_air_subscribers
+      WHERE ROUND(contract_amount) IN (49, 79, 89, 99, 109, 119, 129, 139, 149, 159)
+      GROUP BY tier ORDER BY tier`);
+
+    // TTP cohort over the requested date range
+    const ttpRes = await pgQuery(`
+      SELECT
+        COUNT(*)::int                                                  AS total_in_range,
+        COUNT(*) FILTER (WHERE is_mature)::int                         AS mature,
+        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int        AS converted,
+        COUNT(*) FILTER (WHERE is_same_day_cancel)::int                AS same_day_cancels
+      FROM nobl_air_subscribers
+      WHERE DATE(created_at) BETWEEN $1::date AND $2::date`, [start, end]);
+
+    // New subs per day (created_at)
+    const dailyRes = await pgQuery(`
+      SELECT
+        DATE(created_at) AS date,
+        COUNT(*)::int                                                  AS new_subs,
+        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int        AS converted,
+        COUNT(*) FILTER (WHERE is_same_day_cancel)::int                AS same_day_cancels
+      FROM nobl_air_subscribers
+      WHERE DATE(created_at) BETWEEN $1::date AND $2::date
+      GROUP BY DATE(created_at) ORDER BY DATE(created_at)`, [start, end]);
+
+    // Estimated MRR — sum of contract_amount for active subs (assumes monthly billing)
+    const mrrRes = await pgQuery(`
+      SELECT
+        COALESCE(SUM(contract_amount), 0)::numeric(14,2) AS active_arr,
+        COUNT(*) FILTER (WHERE status = 'active')::int     AS active_count
+      FROM nobl_air_subscribers
+      WHERE status = 'active'`);
+
+    const ttp = ttpRes.rows[0] || {};
+    const ttpRate = ttp.mature > 0 ? Number((ttp.converted / ttp.mature).toFixed(4)) : null;
+
+    res.json({
+      status:         statusRes.rows,
+      tiers:          tierRes.rows,
+      ttp_cohort: {
+        total_in_range:    ttp.total_in_range || 0,
+        mature:            ttp.mature || 0,
+        converted:         ttp.converted || 0,
+        same_day_cancels:  ttp.same_day_cancels || 0,
+        ttp_rate:          ttpRate,
+      },
+      daily:          dailyRes.rows.map(r => ({
+        date:             r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0,10),
+        new_subs:         r.new_subs,
+        converted:        r.converted,
+        same_day_cancels: r.same_day_cancels,
+      })),
+      active_arr:     Number(mrrRes.rows[0]?.active_arr || 0),
+      active_count:   mrrRes.rows[0]?.active_count || 0,
+    });
+  } catch (e) {
+    console.error('[Analytics /nobl/air-subscribers]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
