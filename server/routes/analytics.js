@@ -691,30 +691,104 @@ router.get('/nobl/air-attribution', async (req, res) => {
     adset: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name'],
     ad: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
   }[level];
+  const groupCols = groupFields.join(', ');
+  const totalJoin = groupFields
+    .map(field => `COALESCE(air.${field}, '') = COALESCE(total.${field}, '')`)
+    .join(' AND ');
 
   try {
     const r = await pgQuery(`
+      WITH air AS (
+        SELECT
+          ${groupCols},
+          COUNT(DISTINCT a.order_id)::int AS air_orders,
+          SUM(a.linear_weight)::numeric(14,2) AS attributed_air_orders,
+          SUM(a.order_revenue * a.linear_weight)::numeric(14,2) AS attributed_air_revenue,
+          SUM(a.linear_weight) FILTER (WHERE s.is_mature)::numeric(14,2) AS ttp_mature_air_orders,
+          SUM(a.linear_weight) FILTER (WHERE s.is_mature AND s.is_converted)::numeric(14,2) AS ttp_paid_air_orders,
+          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature)::int AS ttp_mature_subscribers,
+          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature AND s.is_converted)::int AS ttp_paid_subscribers
+        FROM tw_air_order_attribution a
+        LEFT JOIN nobl_air_subscribers s
+          ON s.order_name = a.order_name
+          OR s.graph_order_id = CONCAT('gid://shopify/Order/', a.order_id)
+          OR s.graph_order_id = a.order_id
+        WHERE a.brand = 'NOBL'
+          AND a.channel = 'facebook-ads'
+          AND a.model = 'Triple Attribution'
+          AND a.attribution_window = '1_day'
+          AND a.date BETWEEN $1::date AND $2::date
+        GROUP BY ${groupCols}
+      ),
+      total AS (
+        SELECT
+          ${groupCols},
+          SUM(purchases)::numeric(14,2) AS total_attributed_orders
+        FROM tw_ads_daily
+        WHERE brand = 'NOBL'
+          AND platform = 'META'
+          AND date BETWEEN $1::date AND $2::date
+        GROUP BY ${groupCols}
+      )
       SELECT
-        ${groupFields.join(', ')},
-        COUNT(DISTINCT order_id)::int AS air_orders,
-        SUM(linear_weight)::numeric(14,2) AS attributed_air_orders,
-        SUM(order_revenue * linear_weight)::numeric(14,2) AS attributed_air_revenue
-      FROM tw_air_order_attribution
-      WHERE brand = 'NOBL'
-        AND channel = 'facebook-ads'
-        AND model = 'Triple Attribution'
-        AND attribution_window = '1_day'
-        AND date BETWEEN $1::date AND $2::date
-      GROUP BY ${groupFields.join(', ')}
+        ${groupFields.map(field => `air.${field}`).join(', ')},
+        COALESCE(total.total_attributed_orders, 0)::numeric(14,2) AS total_attributed_orders,
+        air.air_orders,
+        air.attributed_air_orders,
+        air.attributed_air_revenue,
+        COALESCE(air.ttp_mature_air_orders, 0)::numeric(14,2) AS ttp_mature_air_orders,
+        COALESCE(air.ttp_paid_air_orders, 0)::numeric(14,2) AS ttp_paid_air_orders,
+        air.ttp_mature_subscribers,
+        air.ttp_paid_subscribers,
+        CASE
+          WHEN COALESCE(total.total_attributed_orders, 0) > 0
+            THEN ROUND(air.attributed_air_orders / total.total_attributed_orders, 4)
+          ELSE NULL
+        END AS attach_rate,
+        CASE
+          WHEN COALESCE(air.ttp_mature_air_orders, 0) > 0
+            THEN ROUND(air.ttp_paid_air_orders / air.ttp_mature_air_orders, 4)
+          ELSE NULL
+        END AS ttp_rate,
+        CASE
+          WHEN COALESCE(total.total_attributed_orders, 0) > 0 AND COALESCE(air.ttp_mature_air_orders, 0) > 0
+            THEN ROUND((air.attributed_air_orders / total.total_attributed_orders) * (air.ttp_paid_air_orders / air.ttp_mature_air_orders), 4)
+          ELSE NULL
+        END AS activation_rate
+      FROM air
+      LEFT JOIN total ON ${totalJoin}
       ORDER BY attributed_air_orders DESC, attributed_air_revenue DESC
       LIMIT 500
     `, [start, end]);
 
     const totals = r.rows.reduce((acc, row) => ({
+      total_attributed_orders: acc.total_attributed_orders + Number(row.total_attributed_orders || 0),
       air_orders: acc.air_orders + Number(row.air_orders || 0),
       attributed_air_orders: acc.attributed_air_orders + Number(row.attributed_air_orders || 0),
       attributed_air_revenue: acc.attributed_air_revenue + Number(row.attributed_air_revenue || 0),
-    }), { air_orders: 0, attributed_air_orders: 0, attributed_air_revenue: 0 });
+      ttp_mature_air_orders: acc.ttp_mature_air_orders + Number(row.ttp_mature_air_orders || 0),
+      ttp_paid_air_orders: acc.ttp_paid_air_orders + Number(row.ttp_paid_air_orders || 0),
+      ttp_mature_subscribers: acc.ttp_mature_subscribers + Number(row.ttp_mature_subscribers || 0),
+      ttp_paid_subscribers: acc.ttp_paid_subscribers + Number(row.ttp_paid_subscribers || 0),
+    }), {
+      total_attributed_orders: 0,
+      air_orders: 0,
+      attributed_air_orders: 0,
+      attributed_air_revenue: 0,
+      ttp_mature_air_orders: 0,
+      ttp_paid_air_orders: 0,
+      ttp_mature_subscribers: 0,
+      ttp_paid_subscribers: 0,
+    });
+    totals.attach_rate = totals.total_attributed_orders > 0
+      ? Number((totals.attributed_air_orders / totals.total_attributed_orders).toFixed(4))
+      : null;
+    totals.ttp_rate = totals.ttp_mature_air_orders > 0
+      ? Number((totals.ttp_paid_air_orders / totals.ttp_mature_air_orders).toFixed(4))
+      : null;
+    totals.activation_rate = totals.attach_rate != null && totals.ttp_rate != null
+      ? Number((totals.attach_rate * totals.ttp_rate).toFixed(4))
+      : null;
 
     res.json({ rows: fmtRows(r.rows), totals, level, start, end });
   } catch (e) {

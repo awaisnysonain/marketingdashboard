@@ -51,7 +51,9 @@ const HEADERS = [
 ];
 
 const AIR_ATTR_HEADERS = [
-  'Ad', 'Ad Set', 'Campaign', 'Air Orders', 'Attributed Air Orders', 'Attributed Air Revenue',
+  'Ad', 'Ad Set', 'Campaign', 'Total Attributed Orders', 'Air Orders', 'Attributed Air Orders',
+  'Attach Rate', 'TTP Mature Air Orders', 'TTP Paid Air Orders', 'TTP Rate', 'Activation Rate',
+  'Attributed Air Revenue',
 ];
 
 function toTableRow(r) {
@@ -97,8 +99,14 @@ function toAirAttributionTableRow(r) {
     'Ad': r.ad_name || 'Unknown ad',
     'Ad Set': r.adset_name || 'Unknown ad set',
     'Campaign': r.campaign_name,
+    'Total Attributed Orders': r.total_attributed_orders,
     'Air Orders': r.air_orders,
     'Attributed Air Orders': r.attributed_air_orders,
+    'Attach Rate': r.attach_rate,
+    'TTP Mature Air Orders': r.ttp_mature_air_orders,
+    'TTP Paid Air Orders': r.ttp_paid_air_orders,
+    'TTP Rate': r.ttp_rate,
+    'Activation Rate': r.activation_rate,
     'Attributed Air Revenue': r.attributed_air_revenue,
     _ad: r.ad_id || `${r.campaign_id}-${r.adset_id}-${r.ad_name}`,
   };
@@ -346,14 +354,18 @@ export default function NoblAirPerformancePage() {
           </Card>
 
           {/* ── NOBL Air ad attribution ── */}
-          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Exact NOBL Air orders from Triple Whale order-level attribution" style={{ marginBottom:16 }}>
+          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Exact NOBL Air orders from Triple Whale, with per-ad attach, TTP, and activation rates" style={{ marginBottom:16 }}>
             {airAttr?.error ? (
               <div style={{ color:'var(--danger)', fontSize:13 }}>NOBL Air ad attribution unavailable: {airAttr.error}</div>
             ) : airAttrRows.length === 0 ? <Empty msg="No NOBL Air ad attribution data yet. Run tw_air_attribution sync for this date range." /> : (
               <>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
                   <KpiCard label="Air Orders" value={fmtNum(airAttr.totals?.air_orders || 0)} />
+                  <KpiCard label="Total Attributed Orders" value={fmtNum(airAttr.totals?.total_attributed_orders || 0)} />
                   <KpiCard label="Attributed Air Orders" value={fmtNum(airAttr.totals?.attributed_air_orders || 0)} />
+                  <KpiCard label="Attach Rate" value={fmtPct(airAttr.totals?.attach_rate || 0)} />
+                  <KpiCard label="TTP Rate" value={fmtPct(airAttr.totals?.ttp_rate || 0)} />
+                  <KpiCard label="Activation Rate" value={fmtPct(airAttr.totals?.activation_rate || 0)} />
                   <KpiCard label="Attributed Air Revenue" value={fmt$(airAttr.totals?.attributed_air_revenue || 0)} />
                 </div>
 

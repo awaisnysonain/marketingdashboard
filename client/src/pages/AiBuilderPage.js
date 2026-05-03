@@ -97,9 +97,12 @@ function TableSection({ section, data }) {
   if (!data?.length) return <EmptyState />;
   const cols = section.columns || Object.keys(data[0]).map(f=>({field:f,label:f}));
   const headers = cols.map(c => c.label || c.field);
+  // Pass RAW values to SheetTable — its built-in fmtCell handles type detection
+  // by header name (currency/percent/date) and avoids the double-format bug
+  // where pre-formatted strings ("$357.1K") get re-parsed as numbers and become "—".
   const rows = data.slice(0, 500).map((row, i) => {
     const out = { _key: i };
-    cols.forEach(c => { out[c.label || c.field] = formatCell(row[c.field], c.format); });
+    cols.forEach(c => { out[c.label || c.field] = row[c.field]; });
     return out;
   });
   return (
@@ -440,27 +443,32 @@ export default function AiBuilderPage({ showToast, onDashboardCreated }) {
 
       if (res.error) throw new Error(res.error);
 
-      let rawContent = res.message || '';
-      const jsonMatch = rawContent.match(/\{[\s\S]*"sections"[\s\S]*\}/);
+      // Server now returns { config, message } when a dashboard is generated.
+      // Trust res.config when present — the server has already parsed and
+      // (auto-wrapped if needed) the JSON. Fall back to regex on message
+      // for backward-compat with any cached/older responses.
+      let cfg = res.config || null;
+      if (!cfg && typeof res.message === 'string') {
+        const m = res.message.match(/\{[\s\S]*"sections"[\s\S]*\}/);
+        if (m) { try { cfg = JSON.parse(m[0]); } catch {} }
+      }
 
-      if (jsonMatch) {
-        let cfg;
-        try { cfg = JSON.parse(jsonMatch[0]); } catch {}
-        if (cfg?.sections) {
-          const aiMsg = { role:'assistant', content:`Dashboard ready: **${cfg.title}**\n${cfg.description||''}\n\nPreview is showing on the right.` };
-          const newMsgs = [...hist, aiMsg];
-          setMessages(newMsgs);
-          setConfig(cfg);
-          setSaveName(cfg.title||'My Dashboard');
-          setShowSave(true);
-          executeConfig(cfg);
-          // Auto-save to history when dashboard is generated
-          saveToHistory(newMsgs, cfg);
-        } else {
-          setMessages(p=>[...p, { role:'assistant', content: rawContent }]);
-        }
+      if (cfg && Array.isArray(cfg.sections) && cfg.sections.length > 0) {
+        const aiMsg = {
+          role: 'assistant',
+          content: `Dashboard ready: **${cfg.title || 'Untitled'}**${cfg.description ? '\n' + cfg.description : ''}\n\nPreview rendering on the right.`,
+        };
+        const newMsgs = [...hist, aiMsg];
+        setMessages(newMsgs);
+        setConfig(cfg);
+        setSaveName(cfg.title || 'My Dashboard');
+        setShowSave(true);
+        executeConfig(cfg);
+        saveToHistory(newMsgs, cfg);
       } else {
-        setMessages(p=>[...p, { role:'assistant', content: rawContent }]);
+        // Plain chat / clarification — show whatever the server gave us
+        const text = (res.message || '').trim() || 'I need a bit more detail. What brand, time range, and metrics?';
+        setMessages(p=>[...p, { role:'assistant', content: text }]);
       }
     } catch(e) {
       setMessages(p=>[...p, { role:'assistant', content:`Sorry, I hit an error: ${e.message}. Please try again.` }]);

@@ -5,76 +5,64 @@ const { pgQuery } = require('../db/postgres');
 // ── Schema context string for AI prompts ──────────────────────────
 // IMPORTANT: this MUST match the actual PG schema. Verified 2026-05-01.
 const SCHEMA_CONTEXT = `
-AVAILABLE DATABASE TABLES (PostgreSQL — these are the EXACT names; do NOT invent variants):
+AVAILABLE DATABASE TABLES (PostgreSQL — use the EXACT names below):
 
 1. tw_summary_daily — Daily totals per brand (brand-level rollup, both NOBL and FLO)
    Columns: date, brand ('NOBL'|'FLO'), total_revenue, total_spend, mer, total_orders,
             new_customer_orders, returning_customer_orders, order_revenue,
             shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
-   NOTE: ALWAYS filter by brand. NOBL includes EU automatically.
+   ▸ ALWAYS filter by brand (use filters.brand: 'NOBL' or 'FLO').
+   ▸ NOBL already includes EU customers (one Shopify store, all regions).
+   ▸ total_revenue = canonical (Shopify+Amazon, includes Amazon for NOBL).
 
 2. tw_channel_daily — Channel breakdown per brand per day
    Columns: date, brand, channel ('META'|'GOOGLE'|'TIKTOK'|'SNAPCHAT'|'PINTEREST'|'APPLOVIN'|'BING'|'X'),
-            spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d,
-            new_cust_orders, cac, portable_cac, wooden_cac, metal_cac
-   NOTE: revenue_1d is multi-touch attributed; do NOT sum across channels for total revenue
-         (use tw_summary_daily.total_revenue for brand-level revenue truth).
+            spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac
+   ▸ revenue_1d is Triple Attribution (1-day window) — matches TW dashboard.
+   ▸ Do NOT sum revenue_1d across channels to get total revenue.
 
-3. tw_store_summary_daily — Per-store rollup (NOBL_MAIN, FLO_MAIN, FLO_EU separately)
-   Columns: date, store_key, brand, total_revenue, total_spend, mer, total_orders, etc.
+3. tw_geo_daily — Geographic breakdown
+   Columns: date, brand, region ('US'|'CA'|'AUS'|'DUBAI'|'EU'|'TOTAL'),
+            revenue_actual, spend_actual, mer
 
-4. tw_product_daily — FLO product-line breakdown ONLY (NOBL doesn't populate this)
-   Columns: date, brand, product_line ('portable'|'wooden'|'metal'),
-            spend, new_cust_orders, revenue,
-            meta_spend, google_spend, tiktok_spend, snap_spend,
-            pinterest_spend, bing_spend, applovin_spend
-   NOTE: For NOBL product breakdown, use shopify_product_daily instead.
+4. tw_product_daily — FLO product lines (portable/wooden/metal). NOBL not populated here.
+   Columns: date, brand, product_line, spend, revenue, new_cust_orders, ...meta_spend etc.
 
-5. klaviyo_daily — Email/SMS marketing performance
-   Columns: date, brand, emails_sent, emails_opened, emails_clicked,
-            open_rate, click_rate, revenue
+5. klaviyo_daily — Email/SMS marketing
+   Columns: date, brand, emails_sent, emails_opened, emails_clicked, open_rate, click_rate, revenue
 
-6. nobl_air_daily — NOBL Air subscription product daily metrics (mirrors the doc's "Daily Input")
+6. nobl_air_daily — NOBL Air subscription product (launched Mar 2026; data only from 2026-02 onward)
    Columns: date, total_orders, air_orders, paid_air_orders, zero_air_orders, rebill_orders,
             same_day_cancels, attach_rate, ttp_rate, activation_rate,
-            tag_gross, tag_discounts, tag_net_sales, tag_refunds,
-            sub_gross, sub_discounts, sub_net_sales, sub_refunds,
-            rebill_revenue, new_sub_revenue,
-            combined_gross, combined_net_sales, combined_net_revenue,
-            new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
-            rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119,
-            rebill_129, rebill_139, rebill_149, rebill_159
+            tag_net_sales, sub_net_sales, rebill_revenue, new_sub_revenue, combined_net_revenue,
+            new_79, new_99, new_119, new_129, new_139, new_149 (and 49/89/109/159),
+            rebill_79, rebill_99, rebill_119, rebill_129, rebill_139, rebill_149 (and 49/89/109/159)
+   ▸ NO brand filter — this table is NOBL Air only.
+   ▸ attach_rate / ttp_rate / activation_rate are decimals (0.0–1.0).
 
-7. nobl_air_subscribers — Individual NOBL Air subscriber records (one per Appstle contract)
+7. nobl_air_subscribers — Individual subscribers (18,779+ contracts)
    Columns: appstle_id, customer_email, customer_name, order_name,
-            status ('active'|'cancelled'|'paused'|...), contract_amount (the tier $79/$99/...),
-            order_amount, billing_policy_interval, currency_code,
-            created_at, updated_at, starts_at, ends_at, next_billing_date, last_billing_date,
-            cancelled_on, is_mature, is_converted, is_same_day_cancel
+            status ('active'|'cancelled'|'paused'), contract_amount (the tier — 79/99/119/etc.),
+            created_at, last_billing_date, cancelled_on, is_mature, is_converted, is_same_day_cancel
+   ▸ Date column is created_at (timestamp). Filter via DATE(created_at).
+   ▸ TTP cohort = mature converted / mature.
 
-8. shopify_product_daily — Per-product daily aggregation (BOTH brands, from Shopify line items)
+8. shopify_product_daily — Per-product daily (BOTH brands)
    Columns: brand, date, product_title, sku_prefix, units_sold, order_count,
             gross_revenue, discounts, net_revenue, refunds
 
-9. shopify_orders_raw — Per-order detail (use sparingly — 100K+ rows)
-   Columns: brand, store_key, order_id, order_name, created_at, date_key, customer_id,
-            customer_email, customer_name, total_price, subtotal_price, total_discounts,
-            shipping_country, shipping_state, financial_status, fulfillment_status,
-            has_air, has_luggage, is_rebill, has_paid_air, has_zero_air,
-            tag_gross, tag_discounts, tag_refunds, sub_gross, sub_discounts, sub_refunds
+9. shopify_orders_raw — Per-order detail (date column is date_key)
+   Columns: brand, date_key, order_name, customer_email, total_price,
+            shipping_country, has_air, has_luggage, is_rebill, ...
 
 COMPUTED METRICS (use as SQL expressions with aliases):
-- MER:        total_revenue / NULLIF(total_spend, 0) AS mer
-- AOV:        total_revenue / NULLIF(total_orders, 0) AS aov
-- NC%:        new_customer_orders * 100.0 / NULLIF(total_orders, 0) AS nc_pct
-- ROAS:       revenue_1d / NULLIF(spend_1d, 0) AS roas
-- CAC:        spend_1d / NULLIF(new_cust_orders, 0) AS cac
-- CVR:        purchases_1d / NULLIF(new_cust_orders, 0) AS cvr
-- Attach %:   attach_rate * 100 (already a fraction in nobl_air_daily)
-- TTP %:      ttp_rate * 100 (already a fraction in nobl_air_daily)
-- Activation: activation_rate * 100 (already a fraction)
+- MER:    total_revenue / NULLIF(total_spend, 0) AS mer
+- AOV:    total_revenue / NULLIF(total_orders, 0) AS aov
+- NC%:    new_customer_orders * 100.0 / NULLIF(total_orders, 0) AS nc_pct
+- ROAS:   revenue_1d / NULLIF(spend_1d, 0) AS roas
+- CAC:    spend_1d / NULLIF(new_cust_orders, 0) AS cac
 
-Data available from 2024-01-01. All amounts in USD. Today = ${new Date().toISOString().slice(0,10)}.
+Data: 2024-01-01 onward. All amounts USD. Today = ${new Date().toISOString().slice(0,10)}.
 `;
 
 // ── Dashboard generation system prompts ───────────────────────────
@@ -96,15 +84,25 @@ ONLY ask clarifying questions if the request is genuinely ambiguous (e.g. "show 
 with no brand or metric). When you do ask, ask ONLY the missing pieces — never ask things the
 user already specified.
 
-When generating, output exactly:
-"Got it! Generating your dashboard now..."
-Then on a new line, output ONLY a valid JSON config (no markdown, no explanation, no code fences) in this format:
+When generating, output exactly the line:
+  Got it! Generating your dashboard now...
+
+Then on a new line, output ONLY a single JSON OBJECT (no markdown, no code fences,
+no explanation, no array wrapper).
+
+CRITICAL: the JSON must be a SINGLE OBJECT, NOT a bare array. The shape is:
 
 {
-  "title": "...",
-  "description": "...",
-  "sections": [ ... ]
+  "title": "Short descriptive title",
+  "description": "One-line summary",
+  "sections": [
+    { "type": "line_chart", ... },
+    { "type": "table", ... }
+  ]
 }
+
+DO NOT output a bare array like [ {...} ] — always wrap with the title/description/sections envelope.
+The "sections" array goes INSIDE the object.
 
 ${SCHEMA_CONTEXT}
 
@@ -113,47 +111,77 @@ SECTION FORMATS you may use:
 KPI row (summary numbers):
 {
   "type": "kpi_row",
-  "title": "Section Title",
+  "title": "Performance",
   "items": [
-    { "label": "Total Revenue", "field": "total_revenue", "format": "currency" },
-    { "label": "Total Spend",   "field": "total_spend",   "format": "currency" },
-    { "label": "MER",           "field": "mer",           "format": "number" }
+    { "label": "Revenue", "field": "total_revenue", "format": "currency" },
+    { "label": "Spend",   "field": "total_spend",   "format": "currency" },
+    { "label": "MER",     "field": "mer",           "format": "number" }
   ],
   "query": {
-    "table": "nobl_brand_tw_summary_daily",
-    "columns": ["COALESCE(SUM(total_revenue),0) AS total_revenue", "COALESCE(SUM(total_spend),0) AS total_spend", "ROUND(SUM(total_revenue)/NULLIF(SUM(total_spend),0),2) AS mer"],
-    "filters": { "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" }
+    "table": "tw_summary_daily",
+    "columns": [
+      "COALESCE(SUM(total_revenue),0) AS total_revenue",
+      "COALESCE(SUM(total_spend),0) AS total_spend",
+      "ROUND(SUM(total_revenue)/NULLIF(SUM(total_spend),0),2) AS mer"
+    ],
+    "filters": { "brand": "NOBL", "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" }
   }
 }
 
-Time-series chart:
+Time-series chart (single brand):
 {
   "type": "line_chart",
-  "title": "Revenue vs Spend",
+  "title": "NOBL Revenue vs Spend (last 30d)",
   "xField": "date",
   "series": [
     { "field": "total_revenue", "label": "Revenue", "color": "#3b5bdb" },
     { "field": "total_spend",   "label": "Spend",   "color": "#cc8a00" }
   ],
   "query": {
-    "table": "nobl_brand_tw_summary_daily",
+    "table": "tw_summary_daily",
     "columns": ["date", "total_revenue", "total_spend"],
-    "filters": { "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" },
+    "filters": { "brand": "NOBL", "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" },
     "order_by": "date",
-    "limit": 365
+    "limit": 400
   }
 }
+
+YEAR-OVER-YEAR comparison (e.g. "compare 2025 vs 2026 daily revenue NOBL"):
+Use TWO sections, each filtered to a different year. The chart gets two lines.
+[
+  {
+    "type": "line_chart",
+    "title": "NOBL Daily Revenue — 2025 vs 2026",
+    "xField": "month_day",
+    "series": [
+      { "field": "rev_2025", "label": "2025", "color": "#94a3b8" },
+      { "field": "rev_2026", "label": "2026", "color": "#3b5bdb" }
+    ],
+    "query": {
+      "table": "tw_summary_daily",
+      "columns": [
+        "TO_CHAR(date, 'MM-DD') AS month_day",
+        "SUM(CASE WHEN EXTRACT(YEAR FROM date) = 2025 THEN total_revenue ELSE 0 END) AS rev_2025",
+        "SUM(CASE WHEN EXTRACT(YEAR FROM date) = 2026 THEN total_revenue ELSE 0 END) AS rev_2026"
+      ],
+      "filters": { "brand": "NOBL", "start_date": "2025-01-01", "end_date": "DYNAMIC_TODAY" },
+      "group_by": ["month_day"],
+      "order_by": "month_day",
+      "limit": 400
+    }
+  }
+]
 
 Bar chart by channel:
 {
   "type": "bar_chart",
-  "title": "Spend by Channel",
+  "title": "Spend by Channel — NOBL",
   "xField": "channel",
   "series": [{ "field": "total_spend", "label": "Spend", "color": "#3b5bdb" }],
   "query": {
-    "table": "nobl_brand_tw_channel_daily",
+    "table": "tw_channel_daily",
     "columns": ["channel", "COALESCE(SUM(spend_1d),0) AS total_spend"],
-    "filters": { "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" },
+    "filters": { "brand": "NOBL", "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" },
     "group_by": ["channel"],
     "order_by": "-total_spend"
   }
@@ -170,29 +198,30 @@ Detail table:
     { "field": "mer",           "label": "MER",     "format": "number"   }
   ],
   "query": {
-    "table": "nobl_brand_tw_summary_daily",
+    "table": "tw_summary_daily",
     "columns": ["date", "total_revenue", "total_spend", "mer"],
-    "filters": { "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" },
+    "filters": { "brand": "NOBL", "start_date": "DYNAMIC_START", "end_date": "DYNAMIC_TODAY" },
     "order_by": "-date",
     "limit": 90
   }
 }
 
-RULES:
-- Use ONLY the EXACT table names from the schema above (tw_summary_daily, tw_channel_daily,
-  tw_product_daily, klaviyo_daily, nobl_air_daily, nobl_air_subscribers,
-  shopify_product_daily, shopify_orders_raw, tw_store_summary_daily).
-  Never invent variants like "nobl_brand_*" or "flo_brand_*" — those don't exist.
-- For brand filtering, add { "brand": "NOBL" } or { "brand": "FLO" } in filters.
-- Use COALESCE(SUM(...), 0) for aggregated numeric KPI columns to avoid nulls.
-- Use "DYNAMIC_TODAY" for end_date, "DYNAMIC_START" for default start (30 days ago),
-  or specific ISO dates ("2026-04-01"/"2026-04-30") for fixed periods.
-- For channel tables: spend column = "spend_1d", revenue (attributed) = "revenue_1d"
-- For summary tables: spend = "total_spend", revenue = "total_revenue"
-- For NOBL Air metrics: use nobl_air_daily (no brand filter — that table is NOBL Air only).
-- Use field aliases that EXACTLY match the "field" in items/series/columns arrays.
+RULES (read carefully):
+- Use ONLY these table names: tw_summary_daily, tw_channel_daily, tw_geo_daily,
+  tw_product_daily, tw_store_summary_daily, klaviyo_daily, nobl_air_daily,
+  nobl_air_subscribers, shopify_product_daily, shopify_orders_raw.
+  Do NOT use "nobl_brand_*" or "flo_brand_*" — apply the brand filter instead.
+- ALWAYS include filters.brand for tables that have a brand column (everything except
+  nobl_air_daily and nobl_air_subscribers).
+- Use COALESCE(SUM(...), 0) for aggregated KPI columns to avoid nulls.
+- Use "DYNAMIC_TODAY"/"DYNAMIC_START" or specific ISO dates ("2025-01-01") for filters.
+- For YoY/multi-year comparisons: use TO_CHAR + CASE WHEN EXTRACT(YEAR ...) pattern above.
+- For channel tables: spend = spend_1d, revenue = revenue_1d.
+- For summary tables: spend = total_spend, revenue = total_revenue.
+- nobl_air_daily has no brand filter — it's NOBL Air only. Data starts Feb 2026.
+- Field aliases in your SELECT columns MUST EXACTLY match the "field" in items/series/columns.
 - Include 3–5 sections. Always include at least one KPI row and one chart.
-- Respond ONLY with the JSON when generating (no markdown, no text before/after the JSON).
+- Respond ONLY with the JSON when generating (no markdown, no code fences, no extra text).
 
 CHANNEL/BRAND COLORS:
 - NOBL=#3b5bdb, FLO=#2f9e6c
@@ -200,10 +229,11 @@ CHANNEL/BRAND COLORS:
 - APPLOVIN=#9333ea, BING=#0ea5e9, PINTEREST=#e60023, X=#1f2937
 
 COMMON PATTERNS:
-- "META for NOBL 30d"  → table=tw_channel_daily, filters={brand:'NOBL', channel:'META', start:DYNAMIC_START}
-- "NOBL Air attach"    → table=nobl_air_daily, columns=[date, attach_rate]
-- "TTP by tier"        → table=nobl_air_subscribers, group by contract_amount, compute is_converted/is_mature ratio
-- "Top NOBL products"  → table=shopify_product_daily, filters={brand:'NOBL'}, group by product_title`;
+- "META for NOBL 30d"        → tw_channel_daily, filters={brand:'NOBL', channel:'META', start:DYNAMIC_START}
+- "Compare NOBL 2025 vs 2026" → tw_summary_daily with TO_CHAR + CASE pattern shown above
+- "NOBL Air attach trend"    → nobl_air_daily, columns=[date, attach_rate]
+- "TTP by tier"              → nobl_air_subscribers, group_by=[contract_amount]
+- "Top NOBL products"        → shopify_product_daily, filters={brand:'NOBL'}, group_by=[product_title]`;
 }
 
 // ── Allowed tables and their allowed columns ──────────────────────
@@ -356,8 +386,21 @@ function buildSectionQuery(query, defaultWindowDays = 30) {
   // If any column is an aggregate, non-aggregate bare columns must be in GROUP BY
   const hasAgg = processedCols.some(c => isAggregate(c));
 
+  // GROUP BY: accept (a) real columns from ALLOWED_TABLES, OR (b) aliases that
+  // appear in our SELECT list (the AI uses these for derived columns like month_day).
+  const selectAliases = new Set(
+    processedCols
+      .map(c => {
+        const m = c.match(/\bAS\s+(\w+)\s*$/i);
+        return m ? m[1].toLowerCase() : null;
+      })
+      .filter(Boolean)
+  );
   let effectiveGroupBy = (rawGroupBy && Array.isArray(rawGroupBy))
-    ? rawGroupBy.map(c => c.trim()).filter(c => ALLOWED_TABLES[table].includes(c.toLowerCase()))
+    ? rawGroupBy.map(c => c.trim()).filter(c =>
+        ALLOWED_TABLES[table].includes(c.toLowerCase()) ||
+        selectAliases.has(c.toLowerCase())
+      )
     : [];
 
   if (hasAgg && effectiveGroupBy.length === 0) {
@@ -398,9 +441,11 @@ function buildSectionQuery(query, defaultWindowDays = 30) {
   if (filters.status)       { whereParts.push(`status = $${paramIdx++}`);       params.push(filters.status);       }
   if (whereParts.length > 0) sql += ` WHERE ${whereParts.join(' AND ')}`;
 
-  // GROUP BY
+  // GROUP BY — alias columns aren't quoted (PG resolves them positionally).
   if (effectiveGroupBy.length > 0) {
-    sql += ` GROUP BY ${effectiveGroupBy.map(c => `"${c}"`).join(', ')}`;
+    sql += ` GROUP BY ${effectiveGroupBy
+      .map(c => selectAliases.has(c.toLowerCase()) ? c : `"${c}"`)
+      .join(', ')}`;
   }
 
   // ORDER BY
@@ -525,27 +570,40 @@ router.post('/execute', async (req, res) => {
 
   const results = {};
   const errors  = {};
+  const debug   = {};
 
   await Promise.all(
     config.sections.map(async (section, idx) => {
-      if (!section.query) { results[idx] = []; return; }
+      if (!section.query) {
+        results[idx] = [];
+        debug[idx] = { skipped: 'no query specified' };
+        return;
+      }
       try {
         const { sql, params } = buildSectionQuery(section.query);
+        debug[idx] = { sql, params, table: section.query.table };
         console.log(`[Execute §${idx}]`, sql.slice(0, 200), params);
         const r = await pgQuery(sql, params);
         results[idx] = fmtRows(r.rows);
+        debug[idx].rowCount = r.rows.length;
         console.log(`[Execute §${idx}] → ${r.rows.length} rows`);
+        if (r.rows.length === 0) {
+          errors[idx] = `No data for "${section.title}". Tried ${section.query.table} with ${
+            section.query.filters?.brand ? `brand=${section.query.filters.brand}, ` : ''
+          }dates ${section.query.filters?.start_date || 'auto'}..${section.query.filters?.end_date || 'auto'}.`;
+        }
       } catch (e) {
         console.error(`[Execute §${idx}]`, e.message);
         errors[idx] = e.message;
         results[idx] = [];
+        debug[idx] = { error: e.message, query: section.query };
       }
     })
   );
 
   res.json({
     results,
-    ...(Object.keys(errors).length > 0 ? { errors } : {}),
+    ...(Object.keys(errors).length > 0 ? { errors, debug } : {}),
   });
 });
 

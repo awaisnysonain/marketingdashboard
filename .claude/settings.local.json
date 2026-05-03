@@ -245,7 +245,13 @@
       "Bash(taskkill //F //PID 5240)",
       "Bash(powershell -c \"Get-Process node | Format-Table Id,StartTime -AutoSize\")",
       "Bash(taskkill //F //PID 8620)",
-      "Bash(node -e \"require\\('dotenv'\\).config\\({path:'.env'}\\);const{pgQuery}=require\\('./server/db/postgres'\\);\\(async\\(\\)=>{const a=await pgQuery\\('SELECT brand,COUNT\\(*\\)::int n,MAX\\(date\\)::date max_d FROM tw_summary_daily GROUP BY brand',[]\\);a.rows.forEach\\(r=>console.log\\(' ',r\\)\\);process.exit\\(0\\);}\\)\\(\\);\")"
+      "Bash(node -e \"require\\('dotenv'\\).config\\({path:'.env'}\\);const{pgQuery}=require\\('./server/db/postgres'\\);\\(async\\(\\)=>{const a=await pgQuery\\('SELECT brand,COUNT\\(*\\)::int n,MAX\\(date\\)::date max_d FROM tw_summary_daily GROUP BY brand',[]\\);a.rows.forEach\\(r=>console.log\\(' ',r\\)\\);process.exit\\(0\\);}\\)\\(\\);\")",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3001/)",
+      "Bash(grep -v \"//.*router\\\\.\")",
+      "Bash(awk '{print $NF}')",
+      "Bash(xargs -I {} taskkill //F //PID {})",
+      "Bash(node -e \"require\\('./server/routes/aiDashboards'\\)\")",
+      "Bash(echo \"server PID $!\")"
     ]
   }
 }

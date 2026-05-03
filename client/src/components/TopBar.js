@@ -103,26 +103,33 @@ export default function TopBar({
 
         <div style={{ width: 1, height: 16, background: 'var(--border2)', margin: '0 1px' }} />
 
-        {/* Sync dot + button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        {/* Sync dot — passive status indicator (visible to all) */}
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '0 6px' }}
+          title={syncDot?.title || 'Sync status — runs daily at 11 AM Pakistan time'}
+        >
           {syncDot && (
-            <span
-              title={syncDot.title}
-              style={{
-                width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
-                background: syncDot.color,
-              }}
-            />
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+              background: syncDot.color,
+            }} />
           )}
+          <span style={{ fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' }}>
+            {refreshing ? 'Syncing…' : 'Auto-sync 11 AM PKT'}
+          </span>
+        </div>
+
+        {/* Manual Sync button — admin only */}
+        {appUser?.role === 'admin' && (
           <HeaderBtn
             icon={Icons.RefreshCw}
-            label={refreshing ? 'Syncing' : 'Sync'}
+            label={refreshing ? 'Syncing' : 'Sync now'}
             onClick={onRefresh}
             disabled={refreshing}
-            title="Fetch latest data from all APIs"
+            title="Manually trigger sync (admin only — rate-limited to 6/hour)"
             small
           />
-        </div>
+        )}
 
         {/* Sync status detail */}
         <HeaderBtn icon={Icons.Database} onClick={onOpenSync} title="Sync status" active={activeTab === 'Sync Status'} />

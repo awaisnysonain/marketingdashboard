@@ -84,6 +84,7 @@ export default function SheetTable({
   const [anchor, setAnchor] = useState(null);       // { r, c }
   const [dragging, setDragging] = useState(false);
   const [colWidths, setColWidths] = useState({});
+  const [hoverCell, setHoverCell] = useState(null);
   const dragStart = useRef(null);
   const resizeRef = useRef(null);
 
@@ -216,6 +217,32 @@ export default function SheetTable({
 
   function handleMouseUp() { setDragging(false); }
 
+  function positionHover(e) {
+    const maxWidth = 520;
+    const left = Math.min(e.clientX + 14, Math.max(12, window.innerWidth - maxWidth - 12));
+    const top = Math.min(e.clientY + 16, Math.max(12, window.innerHeight - 220));
+    return { left, top };
+  }
+
+  function showCellHover(e, row, header, rowIndex) {
+    if (dragging || resizeRef.current) return;
+    const raw = row?.[header];
+    setHoverCell({
+      ...positionHover(e),
+      header,
+      rowIndex: rowIndex + 1,
+      formatted: fmtVal(raw, header),
+      raw: raw == null || raw === '' ? '—' : String(raw),
+    });
+  }
+
+  function moveCellHover(e) {
+    if (!hoverCell || dragging || resizeRef.current) return;
+    setHoverCell(prev => prev ? { ...prev, ...positionHover(e) } : prev);
+  }
+
+  function hideCellHover() { setHoverCell(null); }
+
   function startColumnResize(e, header) {
     e.preventDefault();
     e.stopPropagation();
@@ -269,11 +296,11 @@ export default function SheetTable({
   const cellPad = compact ? '4px 8px' : '6px 10px';
 
   return (
-    <div
-      onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
-      style={{ userSelect: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}
-    >
+      <div
+        onMouseUp={handleMouseUp}
+        onMouseLeave={() => { handleMouseUp(); hideCellHover(); }}
+        style={{ userSelect: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}
+      >
       {/* ── toolbar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {searchable && (
@@ -464,7 +491,9 @@ export default function SheetTable({
                       <td
                         key={h}
                         onMouseDown={e => handleCellMouseDown(ri, ci, e)}
-                        onMouseEnter={() => handleCellMouseEnter(ri, ci)}
+                        onMouseEnter={e => { handleCellMouseEnter(ri, ci); showCellHover(e, row, h, ri); }}
+                        onMouseMove={moveCellHover}
+                        onMouseLeave={hideCellHover}
                         style={{
                           padding: cellPad,
                           borderBottom: '1px solid var(--row-sep)',
@@ -503,9 +532,43 @@ export default function SheetTable({
         </table>
       </div>
 
+      {hoverCell && (
+        <div
+          style={{
+            position: 'fixed',
+            left: hoverCell.left,
+            top: hoverCell.top,
+            zIndex: 9999,
+            maxWidth: 520,
+            minWidth: 220,
+            padding: '10px 12px',
+            borderRadius: 10,
+            border: '1px solid var(--border2)',
+            background: 'var(--bg)',
+            color: 'var(--text)',
+            boxShadow: '0 18px 48px rgba(0,0,0,.35)',
+            pointerEvents: 'none',
+            userSelect: 'text',
+          }}
+        >
+          <div style={{ display:'flex', justifyContent:'space-between', gap:12, marginBottom:8, color:'var(--text3)', fontSize:10, textTransform:'uppercase', letterSpacing:'.06em' }}>
+            <span>{hoverCell.header}</span>
+            <span>Row {hoverCell.rowIndex}</span>
+          </div>
+          <div style={{ fontSize:13, lineHeight:1.45, whiteSpace:'pre-wrap', wordBreak:'break-word' }}>
+            {hoverCell.raw}
+          </div>
+          {hoverCell.formatted !== hoverCell.raw && (
+            <div style={{ marginTop:8, paddingTop:8, borderTop:'1px solid var(--border)', color:'var(--text3)', fontSize:11 }}>
+              Formatted: <span style={{ color:'var(--text2)' }}>{hoverCell.formatted}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── keyboard hint ── */}
       <div style={{ fontSize: 10, color: 'var(--text4)' }}>
-        Click to select · Shift+click range · Ctrl+click multi · Drag column edge to resize · Ctrl+C copy
+        Hover cell for full value · Click to select · Shift+click range · Ctrl+click multi · Drag column edge to resize · Ctrl+C copy
       </div>
     </div>
   );

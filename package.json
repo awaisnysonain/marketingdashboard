@@ -21,6 +21,7 @@
     "googleapis": "^140.0.0",
     "helmet": "^7.1.0",
     "node-cron": "^3.0.3",
+    "nodemailer": "^8.0.7",
     "openai": "^6.34.0",
     "pg": "^8.20.0"
   },

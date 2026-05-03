@@ -108,10 +108,28 @@ export default function App() {
 
   async function handleRefresh() {
     if (refreshing) return;
+    if (appUser?.role !== 'admin') {
+      showToast('Manual sync is admin-only. Daily auto-sync runs at 11 AM Pakistan time.', 'info');
+      return;
+    }
     setRefreshing(true);
     try {
-      await triggerSync({ tasks: ['klaviyo', 'appstle', 'tw_refresh'] });
-      showToast('Sync started — data will update in ~2 min', 'success');
+      // Hits /api/sync/trigger-daily — server-side single-flight + rate limit
+      const res = await fetch('/api/sync/trigger-daily', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.status === 403) {
+        showToast('Manual sync is admin-only.', 'error');
+      } else if (res.status === 429) {
+        showToast(data.error || 'Rate limit reached — try again later', 'error');
+      } else if (data.already_running) {
+        showToast('A sync is already running — your click joined that run.', 'info');
+      } else {
+        showToast('Sync started — data will update in ~5 min.', 'success');
+      }
     } catch {
       showToast('Failed to start sync', 'error');
     } finally {

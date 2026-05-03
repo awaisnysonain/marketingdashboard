@@ -471,6 +471,16 @@ app.get('/auth/app-status', async (req, res) => {
   res.json({ authenticated: true, user });
 });
 
+// Single admin email — everyone else is 'viewer' regardless of signup order.
+// This is intentional: admin powers (sync trigger, future settings) only ever
+// belong to this address. To grant elsewhere, change ADMIN_EMAIL env or add an
+// explicit role-update endpoint.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'muhammad.awais@nysonian.com').toLowerCase().trim();
+
+function roleForEmail(email) {
+  return String(email || '').toLowerCase().trim() === ADMIN_EMAIL ? 'admin' : 'viewer';
+}
+
 app.post('/auth/app-signup', authLimiter, async (req, res) => {
   const { email, password, name } = req.body;
   if (!email || !password || !name)
@@ -483,8 +493,8 @@ app.post('/auth/app-signup', authLimiter, async (req, res) => {
   try {
     const existing = await pgQuery('SELECT id FROM app_users WHERE email=$1', [emailLow]);
     if (existing.rows.length) return res.status(400).json({ error: 'An account with this email already exists' });
-    const countRes = await pgQuery('SELECT COUNT(*)::int AS n FROM app_users', []);
-    const role = countRes.rows[0].n === 0 ? 'admin' : 'viewer';
+    // Role is determined by email, not by signup order.
+    const role = roleForEmail(emailLow);
     const hash = bcrypt.hashSync(password, 12);
     const ins = await pgQuery(
       `INSERT INTO app_users (email, password_hash, name, role)
@@ -505,10 +515,18 @@ app.post('/auth/app-login', authLimiter, async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password)
     return res.status(400).json({ error: 'Email and password are required' });
-  const r = await pgQuery('SELECT * FROM app_users WHERE email=$1', [email.toLowerCase().trim()]);
+  const emailLow = email.toLowerCase().trim();
+  const r = await pgQuery('SELECT * FROM app_users WHERE email=$1', [emailLow]);
   const user = r.rows[0];
   if (!user || !bcrypt.compareSync(password, user.password_hash))
     return res.status(401).json({ error: 'Invalid email or password' });
+  // Re-assert role at every login — guarantees only ADMIN_EMAIL is admin
+  // (handles legacy accounts and prevents accidental promotions).
+  const expectedRole = roleForEmail(user.email);
+  if (user.role !== expectedRole) {
+    await pgRun('UPDATE app_users SET role=$1 WHERE id=$2', [expectedRole, user.id]);
+    user.role = expectedRole;
+  }
   await pgRun('UPDATE app_users SET last_login = NOW() WHERE id=$1', [user.id]);
   req.session.userId = user.id;
   res.json({ ok: true, user: { id: user.id, email: user.email, name: user.name, role: user.role } });
@@ -612,12 +630,25 @@ tw_store_summary_daily(id, brand, store_key, shop_id, date, total_revenue, total
 klaviyo_daily(id, date, brand, emails_sent, emails_opened, emails_clicked, open_rate, click_rate, revenue)
   → brand = 'NOBL' or 'FLO'
 
-appstle_subscriptions(id, subscription_id, customer_id, status, product_title, sku, price, billing_interval, created_at, updated_at, next_billing_date)
-  → status: 'active','paused','cancelled'
-  → This is NOBL Air subscription data
+nobl_air_subscribers(appstle_id, customer_email, customer_name, order_name, status, contract_amount, order_amount, billing_policy_interval, currency_code, created_at, last_billing_date, next_billing_date, cancelled_on, is_mature, is_converted, is_same_day_cancel)
+  → 18,779+ Appstle subscription contracts. Date column is created_at (TIMESTAMPTZ).
+  → contract_amount = the monthly tier (49, 79, 89, 99, 109, 119, 129, 139, 149, 159).
+  → status values: 'active','cancelled','paused'.
+  → is_converted = the customer was actually billed (lastSuccessfulOrder.orderAmount > 0).
+  → is_mature = created >= 14 days ago. TTP rate = converted / mature within cohort.
 
-nobl_air_sub_revenue_daily(id, date, revenue, orders, aov, created_at)
-  → Daily NOBL Air subscription revenue
+nobl_air_daily(date, total_orders, air_orders, paid_air_orders, zero_air_orders, rebill_orders, same_day_cancels, attach_rate, ttp_rate, activation_rate, tag_net_sales, sub_net_sales, rebill_revenue, new_sub_revenue, combined_net_revenue, new_49..new_159, rebill_49..rebill_159)
+  → NOBL Air daily metrics — mirrors the technical doc's "Daily Input" tab.
+  → No brand filter (NOBL Air-only product). Data starts 2026-02 (product launched March 2026).
+  → attach_rate / ttp_rate / activation_rate are decimals (0.0–1.0). Multiply by 100 for %.
+
+shopify_product_daily(brand, date, product_title, sku_prefix, units_sold, order_count, gross_revenue, discounts, net_revenue, refunds)
+  → Per-product daily aggregation for BOTH brands, derived from Shopify line items.
+  → Use this for product breakdowns ("top NOBL products", "FLO subscription revenue", etc.).
+
+shopify_orders_raw(brand, store_key, order_id, order_name, created_at, date_key, customer_email, total_price, shipping_country, has_air, has_luggage, is_rebill, has_paid_air, tag_gross, sub_gross)
+  → Per-order detail. Date column is date_key (DATE). 600K+ rows.
+  → has_air = order contains a NOBLAIR-prefixed SKU. is_rebill = NOBLAIR with no luggage SKU.
 
 etl_run_log(id, run_id, brand, task, start_date, end_date, status, rows_written, error_message, started_at, finished_at)
   → Track ETL sync health
@@ -710,14 +741,34 @@ In tw_channel_daily_all: facebook-ads, google-ads, applovin, tiktok-ads, snapcha
 US = United States, CA = Canada, AUS = Australia, DUBAI = UAE/Dubai, EU = European Union, TOTAL = all regions combined
 
 ━━━ BEHAVIOR RULES ━━━
-1. NEVER ask clarifying questions — just answer with the data
-2. If the user asks about a metric, query the database and show the actual numbers
-3. Always show specific numbers, not vague answers
-4. When returning data for charts/tables, format it as clean JSON in chartData
-5. Be concise — executives want bullet points and numbers
-6. Today is 2026-04-29. "Yesterday" = 2026-04-27 (latest available)
-7. For date filtering: use DATE(date AT TIME ZONE 'UTC') = 'YYYY-MM-DD'::date
-8. Return chartHint as: "line_chart", "bar_chart", "table", or "kpi_cards" based on what data you return`;
+1. NEVER ask clarifying questions — just answer with the data using query_database.
+2. Always show specific numbers, not vague answers.
+3. When returning data for charts/tables, format it as clean JSON in chartData.
+4. Be concise — executives want bullet points and numbers.
+5. Date filtering: most tables use a 'date' column (DATE). Use BETWEEN '$1'::date AND '$2'::date.
+   - shopify_orders_raw uses date_key.
+   - nobl_air_subscribers uses created_at (cast via DATE(created_at)).
+6. Today's date is dynamic — call NOW() or use current_date in SQL when you need "today".
+7. Return chartHint as: "line_chart", "bar_chart", "table", or "kpi_cards" based on what data you return.
+
+━━━ COMMON QUERIES ━━━
+- Daily revenue NOBL last 30 days:
+    SELECT date, total_revenue FROM tw_summary_daily
+    WHERE brand='NOBL' AND date >= current_date - 30 ORDER BY date
+- META spend/revenue NOBL Apr 2026:
+    SELECT date, spend_1d, revenue_1d, roas_1d FROM tw_channel_daily
+    WHERE brand='NOBL' AND channel='META' AND date BETWEEN '2026-04-01'::date AND '2026-04-30'::date
+- NOBL Air attach rate trend:
+    SELECT date, attach_rate, ttp_rate FROM nobl_air_daily ORDER BY date DESC LIMIT 60
+- Active subscribers by tier:
+    SELECT contract_amount AS tier, COUNT(*) FILTER (WHERE status='active')::int AS active
+    FROM nobl_air_subscribers WHERE contract_amount IN (49,79,89,99,109,119,129,139,149,159)
+    GROUP BY tier ORDER BY tier
+- Top NOBL products last 30 days:
+    SELECT product_title, SUM(units_sold)::int AS units, SUM(net_revenue)::numeric(14,2) AS revenue
+    FROM shopify_product_daily
+    WHERE brand='NOBL' AND date >= current_date - 30
+    GROUP BY product_title HAVING SUM(units_sold) > 50 ORDER BY revenue DESC LIMIT 20`;
 
 const DB_TOOL = {
   type: 'function',
@@ -906,25 +957,72 @@ app.post('/api/ai/dashboard-generate', async (req, res) => {
     // Strip markdown code fences if present
     const cleaned = raw.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
 
-    // Detect if this is a JSON config or a natural-language clarification question
-    const jsonStart = cleaned.search(/\{[\s\S]*"sections"/);
+    // Try to extract a JSON config from the response. The AI sometimes returns:
+    //   (a) a wrapped object   →  {"title":"...", "sections":[...]}
+    //   (b) a bare sections array  →  [{"type":"line_chart", ...}]   ← we auto-wrap
+    //   (c) a chat reply with embedded JSON (after "Got it! Generating...")
+    function extractJsonConfig(text) {
+      // Look for the first balanced JSON value (object or array) anywhere in the text
+      const candidates = [];
+      // Object form
+      const objIdx = text.search(/\{[\s\S]*?"sections"\s*:/);
+      if (objIdx !== -1) candidates.push({ type: 'object', start: objIdx });
+      // Array form — first '[' that's followed by an object containing "type" and "query"
+      const arrMatch = text.match(/\[\s*\{[\s\S]*?"type"[\s\S]*?"query"/);
+      if (arrMatch) candidates.push({ type: 'array', start: text.indexOf(arrMatch[0]) });
+      if (candidates.length === 0) return null;
 
-    if (jsonStart !== -1) {
-      // AI generated a config — parse and validate it
-      const jsonStr = cleaned.slice(jsonStart);
-      let config;
-      try {
-        config = JSON.parse(jsonStr);
-      } catch(parseErr) {
-        console.error('[AI Dashboard Gen] Parse error:', parseErr.message, '\nRaw:', cleaned.slice(0, 300));
-        // Return as a conversational message so user knows what happened
-        return res.json({ message: raw + '\n\n(Note: JSON parse error — please try again with clearer requirements)' });
+      // Try each candidate; balanced-brace scan to find the closing token
+      for (const c of candidates.sort((a,b) => a.start - b.start)) {
+        const open = c.type === 'object' ? '{' : '[';
+        const close = c.type === 'object' ? '}' : ']';
+        let depth = 0, inStr = false, esc = false, end = -1;
+        for (let i = c.start; i < text.length; i++) {
+          const ch = text[i];
+          if (esc) { esc = false; continue; }
+          if (ch === '\\') { esc = true; continue; }
+          if (ch === '"') { inStr = !inStr; continue; }
+          if (inStr) continue;
+          if (ch === open) depth++;
+          else if (ch === close) {
+            depth--;
+            if (depth === 0) { end = i + 1; break; }
+          }
+        }
+        if (end === -1) continue;
+        const slice = text.slice(c.start, end);
+        try {
+          const parsed = JSON.parse(slice);
+          if (c.type === 'array') {
+            // Auto-wrap into the canonical config shape
+            const sections = Array.isArray(parsed) ? parsed : [];
+            const firstTitle = sections[0]?.title || 'Custom dashboard';
+            return { title: firstTitle, description: '', sections };
+          }
+          if (parsed && Array.isArray(parsed.sections)) return parsed;
+        } catch { /* try next candidate */ }
       }
-      if (!config?.sections) {
-        return res.json({ message: raw });
-      }
-      console.log('[AI Dashboard Gen] Config generated:', config.title, `(${config.sections.length} sections)`);
-      return res.json({ config, message: raw });
+      return null;
+    }
+
+    const config = extractJsonConfig(cleaned);
+
+    if (config && Array.isArray(config.sections) && config.sections.length > 0) {
+      console.log('[AI Dashboard Gen] Config generated:', config.title, `(${config.sections.length} section(s))`);
+      // Strip the JSON from the user-facing message — keep only any prose before it
+      // (e.g. "Got it! Generating your dashboard now...")
+      const messageOnly = (raw.split(/\{[\s\S]*"sections"|\[\s*\{[\s\S]*"type"/)[0] || '').trim() ||
+                          'Dashboard generated.';
+      return res.json({ config, message: messageOnly });
+    }
+
+    // Couldn't extract a usable config. If the response LOOKS like JSON but was
+    // malformed, tell the user — otherwise treat as a clarification question.
+    if (/\{[\s\S]*"sections"|\[\s*\{[\s\S]*"type"/.test(cleaned)) {
+      console.error('[AI Dashboard Gen] Could not parse JSON. Raw:', cleaned.slice(0, 400));
+      return res.json({
+        message: 'I generated a dashboard config but it had a JSON error. Could you try again? You can be more specific (e.g. "compare NOBL daily revenue 2025 vs 2026 — show as line chart").'
+      });
     }
 
     // Natural language response (clarification questions or acknowledgement)
@@ -973,76 +1071,268 @@ app.use('/api/sync/status', requireAppAuth, syncStatusRouter);
 app.use('/api/tw',    requireAppAuth, twRouter);
 app.use('/api/store', requireAppAuth, storeRouter);
 
-// ── Daily cron: 06:00 UTC = 11:00 AM Asia/Karachi (GMT+5) ───────
-// Each run: (1) sync yesterday + (2) backfill any missing days in last 14d
-//           (catches days where the previous cron failed or data arrived late).
+// ── Daily cron: 11:00 AM Asia/Karachi (Pakistan Standard Time) ──────────────
+// Each run:
+//   1. Auto-cleanup any stuck "running" entries from previous failures
+//   2. Find missing days in the last 14d and include them in the range
+//   3. Run ALL 9 ETL tasks
+//   4. Email muhammad.awais@nysonian.com on errors / stuck runs / missing data
+//   5. Full timeout protection (60-min hard cap on the whole run)
+//
+// Robustness guarantees:
+//   - Per-task try/catch — one failure doesn't block the rest
+//   - Hard 60-min wall-clock timeout — won't sit "running" forever
+//   - Stale "running" entries (>3h old) get auto-marked errored on cron startup
+//   - Post-run validation: if today's date isn't present in tw_summary_daily for both
+//     brands, fire a critical alert
+const ALL_DAILY_TASKS = [
+  'klaviyo',
+  'tw_refresh',          // brand-level summary (TW Summary API)
+  'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
+  'tw_ads',              // campaign/adset/ad performance from TW
+  'tw_air_attribution',  // NOBL Air order-level attribution
+  'shopify_orders',      // per-order detail + product line items (NOBL + FLO)
+  'appstle_contracts',   // subscription contracts (all 18,775+)
+  'nobl_air_aggregate',  // recompute nobl_air_daily
+  'product_daily',       // recompute shopify_product_daily
+];
+
+const CRON_HARD_TIMEOUT_MS = 60 * 60 * 1000; // 60 min absolute cap
+
+// In-process flag prevents double-firing if cron + manual click overlap
+let cronRunning = false;
+let lastCronRunAt = null;
+let lastCronStatus = null; // { runId, ok, errors, ts }
+
 try {
   const cron = require('node-cron');
-  const { pgQuery } = require('./db/postgres');
+  const { pgQuery, pgRun } = require('./db/postgres');
+  const { sendAlert, ensureSchema: ensureAlertsSchema } = require('./etl/alerts');
 
-  async function runDailySync() {
-    const today = new Date();
-    const yStr = new Date(today.getTime() - 86400000).toISOString().slice(0, 10);
+  // Initialize alerts table on boot
+  ensureAlertsSchema().catch(e => console.warn('[Alerts] schema init failed:', e.message));
 
-    // 1. Find any missing days in the last 14 days that need backfilling.
-    //    A day is "missing" if nobl_air_daily has no row for it.
-    const lookback = 14;
-    const startBack = new Date(today.getTime() - lookback * 86400000).toISOString().slice(0, 10);
-    let missing = [];
+  async function cleanupStuckRuns() {
     try {
-      const r = await pgQuery(`
-        WITH days AS (
-          SELECT generate_series($1::date, $2::date, '1 day')::date AS d
-        )
-        SELECT d FROM days
-        WHERE NOT EXISTS (SELECT 1 FROM nobl_air_daily WHERE date = days.d)
-        ORDER BY d
-      `, [startBack, yStr]);
-      missing = r.rows.map(x => x.d.toISOString().slice(0, 10));
+      const r = await pgRun(`
+        UPDATE etl_run_log
+        SET status='error', error_message='auto-cleanup: stuck >3h', finished_at=NOW()
+        WHERE status='running' AND started_at < NOW() - interval '3 hours'
+      `);
+      if (r.rowCount > 0) {
+        await sendAlert({
+          severity: 'warn',
+          subject: `Auto-cleaned ${r.rowCount} stuck ETL run(s)`,
+          body: `${r.rowCount} ETL entries had status='running' for >3 hours and were marked errored.`,
+        });
+      }
+      return r.rowCount;
     } catch (e) {
-      console.warn('[Cron] Could not scan for missing days:', e.message);
-    }
-
-    // 2. Effective range: oldest missing day → yesterday.
-    //    If nothing missing, just yesterday → yesterday.
-    const startDate = missing.length ? missing[0] : yStr;
-    const endDate = yStr;
-    const runId = `cron_daily_${endDate}_${Date.now()}`;
-    console.log(`[Cron] ▶ Daily sync ${startDate} → ${endDate} (missing=${missing.length}) → ${runId}`);
-
-    try {
-      await syncEngine.runSync({
-        runId,
-        tasks: [
-          'klaviyo',
-          'tw_refresh',          // brand-level summary (works via TW Summary API)
-          'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
-          'tw_ads',              // campaign/adset/ad performance from TW attribution
-          'tw_air_attribution',  // NOBL Air order-level attribution by ad/adset
-          'shopify_orders',      // per-order detail + product line items (NOBL + FLO)
-          'appstle_contracts',   // subscription contracts (all 18,775+)
-          'nobl_air_aggregate',  // recompute nobl_air_daily for the range
-          'product_daily',       // recompute shopify_product_daily for the range
-        ],
-        startDate, endDate,
-        brands: ['NOBL', 'FLO'],
-      });
-      console.log(`[Cron] ✓ Daily sync complete (${runId})`);
-    } catch (e) {
-      console.error('[Cron] sync error:', e.message);
+      console.error('[Cron cleanup]', e.message);
+      return 0;
     }
   }
 
-  cron.schedule('0 6 * * *', () => { runDailySync(); }, { timezone: 'UTC' });
+  async function validateRunCompleteness(yStr) {
+    // After a cron run, verify yesterday's data actually landed for both brands.
+    const checks = [
+      { table: 'tw_summary_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_summary_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'shopify_orders_raw', sql: `SELECT brand, COUNT(*)::int n FROM shopify_orders_raw WHERE date_key = $1::date GROUP BY brand`, expect: 1 }, // NOBL min
+      { table: 'nobl_air_daily', sql: `SELECT 'na' AS brand, COUNT(*)::int n FROM nobl_air_daily WHERE date = $1::date`, expect: 1 },
+    ];
+    const issues = [];
+    for (const c of checks) {
+      try {
+        const r = await pgQuery(c.sql, [yStr]);
+        if (r.rows.length < c.expect || r.rows.some(x => !x.n)) {
+          issues.push(`${c.table}: only ${r.rows.length} brand row(s), expected ≥${c.expect}`);
+        }
+      } catch (e) {
+        issues.push(`${c.table}: query failed — ${e.message}`);
+      }
+    }
+    return issues;
+  }
 
-  // Manual trigger endpoint — POST /api/sync/trigger-daily
-  // (Useful for "run now" buttons in admin UI.)
-  app.post('/api/sync/trigger-daily', requireAppAuth, async (req, res) => {
-    runDailySync().catch(e => console.error('[Manual sync]', e));
-    res.json({ ok: true, msg: 'Sync started in background' });
+  async function runDailySync(opts = {}) {
+    if (cronRunning) {
+      console.log('[Cron] Already running — skip');
+      return { skipped: true };
+    }
+    cronRunning = true;
+    const t0 = Date.now();
+
+    try {
+      // Step 0: clean up any stuck runs first
+      await cleanupStuckRuns();
+
+      const today = new Date();
+      const yStr = new Date(today.getTime() - 86400000).toISOString().slice(0, 10);
+
+      // Step 1: find missing days in the last 14 (we'll catch holes)
+      let missing = [];
+      try {
+        const lookback = 14;
+        const startBack = new Date(today.getTime() - lookback * 86400000).toISOString().slice(0, 10);
+        const r = await pgQuery(`
+          WITH days AS (SELECT generate_series($1::date, $2::date, '1 day')::date AS d)
+          SELECT d FROM days
+          WHERE NOT EXISTS (SELECT 1 FROM nobl_air_daily WHERE date = days.d)
+          ORDER BY d
+        `, [startBack, yStr]);
+        missing = r.rows.map(x => x.d.toISOString().slice(0, 10));
+      } catch (e) {
+        console.warn('[Cron] Missing-day scan failed:', e.message);
+      }
+
+      const startDate = missing.length ? missing[0] : yStr;
+      const endDate   = yStr;
+      const runId = opts.runId || `cron_daily_${endDate}_${Date.now()}`;
+      console.log(`[Cron] ▶ ${runId} | ${startDate} → ${endDate} | missing=${missing.length}`);
+
+      // Step 2: run with 60-min hard timeout
+      const syncPromise = syncEngine.runSync({
+        runId,
+        tasks:  ALL_DAILY_TASKS,
+        startDate, endDate,
+        brands: ['NOBL', 'FLO'],
+      });
+      const timeoutPromise = new Promise((_, rej) =>
+        setTimeout(() => rej(new Error(`Cron timed out after ${CRON_HARD_TIMEOUT_MS/60000} min`)), CRON_HARD_TIMEOUT_MS)
+      );
+
+      let syncResult, syncErr;
+      try {
+        syncResult = await Promise.race([syncPromise, timeoutPromise]);
+      } catch (e) {
+        syncErr = e.message;
+        await sendAlert({
+          severity: 'critical',
+          subject: `Cron failed/timed out: ${runId}`,
+          body: `The daily cron sync errored: ${e.message}`,
+          context: { runId, startDate, endDate, elapsed_min: ((Date.now()-t0)/60000).toFixed(1) },
+        });
+      }
+
+      // Step 3: validate completeness
+      const issues = await validateRunCompleteness(yStr);
+      if (issues.length) {
+        await sendAlert({
+          severity: 'error',
+          subject: `Cron data validation failed for ${yStr}`,
+          body: `After cron run ${runId}, the following data is missing or incomplete:\n\n${issues.join('\n')}`,
+          context: { runId, yStr, issues },
+        });
+      }
+
+      // Step 4: check for any error rows in this cron run
+      try {
+        const errs = await pgQuery(
+          `SELECT task, brand, error_message FROM etl_run_log
+           WHERE run_id = $1 AND status = 'error' LIMIT 10`,
+          [runId]
+        );
+        if (errs.rows.length) {
+          await sendAlert({
+            severity: 'error',
+            subject: `Cron task errors in ${runId}`,
+            body: errs.rows.map(r => `• ${r.task} (${r.brand}): ${r.error_message?.slice(0, 200)}`).join('\n'),
+            context: { runId, errorCount: errs.rows.length },
+          });
+        }
+      } catch {}
+
+      const elapsed = ((Date.now()-t0)/60000).toFixed(1);
+      lastCronRunAt = new Date().toISOString();
+      lastCronStatus = {
+        runId, ok: !syncErr && !issues.length,
+        errors: (syncErr ? 1 : 0) + issues.length,
+        elapsed_min: elapsed, ts: lastCronRunAt
+      };
+      console.log(`[Cron] ✓ Done ${runId} in ${elapsed}min — ${lastCronStatus.ok ? 'OK' : `${lastCronStatus.errors} issue(s)`}`);
+      return { runId, ...lastCronStatus };
+    } finally {
+      cronRunning = false;
+    }
+  }
+
+  // Schedule: 11:00 AM Asia/Karachi every day (Pakistan Standard Time)
+  cron.schedule('0 11 * * *', () => {
+    runDailySync().catch(e => console.error('[Cron unhandled]', e));
+  }, { timezone: 'Asia/Karachi' });
+
+  console.log('[Cron] Scheduled: 11:00 AM Asia/Karachi (PKT) daily — 9 tasks with 14-day backfill window');
+
+  // ── Manual sync trigger — admin only, single-flight, rate-limited ────────
+  // Tracks per-user manual triggers in this Map; purges every hour
+  const manualTriggerLog = new Map(); // userId → [timestamps]
+  const MAX_MANUAL_PER_HOUR = 6;
+
+  function requireAdmin(req, res, next) {
+    if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+    pgQuery(`SELECT role FROM app_users WHERE id = $1`, [req.session.userId])
+      .then(r => {
+        if (r.rows[0]?.role !== 'admin') return res.status(403).json({ error: 'Admin role required' });
+        next();
+      })
+      .catch(e => res.status(500).json({ error: e.message }));
+  }
+
+  app.post('/api/sync/trigger-daily', requireAdmin, async (req, res) => {
+    const userId = req.session.userId;
+    const now = Date.now();
+
+    // Rate limit
+    const userHits = (manualTriggerLog.get(userId) || []).filter(t => now - t < 3600000);
+    if (userHits.length >= MAX_MANUAL_PER_HOUR) {
+      return res.status(429).json({
+        error: `Rate limit: max ${MAX_MANUAL_PER_HOUR} manual triggers per hour. Try again in ${
+          Math.ceil((userHits[0] + 3600000 - now) / 60000)
+        } min.`
+      });
+    }
+    userHits.push(now);
+    manualTriggerLog.set(userId, userHits);
+
+    // Single-flight: if a cron run from the last 30 min is still running, return its run_id
+    if (cronRunning) {
+      return res.json({
+        ok: true,
+        msg: 'Sync already running — joining existing run',
+        run_id: 'in-progress',
+        already_running: true,
+      });
+    }
+    try {
+      const recent = await pgQuery(
+        `SELECT run_id FROM etl_run_log
+         WHERE status = 'running' AND started_at > NOW() - interval '30 minutes'
+         ORDER BY started_at DESC LIMIT 1`
+      );
+      if (recent.rows.length) {
+        return res.json({
+          ok: true,
+          msg: 'Sync already running — joining existing run',
+          run_id: recent.rows[0].run_id,
+          already_running: true,
+        });
+      }
+    } catch {}
+
+    // Spawn background
+    runDailySync({ runId: `manual_${Date.now()}` }).catch(e => console.error('[Manual sync]', e));
+    res.json({ ok: true, msg: 'Sync started in background', run_id: `manual_${Date.now()}` });
   });
 
-  console.log('[Cron] Daily sync scheduled: 06:00 UTC (11:00 AM GMT+5) with 14-day backfill window');
+  // Public status endpoint — anyone authed can read sync status
+  app.get('/api/sync/last-cron', requireAppAuth, (req, res) => {
+    res.json({
+      running: cronRunning,
+      last_run_at: lastCronRunAt,
+      last_status: lastCronStatus,
+      next_scheduled: 'Daily at 11:00 AM Asia/Karachi (Pakistan time)',
+    });
+  });
 } catch(e) {
   console.warn('[Cron] node-cron unavailable:', e.message);
 }

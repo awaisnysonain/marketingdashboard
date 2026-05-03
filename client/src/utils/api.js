@@ -155,6 +155,9 @@ export function fmtCell(val,header){
   if(val===''||val===null||val===undefined) return '—';
   const s=String(val);
   if(s==='TOTAL'||s==='Total') return s;
+  // Pre-formatted strings (already include currency/percent symbols) → pass through.
+  // Prevents double-formatting when callers format upstream and SheetTable formats again.
+  if(/^\s*[$€£¥]/.test(s) || /%\s*$/.test(s)) return s;
   const h=String(header);
   // Date columns
   if(isDateField(h)&&DATE_RE.test(s)) return fmtDate(val);
