@@ -247,6 +247,17 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
   return fmtRows(r.rows);
 }
 
+async function capNoblAirEndDate(end) {
+  const r = await pgQuery(
+    `SELECT MAX(end_date::date)::text AS latest_complete_date
+     FROM etl_run_log
+     WHERE task = 'nobl_air_aggregate' AND status = 'success'`,
+    []
+  );
+  const latest = r.rows[0]?.latest_complete_date;
+  return latest && latest < end ? latest : end;
+}
+
 // GET /overview
 router.get('/overview', async (req, res) => {
   const { start, end } = getDefaultDates(req);
@@ -713,8 +724,9 @@ router.get('/nobl/air-performance', async (req, res) => {
   };
 
   try {
+    const effectiveEnd = await capNoblAirEndDate(end);
     const daily = regionCountries[region]
-      ? await loadNoblAirRegionalDaily(start, end, regionCountries[region])
+      ? await loadNoblAirRegionalDaily(start, effectiveEnd, regionCountries[region])
       : fmtRows((await pgQuery(
           `SELECT
              TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
@@ -730,7 +742,7 @@ router.get('/nobl/air-performance', async (req, res) => {
            FROM nobl_air_daily
            WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
            ORDER BY date ASC`,
-          [start, end]
+          [start, effectiveEnd]
         )).rows);
     const rowsDesc = [...daily].reverse();
 
@@ -828,6 +840,8 @@ router.get('/nobl/air-performance', async (req, res) => {
       rolling_days: rollingDays,
       forecast_days: forecastDays,
       region,
+      data_end: effectiveEnd,
+      requested_end: end,
     });
   } catch (e) {
     console.error('[Analytics /nobl/air-performance]', e.message);
