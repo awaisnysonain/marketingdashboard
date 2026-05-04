@@ -40,6 +40,12 @@ const STATUS_COLORS = {
   expired:   '#64748b',
   unknown:   '#94a3b8',
 };
+const REGIONS = [
+  { value: 'ALL', label: 'All Regions' },
+  { value: 'US', label: 'USA' },
+  { value: 'CA', label: 'Canada' },
+  { value: 'AUS', label: 'AUS' },
+];
 
 /* ────────────── headers (full table) ────────────── */
 const HEADERS = [
@@ -122,17 +128,20 @@ export default function NoblAirPerformancePage() {
   const [subData, setSubData] = useState(null);
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
   const [airAttrLoading, setAirAttrLoading] = useState(false);
+  const [region, setRegion] = useState('ALL');
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     setAirAttrLoading(true);
     setAirAttr({ rows: [], totals: {}, error: null });
     try {
-      const attrPromise = getNoblAirAttribution(range.start, range.end, 'ad')
-        .catch(e => ({ rows: [], totals: {}, error: e.message }));
+      const regionScoped = region !== 'ALL';
+      const attrPromise = regionScoped
+        ? Promise.resolve({ rows: [], totals: {}, error: null })
+        : getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message }));
       const [perf, subs] = await Promise.all([
-        getNoblAirPerformance(range.start, range.end, 14, 0),
-        getNoblAirSubscribers(range.start, range.end),
+        getNoblAirPerformance(range.start, range.end, 14, 0, region),
+        regionScoped ? Promise.resolve(null) : getNoblAirSubscribers(range.start, range.end),
       ]);
       setData({ rows: perf?.rows || [], totals: perf?.totals || {} });
       setSubData(subs || null);
@@ -146,7 +155,7 @@ export default function NoblAirPerformancePage() {
       setLoading(false);
       setAirAttrLoading(false);
     }
-  }, [range]);
+  }, [range, region]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -173,7 +182,7 @@ export default function NoblAirPerformancePage() {
   /* ── KPIs from totals (use the doc's TTP from subscriber cohort, not from daily) ── */
   const kpi = useMemo(() => {
     const t = data.totals || {};
-    const ttp = subData?.ttp_cohort?.ttp_rate;
+    const ttp = region === 'ALL' ? subData?.ttp_cohort?.ttp_rate : t.ttp_rate;
     const attach = t.attach_rate;
     const activation = (attach != null && ttp != null) ? attach * ttp : null;
     return {
@@ -184,14 +193,14 @@ export default function NoblAirPerformancePage() {
       activationRate: activation,
       paidAirOrders: t.paid_air_orders || 0,
       zeroAirOrders: t.zero_air_orders || 0,
-      sameDayCancels: subData?.ttp_cohort?.same_day_cancels || t.same_day_cancels || 0,
+      sameDayCancels: region === 'ALL' ? (subData?.ttp_cohort?.same_day_cancels || t.same_day_cancels || 0) : (t.same_day_cancels || 0),
       combinedNetRevenue: t.combined_net_revenue || 0,
       rebillRevenue: t.rebill_revenue || 0,
-      newSubRevenue: t.sub_net_sales || 0,
-      activeSubs: subData?.active_count || 0,
-      activeArr:  subData?.active_arr || 0,
+      newSubRevenue: t.new_sub_revenue || 0,
+      activeSubs: region === 'ALL' ? (subData?.active_count || 0) : null,
+      activeArr:  region === 'ALL' ? (subData?.active_arr || 0) : null,
     };
-  }, [data.totals, subData]);
+  }, [data.totals, subData, region]);
 
   const tierData = useMemo(
     () => (subData?.tiers || []).map(t => ({
@@ -222,12 +231,24 @@ export default function NoblAirPerformancePage() {
             Subscription product launched March 2026 · attach rate, TTP, tier mix, revenue split
           </p>
         </div>
-        <DateRangePicker
-          start={range.start}
-          end={range.end}
-          onChange={setRange}
-          scope="nobl-air-performance"
-        />
+        <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
+          <select
+            value={region}
+            onChange={(e) => setRegion(e.target.value)}
+            style={{
+              padding:'6px 10px', fontSize:12, borderRadius:6,
+              border:'1px solid var(--border)', background:'var(--bg2)', color:'var(--text)',
+            }}
+          >
+            {REGIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+          </select>
+          <DateRangePicker
+            start={range.start}
+            end={range.end}
+            onChange={setRange}
+            scope="nobl-air-performance"
+          />
+        </div>
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
@@ -240,8 +261,8 @@ export default function NoblAirPerformancePage() {
             <KpiCard label="Activation Rate"       value={fmtPct(kpi.activationRate || 0)}  color="green" />
             <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" />
             <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" />
-            <KpiCard label="Active Subscribers"    value={fmtNum(kpi.activeSubs)}           color="green" />
-            <KpiCard label="Active ARR (est.)"     value={fmt$(kpi.activeArr)}              color="purple" />
+            {region === 'ALL' && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" />}
+            {region === 'ALL' && <KpiCard label="Active ARR (est.)" value={fmt$(kpi.activeArr)} color="purple" />}
           </div>
 
           {/* ── Secondary KPI row ── */}
@@ -304,6 +325,7 @@ export default function NoblAirPerformancePage() {
           </div>
 
           {/* ── Row 2: tier mix bar + status pie ── */}
+          {region === 'ALL' && (
           <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16, marginBottom:16 }}>
             <Card title="Subscriber Tier Mix" subtitle="Active / Cancelled / Paused per tier">
               {tierData.length === 0 ? <Empty msg="No tier data" /> : (
@@ -340,6 +362,7 @@ export default function NoblAirPerformancePage() {
               )}
             </Card>
           </div>
+          )}
 
           {/* ── Row 3: revenue composition stacked bar ── */}
           <Card title="Revenue Composition (Tag + Sub + Rebill)" style={{ marginBottom:16 }}>
@@ -362,6 +385,7 @@ export default function NoblAirPerformancePage() {
           </Card>
 
           {/* ── NOBL Air ad attribution ── */}
+          {region === 'ALL' && (
           <Card title="NOBL Air Purchases by Meta Ad" subtitle="Exact NOBL Air orders from Triple Whale, with per-ad attach, TTP, and activation rates" style={{ marginBottom:16 }}>
             {airAttrLoading ? (
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
@@ -406,6 +430,7 @@ export default function NoblAirPerformancePage() {
               </>
             )}
           </Card>
+          )}
 
           {/* ── Daily detail table ── */}
           <Card title="Daily Detail" subtitle="Mirrors the technical doc's Daily Input tab">

@@ -85,12 +85,14 @@ export const getNoblTopline = (start, end) => fetch(`${B}/api/analytics/nobl/top
 export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(r=>r.json());
 export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(r=>r.json());
 export const getNoblSubs = (start, end) => fetch(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`).then(r=>r.json());
+export const getSubscriptions = (start, end, brand = 'NOBL') =>
+  fetch(`${B}/api/analytics/subscriptions?start=${start}&end=${end}&brand=${encodeURIComponent(brand)}`).then(r=>r.json());
 export const getNoblAirSubscribers = (start, end) =>
   fetch(`${B}/api/analytics/nobl/air-subscribers?start=${start}&end=${end}`).then(r => r.json());
 
-export const getNoblAirPerformance = async (start, end, rollingDays = 14, forecastDays = 14) => {
+export const getNoblAirPerformance = async (start, end, rollingDays = 14, forecastDays = 14, region = 'ALL') => {
   const res = await fetch(
-    `${B}/api/analytics/nobl/air-performance?start=${start}&end=${end}&rollingDays=${rollingDays}&forecastDays=${forecastDays}`
+    `${B}/api/analytics/nobl/air-performance?start=${start}&end=${end}&rollingDays=${rollingDays}&forecastDays=${forecastDays}&region=${encodeURIComponent(region)}`
   );
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {

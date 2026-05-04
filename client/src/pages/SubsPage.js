@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getNoblSubs, fmt$ } from '../utils/api';
+import { getSubscriptions, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import SheetTable from '../components/SheetTable';
@@ -46,6 +46,7 @@ function SortTh({ label, field, sortBy, sortDir, onSort }) {
 
 export default function SubsPage({ showToast }) {
   const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
+  const [brand, setBrand] = useState('NOBL');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -55,10 +56,10 @@ export default function SubsPage({ showToast }) {
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
-    try { setData(await getNoblSubs(range.start, range.end)); }
+    try { setData(await getSubscriptions(range.start, range.end, brand)); }
     catch(e) { setError(e.message); }
     finally { setLoading(false); }
-  }, [range]);
+  }, [range, brand]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -80,9 +81,16 @@ export default function SubsPage({ showToast }) {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, fontFamily: 'var(--font-head)', color: '#8b5cf6' }}>Subscriptions</h1>
-          <p style={{ fontSize: 13, color: 'var(--text3)', margin: '4px 0 0' }}>NOBL Air subscription program deep dive</p>
+          <p style={{ fontSize: 13, color: 'var(--text3)', margin: '4px 0 0' }}>{brand === 'FLO' ? 'FLO subscription program deep dive' : 'NOBL Air subscription program deep dive'}</p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="subs" />
+        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+          <div style={{ display:'inline-flex', background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:10, padding:3 }}>
+            {['NOBL','FLO'].map(b => (
+              <button key={b} onClick={() => setBrand(b)} style={{ padding:'7px 14px', border:'none', borderRadius:8, cursor:'pointer', fontWeight:700, background:brand === b ? 'var(--accent)' : 'transparent', color:brand === b ? '#fff' : 'var(--text2)' }}>{b}</button>
+            ))}
+          </div>
+          <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="subs" />
+        </div>
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (

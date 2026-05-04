@@ -197,6 +197,39 @@ async function initPostgresTables() {
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_channel ON tw_air_order_attribution (brand, channel, date DESC)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_adset ON tw_air_order_attribution (brand, adset_id, date DESC)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_perf ON tw_air_order_attribution (brand, channel, model, attribution_window, date DESC)`);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS flo_appstle_subscribers (
+        appstle_id TEXT PRIMARY KEY,
+        graph_subscription_contract_id TEXT,
+        subscription_contract_id TEXT,
+        customer_id TEXT,
+        customer_email TEXT,
+        customer_name TEXT,
+        order_name TEXT,
+        graph_order_id TEXT,
+        status TEXT,
+        contract_amount NUMERIC(14,4),
+        order_amount NUMERIC(14,4),
+        billing_policy_interval TEXT,
+        billing_policy_interval_count INT,
+        currency_code TEXT,
+        created_at TIMESTAMPTZ,
+        updated_at TIMESTAMPTZ,
+        starts_at TIMESTAMPTZ,
+        ends_at TIMESTAMPTZ,
+        next_billing_date TIMESTAMPTZ,
+        last_billing_date TIMESTAMPTZ,
+        cancelled_on TIMESTAMPTZ,
+        is_mature BOOLEAN DEFAULT FALSE,
+        is_converted BOOLEAN DEFAULT FALSE,
+        is_same_day_cancel BOOLEAN DEFAULT FALSE,
+        raw_json JSONB,
+        etl_fetched_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_created_at ON flo_appstle_subscribers (created_at)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_order_name ON flo_appstle_subscribers (order_name)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_status ON flo_appstle_subscribers (status)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_order_name ON nobl_air_subscribers (order_name)`).catch(() => {});
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_graph_order_id ON nobl_air_subscribers (graph_order_id)`).catch(() => {});
 
@@ -1106,7 +1139,7 @@ const ALL_DAILY_TASKS = [
   'tw_ads',              // campaign/adset/ad performance from TW
   'tw_air_attribution',  // NOBL Air order-level attribution
   'shopify_orders',      // per-order detail + product line items (NOBL + FLO)
-  'appstle_contracts',   // subscription contracts (all 18,775+)
+  'appstle_contracts',   // subscription contracts (NOBL + FLO)
   'nobl_air_aggregate',  // recompute nobl_air_daily
   'product_daily',       // recompute shopify_product_daily
 ];

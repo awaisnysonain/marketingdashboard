@@ -12,7 +12,7 @@
  *   - tag_*          = NOBLAIR line items where origPx < $15
  *   - sub_*          = NOBLAIR line items where origPx >= $15
  *   - new_sub_revenue = sub_net_sales from non-rebill orders
- *   - rebill_revenue  = combined revenue from rebill orders
+ *   - rebill_revenue  = Appstle lastSuccessfulOrder.orderAmount by billing date
  *   - tier counts    = via Appstle.contractAmount join on order_name
  *   - TTP rate       = mature converted / mature (cohort over the date range)
  *   - same-day cancels = sub orders cancelled within 24h
@@ -30,15 +30,18 @@ async function aggregateNoblAir(startDate, endDate) {
   // We compute per-date metrics, then upsert each row.
   const sql = `
     WITH
-    -- Base orders (NOBL only, in window)
+    -- Base orders (NOBL only, in window). Daily Input aligns to UTC order dates,
+    -- not the Shopify-local date_key stored during ingestion.
     o AS (
-      SELECT * FROM shopify_orders_raw
-      WHERE brand='NOBL' AND date_key BETWEEN $1::date AND $2::date
+      SELECT *, (created_at AT TIME ZONE 'UTC')::date AS report_date
+      FROM shopify_orders_raw
+      WHERE brand='NOBL'
+        AND (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
     ),
     -- Per-date order/revenue aggregates
     daily_orders AS (
       SELECT
-        date_key AS date,
+        report_date AS date,
         COUNT(*) FILTER (WHERE NOT is_rebill)                         AS total_orders,
         COUNT(*) FILTER (WHERE has_air AND has_luggage)               AS air_orders,
         COUNT(*) FILTER (WHERE has_air AND has_luggage AND has_paid_air) AS paid_air_orders,
@@ -49,22 +52,38 @@ async function aggregateNoblAir(startDate, endDate) {
         COALESCE(SUM(tag_refunds)   FILTER (WHERE NOT is_rebill), 0)  AS tag_refunds,
         COALESCE(SUM(sub_gross)     FILTER (WHERE NOT is_rebill), 0)  AS sub_gross,
         COALESCE(SUM(sub_discounts) FILTER (WHERE NOT is_rebill), 0)  AS sub_discounts,
-        COALESCE(SUM(sub_refunds)   FILTER (WHERE NOT is_rebill), 0)  AS sub_refunds,
-        -- Rebill revenue: total revenue from rebill orders (whole order, since rebills are sub-only)
-        COALESCE(SUM(total_price) FILTER (WHERE is_rebill), 0)        AS rebill_revenue
+        COALESCE(SUM(sub_refunds)   FILTER (WHERE NOT is_rebill), 0)  AS sub_refunds
       FROM o
-      GROUP BY date_key
+      GROUP BY report_date
+    ),
+    -- Appstle is the source of truth for subscription billing revenue. Shopify
+    -- rebill orders can differ from the Appstle successful-billing amounts.
+    appstle_success AS (
+      SELECT
+        (success_json->>'orderDate')::timestamptz::date AS date,
+        COALESCE(SUM((success_json->>'orderAmount')::numeric), 0) AS rebill_revenue
+      FROM (
+        SELECT CASE
+          WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object' THEN raw_json->'lastSuccessfulOrder'
+          WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string' THEN (raw_json->>'lastSuccessfulOrder')::jsonb
+          ELSE NULL
+        END AS success_json
+        FROM nobl_air_subscribers
+      ) s
+      WHERE success_json ? 'orderDate'
+        AND (success_json->>'orderDate')::timestamptz::date BETWEEN $1::date AND $2::date
+      GROUP BY (success_json->>'orderDate')::timestamptz::date
     ),
     -- Tier breakdown of NEW subs (join via order_name to Appstle)
     new_tiers AS (
       SELECT
-        o.date_key AS date,
+        o.report_date AS date,
         s.contract_amount,
         COUNT(*)::int AS n
       FROM o
       JOIN nobl_air_subscribers s ON s.order_name = o.order_name
       WHERE o.has_air AND o.has_luggage
-      GROUP BY o.date_key, s.contract_amount
+      GROUP BY o.report_date, s.contract_amount
     ),
     -- Tier breakdown of REBILL orders (rebill orders are tied back to the
     -- customer's original subscription contract; we infer tier via contract_amount
@@ -73,7 +92,7 @@ async function aggregateNoblAir(startDate, endDate) {
     -- just the numeric value. We normalize by stripping the GID prefix.
     rebill_tiers AS (
       SELECT
-        o.date_key AS date,
+        o.report_date AS date,
         s.contract_amount,
         COUNT(*)::int AS n
       FROM o
@@ -81,7 +100,7 @@ async function aggregateNoblAir(startDate, endDate) {
         s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
         OR s.customer_id = o.customer_id
       WHERE o.is_rebill
-      GROUP BY o.date_key, s.contract_amount
+      GROUP BY o.report_date, s.contract_amount
     ),
     -- Pivot tier counts to columns
     new_tiers_pivot AS (
@@ -133,12 +152,12 @@ async function aggregateNoblAir(startDate, endDate) {
       COALESCE(t.same_day_cancels, 0) AS same_day_cancels,
       d.tag_gross, d.tag_discounts, (d.tag_gross - d.tag_discounts) AS tag_net_sales, d.tag_refunds,
       d.sub_gross, d.sub_discounts, (d.sub_gross - d.sub_discounts) AS sub_net_sales, d.sub_refunds,
-      d.rebill_revenue,
+      COALESCE(a.rebill_revenue, 0) AS rebill_revenue,
       (d.sub_gross - d.sub_discounts) AS new_sub_revenue,
       -- combined = new tag + new sub + rebills (= what the doc calls "Combined Gross/Net Revenue")
-      (d.tag_gross + d.sub_gross + d.rebill_revenue) AS combined_gross,
-      (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts + d.rebill_revenue) AS combined_net_sales,
-      (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts - d.tag_refunds - d.sub_refunds + d.rebill_revenue) AS combined_net_revenue,
+      (d.tag_gross + d.sub_gross + COALESCE(a.rebill_revenue, 0)) AS combined_gross,
+      (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts + COALESCE(a.rebill_revenue, 0)) AS combined_net_sales,
+      (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts - d.tag_refunds - d.sub_refunds + COALESCE(a.rebill_revenue, 0)) AS combined_net_revenue,
       -- Rates
       CASE WHEN d.total_orders > 0
            THEN ROUND(d.air_orders::numeric / d.total_orders, 4)
@@ -173,6 +192,7 @@ async function aggregateNoblAir(startDate, endDate) {
       COALESCE(rp.rebill_149, 0) AS rebill_149,
       COALESCE(rp.rebill_159, 0) AS rebill_159
     FROM daily_orders d
+    LEFT JOIN appstle_success     a  ON a.date = d.date
     LEFT JOIN ttp_cohorts        t  ON t.date = d.date
     LEFT JOIN new_tiers_pivot    np ON np.date = d.date
     LEFT JOIN rebill_tiers_pivot rp ON rp.date = d.date

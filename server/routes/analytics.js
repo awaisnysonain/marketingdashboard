@@ -92,6 +92,161 @@ function fmtRows(rows) {
   });
 }
 
+async function loadNoblAirRegionalDaily(start, end, countryCodes) {
+  const r = await pgQuery(`
+    WITH o AS (
+      SELECT *, (created_at AT TIME ZONE 'UTC')::date AS report_date
+      FROM shopify_orders_raw
+      WHERE brand = 'NOBL'
+        AND (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+        AND shipping_country = ANY($3::text[])
+    ),
+    daily_orders AS (
+      SELECT
+        report_date AS date,
+        COUNT(*) FILTER (WHERE NOT is_rebill) AS total_orders,
+        COUNT(*) FILTER (WHERE has_air AND has_luggage) AS air_orders,
+        COUNT(*) FILTER (WHERE has_air AND has_luggage AND has_paid_air) AS paid_air_orders,
+        COUNT(*) FILTER (WHERE has_air AND has_luggage AND has_zero_air) AS zero_air_orders,
+        COUNT(*) FILTER (WHERE is_rebill) AS rebill_orders,
+        COALESCE(SUM(tag_gross) FILTER (WHERE NOT is_rebill), 0) AS tag_gross,
+        COALESCE(SUM(tag_discounts) FILTER (WHERE NOT is_rebill), 0) AS tag_discounts,
+        COALESCE(SUM(tag_refunds) FILTER (WHERE NOT is_rebill), 0) AS tag_refunds,
+        COALESCE(SUM(sub_gross) FILTER (WHERE NOT is_rebill), 0) AS sub_gross,
+        COALESCE(SUM(sub_discounts) FILTER (WHERE NOT is_rebill), 0) AS sub_discounts,
+        COALESCE(SUM(sub_refunds) FILTER (WHERE NOT is_rebill), 0) AS sub_refunds,
+        COALESCE(SUM(total_price) FILTER (WHERE is_rebill), 0) AS rebill_revenue
+      FROM o
+      GROUP BY report_date
+    ),
+    new_tiers AS (
+      SELECT
+        o.report_date AS date,
+        s.contract_amount,
+        COUNT(*)::int AS n
+      FROM o
+      JOIN nobl_air_subscribers s ON s.order_name = o.order_name
+      WHERE o.has_air AND o.has_luggage
+      GROUP BY o.report_date, s.contract_amount
+    ),
+    rebill_tiers AS (
+      SELECT
+        o.report_date AS date,
+        s.contract_amount,
+        COUNT(*)::int AS n
+      FROM o
+      LEFT JOIN nobl_air_subscribers s ON
+        s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+        OR s.customer_id = o.customer_id
+      WHERE o.is_rebill
+      GROUP BY o.report_date, s.contract_amount
+    ),
+    new_tiers_pivot AS (
+      SELECT
+        date,
+        SUM(CASE WHEN ROUND(contract_amount) = 49 THEN n ELSE 0 END)::int AS new_49,
+        SUM(CASE WHEN ROUND(contract_amount) = 79 THEN n ELSE 0 END)::int AS new_79,
+        SUM(CASE WHEN ROUND(contract_amount) = 89 THEN n ELSE 0 END)::int AS new_89,
+        SUM(CASE WHEN ROUND(contract_amount) = 99 THEN n ELSE 0 END)::int AS new_99,
+        SUM(CASE WHEN ROUND(contract_amount) = 109 THEN n ELSE 0 END)::int AS new_109,
+        SUM(CASE WHEN ROUND(contract_amount) = 119 THEN n ELSE 0 END)::int AS new_119,
+        SUM(CASE WHEN ROUND(contract_amount) = 129 THEN n ELSE 0 END)::int AS new_129,
+        SUM(CASE WHEN ROUND(contract_amount) = 139 THEN n ELSE 0 END)::int AS new_139,
+        SUM(CASE WHEN ROUND(contract_amount) = 149 THEN n ELSE 0 END)::int AS new_149,
+        SUM(CASE WHEN ROUND(contract_amount) = 159 THEN n ELSE 0 END)::int AS new_159
+      FROM new_tiers
+      GROUP BY date
+    ),
+    rebill_tiers_pivot AS (
+      SELECT
+        date,
+        SUM(CASE WHEN ROUND(contract_amount) = 49 THEN n ELSE 0 END)::int AS rebill_49,
+        SUM(CASE WHEN ROUND(contract_amount) = 79 THEN n ELSE 0 END)::int AS rebill_79,
+        SUM(CASE WHEN ROUND(contract_amount) = 89 THEN n ELSE 0 END)::int AS rebill_89,
+        SUM(CASE WHEN ROUND(contract_amount) = 99 THEN n ELSE 0 END)::int AS rebill_99,
+        SUM(CASE WHEN ROUND(contract_amount) = 109 THEN n ELSE 0 END)::int AS rebill_109,
+        SUM(CASE WHEN ROUND(contract_amount) = 119 THEN n ELSE 0 END)::int AS rebill_119,
+        SUM(CASE WHEN ROUND(contract_amount) = 129 THEN n ELSE 0 END)::int AS rebill_129,
+        SUM(CASE WHEN ROUND(contract_amount) = 139 THEN n ELSE 0 END)::int AS rebill_139,
+        SUM(CASE WHEN ROUND(contract_amount) = 149 THEN n ELSE 0 END)::int AS rebill_149,
+        SUM(CASE WHEN ROUND(contract_amount) = 159 THEN n ELSE 0 END)::int AS rebill_159
+      FROM rebill_tiers
+      GROUP BY date
+    ),
+    ttp_cohorts AS (
+      SELECT
+        DATE(s.created_at) AS date,
+        SUM(CASE WHEN s.is_mature THEN 1 ELSE 0 END)::int AS mature_count,
+        SUM(CASE WHEN s.is_mature AND s.is_converted THEN 1 ELSE 0 END)::int AS converted_count,
+        SUM(CASE WHEN s.is_same_day_cancel THEN 1 ELSE 0 END)::int AS same_day_cancels
+      FROM nobl_air_subscribers s
+      JOIN o ON o.order_name = s.order_name
+      WHERE o.has_air AND o.has_luggage
+        AND DATE(s.created_at) BETWEEN $1::date AND $2::date
+      GROUP BY DATE(s.created_at)
+    )
+    SELECT
+      TO_CHAR(d.date, 'YYYY-MM-DD') AS date,
+      d.total_orders, d.air_orders,
+      CASE WHEN d.total_orders > 0 THEN ROUND(d.air_orders::numeric / d.total_orders, 4) ELSE NULL END AS attach_rate,
+      CASE
+        WHEN COALESCE(t.mature_count, 0) > 0 THEN ROUND(t.converted_count::numeric / t.mature_count, 4)
+        WHEN d.air_orders > 0 THEN ROUND(d.paid_air_orders::numeric / d.air_orders, 4)
+        ELSE NULL
+      END AS ttp_rate,
+      CASE
+        WHEN d.total_orders > 0 AND (
+          CASE
+            WHEN COALESCE(t.mature_count, 0) > 0 THEN t.converted_count::numeric / NULLIF(t.mature_count, 0)
+            WHEN d.air_orders > 0 THEN d.paid_air_orders::numeric / NULLIF(d.air_orders, 0)
+            ELSE NULL
+          END
+        ) IS NOT NULL THEN ROUND((d.air_orders::numeric / d.total_orders) * (
+          CASE
+            WHEN COALESCE(t.mature_count, 0) > 0 THEN t.converted_count::numeric / NULLIF(t.mature_count, 0)
+            WHEN d.air_orders > 0 THEN d.paid_air_orders::numeric / NULLIF(d.air_orders, 0)
+            ELSE NULL
+          END
+        ), 4)
+        ELSE NULL
+      END AS activation_rate,
+      d.zero_air_orders, d.paid_air_orders, d.rebill_orders, COALESCE(t.same_day_cancels, 0) AS same_day_cancels,
+      d.tag_gross, d.tag_discounts, (d.tag_gross - d.tag_discounts) AS tag_net_sales,
+      d.sub_gross, d.sub_discounts, (d.sub_gross - d.sub_discounts) AS sub_net_sales,
+      d.rebill_revenue, (d.sub_gross - d.sub_discounts) AS new_sub_revenue,
+      (d.tag_gross + d.sub_gross + d.rebill_revenue) AS combined_gross,
+      (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts + d.rebill_revenue) AS combined_net_sales,
+      d.tag_refunds, d.sub_refunds,
+      (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts - d.tag_refunds - d.sub_refunds + d.rebill_revenue) AS combined_net_revenue,
+      COALESCE(np.new_49, 0) AS new_49,
+      COALESCE(np.new_79, 0) AS new_79,
+      COALESCE(np.new_89, 0) AS new_89,
+      COALESCE(np.new_99, 0) AS new_99,
+      COALESCE(np.new_109, 0) AS new_109,
+      COALESCE(np.new_119, 0) AS new_119,
+      COALESCE(np.new_129, 0) AS new_129,
+      COALESCE(np.new_139, 0) AS new_139,
+      COALESCE(np.new_149, 0) AS new_149,
+      COALESCE(np.new_159, 0) AS new_159,
+      COALESCE(rp.rebill_49, 0) AS rebill_49,
+      COALESCE(rp.rebill_79, 0) AS rebill_79,
+      COALESCE(rp.rebill_89, 0) AS rebill_89,
+      COALESCE(rp.rebill_99, 0) AS rebill_99,
+      COALESCE(rp.rebill_109, 0) AS rebill_109,
+      COALESCE(rp.rebill_119, 0) AS rebill_119,
+      COALESCE(rp.rebill_129, 0) AS rebill_129,
+      COALESCE(rp.rebill_139, 0) AS rebill_139,
+      COALESCE(rp.rebill_149, 0) AS rebill_149,
+      COALESCE(rp.rebill_159, 0) AS rebill_159
+    FROM daily_orders d
+    LEFT JOIN ttp_cohorts t ON t.date = d.date
+    LEFT JOIN new_tiers_pivot np ON np.date = d.date
+    LEFT JOIN rebill_tiers_pivot rp ON rp.date = d.date
+    ORDER BY d.date ASC
+  `, [start, end, countryCodes]);
+  return fmtRows(r.rows);
+}
+
 // GET /overview
 router.get('/overview', async (req, res) => {
   const { start, end } = getDefaultDates(req);
@@ -396,10 +551,10 @@ router.get('/nobl/subscriptions', async (req, res) => {
       pgQuery(
         `SELECT
            COUNT(*) AS total,
-           COUNT(*) FILTER (WHERE status = 'active') AS active,
-           COUNT(*) FILTER (WHERE status = 'cancelled') AS cancelled,
-           COUNT(*) FILTER (WHERE status = 'paused') AS paused,
-           COUNT(*) FILTER (WHERE status = 'trialing') AS trialing,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
            COUNT(*) FILTER (WHERE is_converted) AS converted,
            AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
          FROM nobl_air_subscribers`,
@@ -425,32 +580,158 @@ router.get('/nobl/subscriptions', async (req, res) => {
   }
 });
 
+// GET /subscriptions?brand=NOBL|FLO
+router.get('/subscriptions', async (req, res) => {
+  const { start, end } = getDefaultDates(req);
+  const brand = String(req.query.brand || 'NOBL').toUpperCase();
+
+  try {
+    if (brand === 'FLO') {
+      const [dailyRes, summaryRes] = await Promise.all([
+        pgQuery(
+          `WITH parsed AS (
+             SELECT *, CASE
+               WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object' THEN raw_json->'lastSuccessfulOrder'
+               WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string' THEN (raw_json->>'lastSuccessfulOrder')::jsonb
+               ELSE NULL
+             END AS success_json
+             FROM flo_appstle_subscribers
+           ), dates AS (
+             SELECT generate_series($1::date, $2::date, '1 day'::interval)::date AS date
+           ), new_subs AS (
+             SELECT DATE(created_at) AS date,
+                    COALESCE(SUM(order_amount), 0) AS new_sub_revenue
+             FROM parsed
+             WHERE DATE(created_at) BETWEEN $1::date AND $2::date
+             GROUP BY DATE(created_at)
+           ), rebills AS (
+             SELECT (success_json->>'orderDate')::timestamptz::date AS date,
+                    COALESCE(SUM((success_json->>'orderAmount')::numeric), 0) AS rebill_revenue
+             FROM parsed
+             WHERE success_json ? 'orderDate'
+               AND (success_json->>'orderDate')::timestamptz::date BETWEEN $1::date AND $2::date
+             GROUP BY (success_json->>'orderDate')::timestamptz::date
+           )
+           SELECT TO_CHAR(d.date, 'YYYY-MM-DD') AS date,
+                  0::numeric AS shopify_sub_gross,
+                  0::numeric AS shopify_sub_disc,
+                  0::numeric AS shopify_sub_refunds,
+                  COALESCE(n.new_sub_revenue, 0) AS new_sub_revenue,
+                  COALESCE(r.rebill_revenue, 0) AS rebill_revenue,
+                  COALESCE(n.new_sub_revenue, 0) + COALESCE(r.rebill_revenue, 0) AS sub_revenue_actual
+           FROM dates d
+           LEFT JOIN new_subs n ON n.date = d.date
+           LEFT JOIN rebills r ON r.date = d.date
+           ORDER BY d.date`,
+          [start, end]
+        ),
+        pgQuery(
+          `SELECT
+             COUNT(*) AS total,
+             COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
+             COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
+             COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
+             COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
+             COUNT(*) FILTER (WHERE is_converted) AS converted,
+             AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
+           FROM flo_appstle_subscribers`,
+          []
+        ),
+      ]);
+      const s = summaryRes.rows[0] || {};
+      return res.json({
+        brand,
+        daily: fmtRows(dailyRes.rows),
+        summary: {
+          total: parseInt(s.total || 0),
+          active: parseInt(s.active || 0),
+          cancelled: parseInt(s.cancelled || 0),
+          paused: parseInt(s.paused || 0),
+          trialing: parseInt(s.trialing || 0),
+          converted: parseInt(s.converted || 0),
+          avg_order_amount: parseFloat(s.avg_order_amount || 0),
+        },
+      });
+    }
+
+    const [dailyRes, summaryRes] = await Promise.all([
+      pgQuery(
+        `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
+                sub_gross AS shopify_sub_gross,
+                sub_discounts AS shopify_sub_disc,
+                sub_refunds AS shopify_sub_refunds,
+                rebill_revenue,
+                new_sub_revenue,
+                (sub_net_sales + rebill_revenue) AS sub_revenue_actual
+         FROM nobl_air_daily
+         WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
+        [start, end]
+      ),
+      pgQuery(
+        `SELECT
+           COUNT(*) AS total,
+           COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
+           COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
+           COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
+           COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
+           COUNT(*) FILTER (WHERE is_converted) AS converted,
+           AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
+         FROM nobl_air_subscribers`,
+        []
+      ),
+    ]);
+    const s = summaryRes.rows[0] || {};
+    res.json({
+      brand: 'NOBL',
+      daily: fmtRows(dailyRes.rows),
+      summary: {
+        total: parseInt(s.total || 0),
+        active: parseInt(s.active || 0),
+        cancelled: parseInt(s.cancelled || 0),
+        paused: parseInt(s.paused || 0),
+        trialing: parseInt(s.trialing || 0),
+        converted: parseInt(s.converted || 0),
+        avg_order_amount: parseFloat(s.avg_order_amount || 0),
+      },
+    });
+  } catch (e) {
+    console.error('[Analytics /subscriptions]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /nobl/air-performance
 router.get('/nobl/air-performance', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const rollingDays = Math.max(7, Math.min(parseInt(req.query.rollingDays || '14', 10), 60));
   const forecastDays = Math.max(7, Math.min(parseInt(req.query.forecastDays || '14', 10), 60));
+  const region = String(req.query.region || 'ALL').toUpperCase();
+  const regionCountries = {
+    US: ['US'],
+    CA: ['CA'],
+    AUS: ['AU'],
+  };
 
   try {
-    const dailyRes = await pgQuery(
-      `SELECT
-         TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
-         total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
-         zero_air_orders, paid_air_orders, rebill_orders, same_day_cancels,
-         tag_gross, tag_discounts, tag_net_sales,
-         sub_gross, sub_discounts, sub_net_sales,
-         rebill_revenue, new_sub_revenue,
-         combined_gross, combined_net_sales,
-         tag_refunds, sub_refunds, combined_net_revenue,
-         new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
-         rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159
-       FROM nobl_air_daily
-       WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-       ORDER BY date ASC`,
-      [start, end]
-    );
-
-    const daily = fmtRows(dailyRes.rows);
+    const daily = regionCountries[region]
+      ? await loadNoblAirRegionalDaily(start, end, regionCountries[region])
+      : fmtRows((await pgQuery(
+          `SELECT
+             TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+             total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
+             zero_air_orders, paid_air_orders, rebill_orders, same_day_cancels,
+             tag_gross, tag_discounts, tag_net_sales,
+             sub_gross, sub_discounts, sub_net_sales,
+             rebill_revenue, new_sub_revenue,
+             combined_gross, combined_net_sales,
+             tag_refunds, sub_refunds, combined_net_revenue,
+             new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+             rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159
+           FROM nobl_air_daily
+           WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+           ORDER BY date ASC`,
+          [start, end]
+        )).rows);
     const rowsDesc = [...daily].reverse();
 
     const totals = daily.reduce((acc, r) => ({
@@ -546,6 +827,7 @@ router.get('/nobl/air-performance', async (req, res) => {
       forecast,
       rolling_days: rollingDays,
       forecast_days: forecastDays,
+      region,
     });
   } catch (e) {
     console.error('[Analytics /nobl/air-performance]', e.message);

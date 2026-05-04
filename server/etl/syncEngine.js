@@ -4,7 +4,7 @@ const { pgQuery, pgRun } = require('../db/postgres');
 const { syncKlaviyoDaily, getKlaviyoApiKey } = require('./klaviyo');
 const { syncNoblAirSubs } = require('./noblAirSubs'); // legacy — kept for backward compat
 const { syncShopifyOrders } = require('./shopifyOrders');
-const { syncAppstleContracts } = require('./appstleContracts');
+const { syncAppstleContracts, syncFloAppstleContracts } = require('./appstleContracts');
 const { aggregateNoblAir, aggregateProductDaily } = require('./noblAirAggregate');
 // Use the new SQL-based TW ETL (matches Brad's queries — Triple Attribution + Amazon + EU)
 const { refreshSummary } = require('./tripleWhaleSQL');
@@ -511,20 +511,25 @@ async function runSync(options = {}) {
     }
   }
 
-  // ── Appstle contracts (full sync, no chunking — gets all 18,775+) ────
+  // ── Appstle contracts (full sync, no chunking) ────────────────────────
   if (tasks.includes('appstle_contracts')) {
-    const logId = await logStart(runId, 'NOBL', 'appstle_contracts', startDate, endDate);
-    try {
-      const r = await syncAppstleContracts();
-      const status = r.errors.length ? 'error' : 'success';
-      await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
-      results.push({ task: 'appstle_contracts', brand: 'NOBL', rows: r.rows });
-      if (r.errors.length) errors.push(...r.errors);
-    } catch (e) {
-      const msg = `appstle_contracts: ${e.message}`;
-      console.error('[SyncEngine]', msg);
-      errors.push(msg);
-      await logFinish(logId, 'error', 0, e.message);
+    for (const cfg of [
+      { brand: 'NOBL', sync: syncAppstleContracts },
+      { brand: 'FLO', sync: syncFloAppstleContracts },
+    ]) {
+      const logId = await logStart(runId, cfg.brand, 'appstle_contracts', startDate, endDate);
+      try {
+        const r = await cfg.sync();
+        const status = r.errors.length ? 'error' : 'success';
+        await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
+        results.push({ task: 'appstle_contracts', brand: cfg.brand, rows: r.rows });
+        if (r.errors.length) errors.push(...r.errors);
+      } catch (e) {
+        const msg = `appstle_contracts ${cfg.brand}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
+      }
     }
   }
 

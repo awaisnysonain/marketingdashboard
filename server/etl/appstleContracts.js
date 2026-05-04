@@ -19,14 +19,56 @@ const TRIAL_DAYS = 14; // per the doc
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-async function fetchPage(page) {
+const TABLES = new Set(['nobl_air_subscribers', 'flo_appstle_subscribers']);
+
+function assertTable(tableName) {
+  if (!TABLES.has(tableName)) throw new Error(`Unsupported Appstle table: ${tableName}`);
+}
+
+async function ensureFloTable() {
+  await pgRun(`
+    CREATE TABLE IF NOT EXISTS flo_appstle_subscribers (
+      appstle_id TEXT PRIMARY KEY,
+      graph_subscription_contract_id TEXT,
+      subscription_contract_id TEXT,
+      customer_id TEXT,
+      customer_email TEXT,
+      customer_name TEXT,
+      order_name TEXT,
+      graph_order_id TEXT,
+      status TEXT,
+      contract_amount NUMERIC(14,4),
+      order_amount NUMERIC(14,4),
+      billing_policy_interval TEXT,
+      billing_policy_interval_count INT,
+      currency_code TEXT,
+      created_at TIMESTAMPTZ,
+      updated_at TIMESTAMPTZ,
+      starts_at TIMESTAMPTZ,
+      ends_at TIMESTAMPTZ,
+      next_billing_date TIMESTAMPTZ,
+      last_billing_date TIMESTAMPTZ,
+      cancelled_on TIMESTAMPTZ,
+      is_mature BOOLEAN DEFAULT FALSE,
+      is_converted BOOLEAN DEFAULT FALSE,
+      is_same_day_cancel BOOLEAN DEFAULT FALSE,
+      raw_json JSONB,
+      etl_fetched_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_created_at ON flo_appstle_subscribers (created_at)`);
+  await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_order_name ON flo_appstle_subscribers (order_name)`);
+  await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_status ON flo_appstle_subscribers (status)`);
+}
+
+async function fetchPage(page, apiKey) {
   // Per the technical doc: ?sort=created_at,asc (snake_case)
   const url = `${BASE}/subscription-contract-details?page=${page}&size=${PAGE_SIZE}&sort=created_at,asc`;
   for (let attempt = 1; attempt <= 4; attempt++) {
     let res;
     try {
       res = await fetch(url, {
-        headers: { 'X-API-Key': process.env.APPSTLE_API_KEY, 'Accept': 'application/json' },
+        headers: { 'X-API-Key': apiKey, 'Accept': 'application/json' },
         signal: AbortSignal.timeout(60_000),
       });
     } catch (e) {
@@ -76,8 +118,9 @@ function computeFlags(contract) {
   return { isMature, isConverted, isSameDayCancel, lastBillingMs: successDate };
 }
 
-async function writeBatch(contracts) {
+async function writeBatch(contracts, tableName) {
   if (contracts.length === 0) return 0;
+  assertTable(tableName);
   const CHUNK = 200;
   let written = 0;
   for (let i = 0; i < contracts.length; i += CHUNK) {
@@ -115,7 +158,7 @@ async function writeBatch(contracts) {
       );
     }
     await pgRun(`
-      INSERT INTO nobl_air_subscribers (
+      INSERT INTO ${tableName} (
         appstle_id, graph_subscription_contract_id, subscription_contract_id,
         customer_id, customer_email, customer_name,
         order_name, graph_order_id,
@@ -146,30 +189,44 @@ async function writeBatch(contracts) {
   return written;
 }
 
-async function syncAppstleContracts() {
-  if (!process.env.APPSTLE_API_KEY) {
-    return { rows: 0, errors: ['Missing APPSTLE_API_KEY'] };
+async function syncAppstleContracts(options = {}) {
+  const brand = options.brand || 'NOBL';
+  const apiKey = options.apiKey || process.env.APPSTLE_API_KEY;
+  const tableName = options.tableName || 'nobl_air_subscribers';
+  assertTable(tableName);
+  if (tableName === 'flo_appstle_subscribers') await ensureFloTable();
+
+  if (!apiKey) {
+    return { rows: 0, errors: [`Missing ${brand === 'FLO' ? 'FLO_APPSTLE_API_KEY' : 'APPSTLE_API_KEY'}`] };
   }
-  console.log('[Appstle] Fetching all subscription contracts…');
+  console.log(`[Appstle ${brand}] Fetching all subscription contracts...`);
   const errors = [];
   let page = 0, written = 0, total = null;
   while (true) {
     let r;
-    try { r = await fetchPage(page); }
+    try { r = await fetchPage(page, apiKey); }
     catch (e) { errors.push(`page ${page}: ${e.message}`); break; }
     if (total === null) {
       total = r.total;
-      console.log(`[Appstle] Total contracts: ${total}`);
+      console.log(`[Appstle ${brand}] Total contracts: ${total}`);
     }
     if (!Array.isArray(r.data) || r.data.length === 0) break;
-    written += await writeBatch(r.data);
-    console.log(`[Appstle] page ${page}: +${r.data.length} (cumulative ${written}/${total})`);
+    written += await writeBatch(r.data, tableName);
+    console.log(`[Appstle ${brand}] page ${page}: +${r.data.length} (cumulative ${written}/${total})`);
     if (page * PAGE_SIZE + r.data.length >= total) break;
     page++;
     await sleep(500);
-    if (page > 50) { console.warn('[Appstle] page cap'); break; }
+    if (page > 50) { console.warn(`[Appstle ${brand}] page cap`); break; }
   }
   return { rows: written, errors, total };
 }
 
-module.exports = { syncAppstleContracts };
+async function syncFloAppstleContracts() {
+  return syncAppstleContracts({
+    brand: 'FLO',
+    apiKey: process.env.FLO_APPSTLE_API_KEY,
+    tableName: 'flo_appstle_subscribers',
+  });
+}
+
+module.exports = { syncAppstleContracts, syncFloAppstleContracts, ensureFloTable };
