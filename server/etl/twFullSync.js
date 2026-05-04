@@ -1035,6 +1035,7 @@ async function syncTWBenchmarks(brand) {
 //  For FLO:
 //    revenue = blended_stats_tvf(include_amazon=TRUE).order_revenue
 //              = Gross Sales + Shipping + Taxes − Discounts
+//              = FLO US only. FLO EU is a separate store and is excluded.
 //
 //  shopify_revenue = blended_stats_tvf(include_amazon=FALSE).order_revenue
 //  amazon_revenue  = total − shopify
@@ -1134,11 +1135,17 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
           shopify_revenue = EXCLUDED.shopify_revenue,
           amazon_revenue  = EXCLUDED.amazon_revenue,
           total_sales     = EXCLUDED.total_sales,
+          total_revenue   = EXCLUDED.total_revenue,
           refund_amount   = EXCLUDED.refund_amount,
           refund_count    = EXCLUDED.refund_count,
           total_spend     = CASE WHEN EXCLUDED.total_spend > 0
                                  THEN EXCLUDED.total_spend
                                  ELSE tw_summary_daily.total_spend END,
+          mer             = CASE
+            WHEN (CASE WHEN EXCLUDED.total_spend > 0 THEN EXCLUDED.total_spend ELSE tw_summary_daily.total_spend END) > 0
+            THEN EXCLUDED.total_revenue / (CASE WHEN EXCLUDED.total_spend > 0 THEN EXCLUDED.total_spend ELSE tw_summary_daily.total_spend END)
+            ELSE NULL
+          END,
           updated_at      = NOW()
       `, [
         brand, date,

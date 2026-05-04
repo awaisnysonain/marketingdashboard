@@ -13,7 +13,8 @@ AVAILABLE DATABASE TABLES (PostgreSQL — use the EXACT names below):
             shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
    ▸ ALWAYS filter by brand (use filters.brand: 'NOBL' or 'FLO').
    ▸ NOBL already includes EU customers (one Shopify store, all regions).
-   ▸ total_revenue = canonical (Shopify+Amazon, includes Amazon for NOBL).
+   ▸ total_revenue/order_revenue = canonical order revenue for dashboard KPIs.
+   ▸ FLO totals are FLO US only. FLO EU is a separate store and is excluded.
 
 2. tw_channel_daily — Channel breakdown per brand per day
    Columns: date, brand, channel ('META'|'GOOGLE'|'TIKTOK'|'SNAPCHAT'|'PINTEREST'|'APPLOVIN'|'BING'|'X'),
@@ -56,13 +57,13 @@ AVAILABLE DATABASE TABLES (PostgreSQL — use the EXACT names below):
             shipping_country, has_air, has_luggage, is_rebill, ...
 
 COMPUTED METRICS (use as SQL expressions with aliases):
-- MER:    total_revenue / NULLIF(total_spend, 0) AS mer
-- AOV:    total_revenue / NULLIF(total_orders, 0) AS aov
+- MER:    SUM(total_revenue) / NULLIF(SUM(total_spend), 0) AS mer
+- AOV:    SUM(total_revenue) / NULLIF(SUM(total_orders), 0) AS aov
 - NC%:    new_customer_orders * 100.0 / NULLIF(total_orders, 0) AS nc_pct
 - ROAS:   revenue_1d / NULLIF(spend_1d, 0) AS roas
 - CAC:    spend_1d / NULLIF(new_cust_orders, 0) AS cac
 
-Data: 2024-01-01 onward. All amounts USD. Today = ${new Date().toISOString().slice(0,10)}.
+Data: 2024-01-01 onward. All amounts USD. Dynamic ranges resolve to the latest synced date for each table.
 `;
 
 // ── Dashboard generation system prompts ───────────────────────────
@@ -74,7 +75,7 @@ Today's date is ${today}.
 YOUR MOST IMPORTANT RULE: If the user's request already specifies the BRAND, TIME PERIOD, and a clear METRIC focus, generate the dashboard JSON IMMEDIATELY without asking any clarifying questions.
 
 Examples of requests where you should generate immediately:
-- "show me META channel for NOBL last 30 days"  → brand=NOBL, time=30d, focus=META channel
+- "show me META channel for NOBL MTD"           → brand=NOBL, time=current month, focus=META channel
 - "FLO product line breakdown this month"       → brand=FLO, time=current month, focus=product
 - "NOBL Air attach rate trend last 90 days"     → brand=NOBL Air, time=90d, focus=attach rate
 - "Compare revenue NOBL vs FLO YTD"             → both brands, time=YTD, focus=revenue
@@ -131,7 +132,7 @@ KPI row (summary numbers):
 Time-series chart (single brand):
 {
   "type": "line_chart",
-  "title": "NOBL Revenue vs Spend (last 30d)",
+  "title": "NOBL Revenue vs Spend (MTD)",
   "xField": "date",
   "series": [
     { "field": "total_revenue", "label": "Revenue", "color": "#3b5bdb" },
@@ -215,9 +216,10 @@ RULES (read carefully):
   nobl_air_daily and nobl_air_subscribers).
 - Use COALESCE(SUM(...), 0) for aggregated KPI columns to avoid nulls.
 - Use "DYNAMIC_TODAY"/"DYNAMIC_START" or specific ISO dates ("2025-01-01") for filters.
+  Dynamic dates are resolved by the server to the latest synced date for that table, not wall-clock today.
 - For YoY/multi-year comparisons: use TO_CHAR + CASE WHEN EXTRACT(YEAR ...) pattern above.
 - For channel tables: spend = spend_1d, revenue = revenue_1d.
-- For summary tables: spend = total_spend, revenue = total_revenue.
+- For summary tables: spend = total_spend, revenue = total_revenue. FLO total_revenue/total_spend exclude FLO EU.
 - nobl_air_daily has no brand filter — it's NOBL Air only. Data starts Feb 2026.
 - Field aliases in your SELECT columns MUST EXACTLY match the "field" in items/series/columns.
 - Include 3–5 sections. Always include at least one KPI row and one chart.
@@ -229,7 +231,7 @@ CHANNEL/BRAND COLORS:
 - APPLOVIN=#9333ea, BING=#0ea5e9, PINTEREST=#e60023, X=#1f2937
 
 COMMON PATTERNS:
-- "META for NOBL 30d"        → tw_channel_daily, filters={brand:'NOBL', channel:'META', start:DYNAMIC_START}
+- "META for NOBL MTD"        → tw_channel_daily, filters={brand:'NOBL', channel:'META', start:DYNAMIC_START}
 - "Compare NOBL 2025 vs 2026" → tw_summary_daily with TO_CHAR + CASE pattern shown above
 - "NOBL Air attach trend"    → nobl_air_daily, columns=[date, attach_rate]
 - "TTP by tier"              → nobl_air_subscribers, group_by=[contract_amount]
@@ -254,19 +256,51 @@ function validateTable(name) {
   return Object.prototype.hasOwnProperty.call(ALLOWED_TABLES, name);
 }
 
-// Replace DYNAMIC_* date placeholders
-function resolveDates(filters, windowDays = 30) {
-  const today = new Date().toISOString().slice(0, 10);
-  const start = new Date();
-  start.setDate(start.getDate() - windowDays);
-  const startStr = start.toISOString().slice(0, 10);
+function dateColumnForTable(table) {
+  if (table === 'shopify_orders_raw') return 'date_key';
+  if (table === 'nobl_air_subscribers') return 'DATE(created_at)';
+  return 'date';
+}
 
+function startOfMonth(dateStr) {
+  return `${String(dateStr).slice(0, 7)}-01`;
+}
+
+// Resolve DYNAMIC_* placeholders to the latest synced date for the selected table.
+// This prevents empty charts when wall-clock today is newer than the ETL data.
+async function resolveDates(filters, table, windowDays = 30) {
+  const today = new Date().toISOString().slice(0, 10);
   const out = { ...filters };
+  if (out.brand) out.brand = String(out.brand).toUpperCase();
+  if (out.channel) out.channel = Array.isArray(out.channel)
+    ? out.channel.map(v => String(v).toUpperCase())
+    : String(out.channel).toUpperCase();
+  if (out.region) out.region = String(out.region).toUpperCase();
+  if (out.product_line) out.product_line = String(out.product_line).toLowerCase();
+  const dateCol = dateColumnForTable(table);
+  let latest = today;
+
+  try {
+    const params = [];
+    const where = [];
+    if (out.brand && (ALLOWED_TABLES[table] || []).includes('brand')) {
+      params.push(String(out.brand).toUpperCase());
+      where.push(`brand = $${params.length}`);
+    }
+    const r = await pgQuery(
+      `SELECT TO_CHAR(MAX(${dateCol})::date, 'YYYY-MM-DD') AS max_date FROM "${table}"${where.length ? ` WHERE ${where.join(' AND ')}` : ''}`,
+      params
+    );
+    if (r.rows[0]?.max_date) latest = r.rows[0].max_date;
+  } catch (e) {
+    console.warn(`[QueryBuilder] latest-date lookup failed for ${table}:`, e.message);
+  }
+
+  const startStr = startOfMonth(latest);
   if (out.start_date === 'DYNAMIC_START' || !out.start_date) out.start_date = startStr;
-  if (out.end_date   === 'DYNAMIC_TODAY' || !out.end_date)   out.end_date   = today;
-  // Replace any ISO date-like dynamic strings
+  if (out.end_date === 'DYNAMIC_TODAY' || !out.end_date) out.end_date = latest;
   for (const k of Object.keys(out)) {
-    if (String(out[k]).startsWith('DYNAMIC')) out[k] = k.includes('start') ? startStr : today;
+    if (String(out[k]).startsWith('DYNAMIC')) out[k] = k.includes('start') ? startStr : latest;
   }
   return out;
 }
@@ -326,7 +360,7 @@ function guardDivision(expr) {
 }
 
 // Build a safe parameterized query from a section query config
-function buildSectionQuery(query, defaultWindowDays = 30) {
+async function buildSectionQuery(query, defaultWindowDays = 30) {
   const {
     table,
     columns = ['*'],
@@ -340,7 +374,7 @@ function buildSectionQuery(query, defaultWindowDays = 30) {
     throw new Error(`Table "${table}" is not allowed`);
   }
 
-  const filters = resolveDates(rawFilters, defaultWindowDays);
+  const filters = await resolveDates(rawFilters, table, defaultWindowDays);
   const params = [];
   let paramIdx = 1;
 
@@ -414,13 +448,7 @@ function buildSectionQuery(query, defaultWindowDays = 30) {
   // ── Build SQL ────────────────────────────────────────────────────
   let sql = `SELECT ${processedCols.join(', ')} FROM "${table}"`;
 
-  // Determine the right date column per table
-  // Most tables use `date`. Exceptions:
-  //   - shopify_orders_raw: date_key (DATE) or created_at (TIMESTAMPTZ)
-  //   - nobl_air_subscribers: created_at (TIMESTAMPTZ)
-  let dateCol = 'date';
-  if (table === 'shopify_orders_raw') dateCol = 'date_key';
-  else if (table === 'nobl_air_subscribers') dateCol = 'DATE(created_at)';
+  const dateCol = dateColumnForTable(table);
 
   // WHERE
   const whereParts = [];
@@ -438,6 +466,7 @@ function buildSectionQuery(query, defaultWindowDays = 30) {
   }
   if (filters.region)       { whereParts.push(`region = $${paramIdx++}`);       params.push(filters.region);       }
   if (filters.product_line) { whereParts.push(`product_line = $${paramIdx++}`); params.push(filters.product_line); }
+  if (filters.store_key)    { whereParts.push(`store_key = $${paramIdx++}`);    params.push(filters.store_key);    }
   if (filters.status)       { whereParts.push(`status = $${paramIdx++}`);       params.push(filters.status);       }
   if (whereParts.length > 0) sql += ` WHERE ${whereParts.join(' AND ')}`;
 
@@ -580,7 +609,7 @@ router.post('/execute', async (req, res) => {
         return;
       }
       try {
-        const { sql, params } = buildSectionQuery(section.query);
+        const { sql, params } = await buildSectionQuery(section.query);
         debug[idx] = { sql, params, table: section.query.table };
         console.log(`[Execute §${idx}]`, sql.slice(0, 200), params);
         const r = await pgQuery(sql, params);

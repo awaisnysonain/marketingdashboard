@@ -17,7 +17,7 @@ const { calcMer }  = require('../config/brandConfig');
 function getDefaultDates(req) {
   const end   = req.query.end   || new Date().toISOString().slice(0, 10);
   const start = req.query.start || (() => {
-    const d = new Date(); d.setDate(d.getDate() - 30); return d.toISOString().slice(0, 10);
+    const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10);
   })();
   return { start, end };
 }

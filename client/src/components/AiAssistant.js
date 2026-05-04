@@ -207,7 +207,7 @@ export default function AiAssistant({ activeTab }) {
   const QUICK = [
     "What's NOBL's MER yesterday?",
     "Show channel ROAS this week",
-    "Compare NOBL vs FLO revenue last 30 days",
+    "Compare NOBL vs FLO revenue MTD",
     "Which channel has best ROAS?",
     "Regional MER breakdown",
     "Klaviyo email performance",

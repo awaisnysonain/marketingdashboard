@@ -13,12 +13,12 @@ const { pgQuery } = require('../db/postgres');
 // eslint-disable-next-line no-unused-vars
 const { NOBL_BRAND, FLO_US_BRAND, getBrand, calcMer } = require('../config/brandConfig');
 
-// Default date range: last 30 days
+// Default date range: current month-to-date
 function getDefaultDates(req) {
   const end = req.query.end || new Date().toISOString().slice(0, 10);
   const start = req.query.start || (() => {
     const d = new Date();
-    d.setDate(d.getDate() - 30);
+    d.setDate(1);
     return d.toISOString().slice(0, 10);
   })();
   return { start, end };
@@ -698,26 +698,48 @@ router.get('/nobl/air-attribution', async (req, res) => {
 
   try {
     const r = await pgQuery(`
-      WITH air AS (
+      WITH attr AS (
+        SELECT *
+        FROM tw_air_order_attribution
+        WHERE brand = 'NOBL'
+          AND channel = 'facebook-ads'
+          AND model = 'Triple Attribution'
+          AND attribution_window = '1_day'
+          AND date BETWEEN $1::date AND $2::date
+      ), sub_match AS (
+        SELECT
+          a.id,
+          BOOL_OR(COALESCE(s.is_mature, false)) AS is_mature,
+          BOOL_OR(COALESCE(s.is_mature, false) AND COALESCE(s.is_converted, false)) AS is_converted,
+          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature)::int AS ttp_mature_subscribers,
+          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature AND s.is_converted)::int AS ttp_paid_subscribers
+        FROM attr a
+        LEFT JOIN LATERAL (
+          SELECT appstle_id, is_mature, is_converted
+          FROM nobl_air_subscribers
+          WHERE order_name = a.order_name
+          UNION
+          SELECT appstle_id, is_mature, is_converted
+          FROM nobl_air_subscribers
+          WHERE graph_order_id = CONCAT('gid://shopify/Order/', a.order_id)
+          UNION
+          SELECT appstle_id, is_mature, is_converted
+          FROM nobl_air_subscribers
+          WHERE graph_order_id = a.order_id
+        ) s ON true
+        GROUP BY a.id
+      ), air AS (
         SELECT
           ${groupCols},
           COUNT(DISTINCT a.order_id)::int AS air_orders,
           SUM(a.linear_weight)::numeric(14,2) AS attributed_air_orders,
           SUM(a.order_revenue * a.linear_weight)::numeric(14,2) AS attributed_air_revenue,
-          SUM(a.linear_weight) FILTER (WHERE s.is_mature)::numeric(14,2) AS ttp_mature_air_orders,
-          SUM(a.linear_weight) FILTER (WHERE s.is_mature AND s.is_converted)::numeric(14,2) AS ttp_paid_air_orders,
-          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature)::int AS ttp_mature_subscribers,
-          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature AND s.is_converted)::int AS ttp_paid_subscribers
-        FROM tw_air_order_attribution a
-        LEFT JOIN nobl_air_subscribers s
-          ON s.order_name = a.order_name
-          OR s.graph_order_id = CONCAT('gid://shopify/Order/', a.order_id)
-          OR s.graph_order_id = a.order_id
-        WHERE a.brand = 'NOBL'
-          AND a.channel = 'facebook-ads'
-          AND a.model = 'Triple Attribution'
-          AND a.attribution_window = '1_day'
-          AND a.date BETWEEN $1::date AND $2::date
+          SUM(a.linear_weight) FILTER (WHERE sm.is_mature)::numeric(14,2) AS ttp_mature_air_orders,
+          SUM(a.linear_weight) FILTER (WHERE sm.is_converted)::numeric(14,2) AS ttp_paid_air_orders,
+          SUM(sm.ttp_mature_subscribers)::int AS ttp_mature_subscribers,
+          SUM(sm.ttp_paid_subscribers)::int AS ttp_paid_subscribers
+        FROM attr a
+        LEFT JOIN sub_match sm ON sm.id = a.id
         GROUP BY ${groupCols}
       ),
       total AS (

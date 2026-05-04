@@ -8,7 +8,7 @@ import DateRangePicker from '../components/DateRangePicker';
 import SheetTable from '../components/SheetTable';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
-function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return toISO(d); }
+function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -33,7 +33,7 @@ function SortTh({ label, field, sortBy, sortDir, onSort }) {
 }
 
 export default function ChannelsPage({ showToast }) {
-  const [range, setRange] = useState({ start: daysAgo(30), end: toISO(new Date()) });
+  const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
   const [brandFilter, setBrandFilter] = useState('Both');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);

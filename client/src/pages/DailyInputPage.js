@@ -89,8 +89,13 @@ export default function DailyInputPage(){
     ? ALL_COLS.filter(c=>headers.includes(c.key)||c.key==='Date')
     : ALL_COLS.filter(c=>activeGroup?.keys.includes(c.key));
 
-  // Chart data — last 30 days
-  const recent=dataRows.slice(-30);
+  // Chart data — current month-to-date
+  const now=new Date();
+  const currentMonthRows=dataRows.filter(r=>{
+    const d=new Date(r['Date']);
+    return !isNaN(d) && d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
+  });
+  const recent=currentMonthRows.length ? currentMonthRows : dataRows.slice(-30);
   const chartData=recent.map(r=>({
     date:fmtDate(r['Date']),
     orders:+r['Total Orders']||0,
@@ -131,7 +136,7 @@ export default function DailyInputPage(){
 
       {/* Charts */}
       <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:20}}>
-        <Section title="Orders (Last 30 Days)">
+        <Section title="Orders (Current Month)">
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={chartData} barGap={2}>
@@ -147,7 +152,7 @@ export default function DailyInputPage(){
           </div>
         </Section>
 
-        <Section title="Attach Rate (Last 30 Days)">
+        <Section title="Attach Rate (Current Month)">
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={chartData}>

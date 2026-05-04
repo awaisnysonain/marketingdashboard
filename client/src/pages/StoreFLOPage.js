@@ -10,7 +10,7 @@ import SheetTable from '../components/SheetTable';
 
 /* ── helpers ──────────────────────────────────────────────────────── */
 function toISO(d) { return d.toISOString().slice(0, 10); }
-function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return toISO(d); }
+function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
 function fmtLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -49,7 +49,7 @@ function merColor(v) {
    MAIN PAGE
 ════════════════════════════════════════════════════════════════════ */
 export default function StoreFLOPage({ showToast }) {
-  const [range, setRange]     = useState({ start: daysAgo(30), end: toISO(new Date()) });
+  const [range, setRange]     = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);

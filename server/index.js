@@ -168,6 +168,7 @@ async function initPostgresTables() {
     `);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_brand_date    ON tw_ads_daily (brand, date DESC)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_brand_platform ON tw_ads_daily (brand, platform)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_meta_perf ON tw_ads_daily (brand, platform, date DESC)`);
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_air_order_attribution (
@@ -195,6 +196,9 @@ async function initPostgresTables() {
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_brand_date ON tw_air_order_attribution (brand, date DESC)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_channel ON tw_air_order_attribution (brand, channel, date DESC)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_adset ON tw_air_order_attribution (brand, adset_id, date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_air_attr_perf ON tw_air_order_attribution (brand, channel, model, attribution_window, date DESC)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_order_name ON nobl_air_subscribers (order_name)`).catch(() => {});
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_graph_order_id ON nobl_air_subscribers (graph_order_id)`).catch(() => {});
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_orders_detail (
@@ -602,20 +606,20 @@ When querying NOBL data: WHERE brand='NOBL' already includes EU in all summary/c
 NEVER show NOBL without EU. NEVER compare NOBL vs NOBL EU. They are ALWAYS summed together.
 EU contributes ~0.5–1% of NOBL revenue and appears as a region breakdown in tw_geo_daily — that is the ONLY place to see EU separately, and only for breakdown purposes.
 
-PILATES FLO (pilatesflo.com): Pilates equipment — Portable Reformer, Home Reformer (metal), Studio Reformer (wooden). Sells via Shopify US + EU store (afmjag-r2.myshopify.com). FLO EU IS a separate Shopify store with its own brand tracking. EU revenue in EUR × 1.16 = USD.
+PILATES FLO (pilatesflo.com): Pilates equipment — Portable Reformer, Home Reformer (metal), Studio Reformer (wooden). The dashboard's FLO totals are FLO US only. FLO EU is a separate Shopify store and is excluded from FLO total_revenue/total_spend.
 
 ━━━ DATABASE TABLES ━━━
 tw_summary_daily(id, brand, date, total_revenue, total_spend, mer, total_orders, new_customer_orders, returning_customer_orders, order_revenue, shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count)
   → brand = 'NOBL' or 'FLO' | date is a DATE column (use date BETWEEN $1::date AND $2::date)
-  → order_revenue = canonical revenue (Shopify+Amazon orders, before refunds) — USE THIS
-  → total_revenue = TW attributed revenue — AVOID using for KPIs
+  → total_revenue/order_revenue = canonical dashboard revenue (Shopify+Amazon for NOBL; FLO US only for FLO)
+  → Use COALESCE(order_revenue, total_revenue) only if you need compatibility with older rows
   → total_sales = order_revenue - refund_amount (net, after refunds)
   → amazon_revenue ≈ $10-15k/day for NOBL; shopify_revenue = rest
   → Note: order_revenue populated by tw_order_revenue ETL task (NULL until backfill runs)
 
 tw_channel_daily(id, brand, date, channel, spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac)
   → channel values: 'META','GOOGLE','APPLOVIN','TIKTOK','SNAPCHAT','BING','PINTEREST','X'
-  → Latest: 2026-04-22
+  → Use MAX(date) to determine latest available data; do not assume wall-clock today has synced.
 
 tw_channel_daily_all(id, brand, date, tw_channel, spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac)
   → tw_channel values: 'facebook-ads','google-ads','applovin','tiktok-ads','snapchat-ads','bing','pinterest-ads','twitter-ads'
@@ -690,19 +694,14 @@ tw_benchmarks(id, brand, date, vertical, revenue_tier, metric_name, metric_value
   → Industry benchmark data from TW benchmarks_table (monthly)
   → Compare brand metrics against industry percentiles
 
-━━━ REVENUE — TWO METRICS, USE THE CORRECT ONE ━━━
-⚠️ CRITICAL: total_revenue ≠ actual revenue. There are TWO revenue fields:
+━━━ REVENUE — USE DASHBOARD-CANONICAL FIELDS ━━━
+For current dashboard tables, total_revenue and order_revenue are kept aligned for brand-level KPIs.
 
-order_revenue  (CANONICAL — USE THIS for MER, AOV, all KPIs)
+order_revenue / total_revenue  (CANONICAL — USE for MER, AOV, all KPIs)
   = SUM of all actual Shopify + Amazon orders (total_price), BEFORE refunds
   = "Order Revenue" as shown in TW UI: "Revenue from orders after discounts, before refunds"
   = Shopify + Amazon combined. shopify_revenue and amazon_revenue show the split.
-  ⚠️ FALLBACK: If order_revenue IS NULL (backfill not run yet), use total_revenue
-
-total_revenue  (TW ATTRIBUTED — secondary, do NOT use for MER)
-  = TripleWhale pixel-attributed/blended revenue
-  = DIFFERENT from Shopify orders — attribution windows cause discrepancies
-  = Example: Apr 28 NOBL: total_revenue=$515,707 but order_revenue=$531,679
+  ⚠️ FLO is FLO US only. Do not add FLO_EU unless the user explicitly asks for the separate EU store.
 
 total_sales
   = order_revenue - refund_amount (net revenue actually kept)
@@ -712,12 +711,12 @@ shopify_revenue  = Shopify-only orders (order_revenue minus Amazon)
 amazon_revenue   = Amazon channel only (NOBL has ~$10-15k/day from Amazon)
 
 ━━━ KEY METRICS & FORMULAS ━━━
-MER = COALESCE(order_revenue, total_revenue) / total_spend  [target ≥2.0, red <1.8]
+MER = SUM(total_revenue) / NULLIF(SUM(total_spend),0)  [target ≥2.0, red <1.8]
 ROAS = channel_revenue / channel_spend
 NC ROAS = new_customer_revenue / spend
 NVP% = new_visitors / total_visitors [target ≥50%]
 CAC = spend / new_customer_orders
-AOV = COALESCE(order_revenue, total_revenue) / total_orders
+AOV = SUM(total_revenue) / NULLIF(SUM(total_orders),0)
 NC Rate = new_customer_orders / total_orders
 Refund Rate = refund_amount / order_revenue
 Net MER = total_sales / total_spend (after refunds)
@@ -748,13 +747,14 @@ US = United States, CA = Canada, AUS = Australia, DUBAI = UAE/Dubai, EU = Europe
 5. Date filtering: most tables use a 'date' column (DATE). Use BETWEEN '$1'::date AND '$2'::date.
    - shopify_orders_raw uses date_key.
    - nobl_air_subscribers uses created_at (cast via DATE(created_at)).
-6. Today's date is dynamic — call NOW() or use current_date in SQL when you need "today".
+6. For "latest", "yesterday", or default ranges, first use MAX(date) from the relevant table/brand and anchor the answer to that latest synced date. Do not assume current_date has data.
 7. Return chartHint as: "line_chart", "bar_chart", "table", or "kpi_cards" based on what data you return.
 
 ━━━ COMMON QUERIES ━━━
-- Daily revenue NOBL last 30 days:
-    SELECT date, total_revenue FROM tw_summary_daily
-    WHERE brand='NOBL' AND date >= current_date - 30 ORDER BY date
+- Daily revenue NOBL current month-to-date:
+    WITH latest AS (SELECT MAX(date) AS d FROM tw_summary_daily WHERE brand='NOBL')
+    SELECT date, total_revenue FROM tw_summary_daily, latest
+    WHERE brand='NOBL' AND date BETWEEN DATE_TRUNC('month', latest.d)::date AND latest.d ORDER BY date
 - META spend/revenue NOBL Apr 2026:
     SELECT date, spend_1d, revenue_1d, roas_1d FROM tw_channel_daily
     WHERE brand='NOBL' AND channel='META' AND date BETWEEN '2026-04-01'::date AND '2026-04-30'::date
@@ -764,10 +764,10 @@ US = United States, CA = Canada, AUS = Australia, DUBAI = UAE/Dubai, EU = Europe
     SELECT contract_amount AS tier, COUNT(*) FILTER (WHERE status='active')::int AS active
     FROM nobl_air_subscribers WHERE contract_amount IN (49,79,89,99,109,119,129,139,149,159)
     GROUP BY tier ORDER BY tier
-- Top NOBL products last 30 days:
+- Top NOBL products current month-to-date:
     SELECT product_title, SUM(units_sold)::int AS units, SUM(net_revenue)::numeric(14,2) AS revenue
     FROM shopify_product_daily
-    WHERE brand='NOBL' AND date >= current_date - 30
+    WHERE brand='NOBL' AND date >= DATE_TRUNC('month', current_date)::date
     GROUP BY product_title HAVING SUM(units_sold) > 50 ORDER BY revenue DESC LIMIT 20`;
 
 const DB_TOOL = {
@@ -785,6 +785,17 @@ const DB_TOOL = {
     }
   }
 };
+
+function prepareAiSelectSql(sql) {
+  let cleaned = String(sql || '').trim().replace(/;\s*$/g, '');
+  if (!/^(SELECT|WITH)\b/i.test(cleaned)) throw new Error('Only SELECT/WITH queries are allowed');
+  if (/;/.test(cleaned)) throw new Error('Multiple SQL statements are not allowed');
+  if (/\b(DROP|DELETE|TRUNCATE|UPDATE|INSERT|ALTER|CREATE|GRANT|REVOKE)\b/i.test(cleaned)) {
+    throw new Error('Only read-only SELECT queries are allowed');
+  }
+  if (!/\bLIMIT\s+\d+\b/i.test(cleaned)) cleaned += ' LIMIT 200';
+  return cleaned;
+}
 
 app.post('/api/ai/chat', async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'OpenAI not configured' });
@@ -814,36 +825,37 @@ app.post('/api/ai/chat', async (req, res) => {
 
     // If AI wants to query the database
     if (r1msg.tool_calls?.length) {
-      const toolCall = r1msg.tool_calls[0];
-      const { sql, description } = JSON.parse(toolCall.function.arguments);
+      const toolMessages = [];
+      const querySummaries = [];
 
-      let dbRows = [], dbColumns = [], dbError = null;
-      try {
-        // Safety: block destructive queries
-        const upper = sql.trim().toUpperCase();
-        if (/^(DROP|DELETE|TRUNCATE|UPDATE|INSERT|ALTER|CREATE)\s/.test(upper)) {
-          throw new Error('Only SELECT queries are allowed');
+      for (const toolCall of r1msg.tool_calls) {
+        const { sql, description } = JSON.parse(toolCall.function.arguments || '{}');
+        let dbRows = [], dbColumns = [], dbError = null, preparedSql = sql;
+        try {
+          preparedSql = prepareAiSelectSql(sql);
+          const result = await pgQuery(preparedSql);
+          dbColumns = result.fields?.map(f => f.name) || Object.keys(result.rows[0] || {});
+          dbRows = result.rows.map(r => dbColumns.map(c => r[c]));
+          queryResult = { columns: dbColumns, rows: dbRows, description, sql: preparedSql };
+        } catch (e) {
+          dbError = e.message;
+          console.error('[AI DB Query]', e.message, '\nSQL:', sql);
         }
-        const result = await pgQuery(sql + (sql.trim().toUpperCase().includes('LIMIT') ? '' : ' LIMIT 200'));
-        dbColumns = result.fields?.map(f => f.name) || Object.keys(result.rows[0] || {});
-        dbRows = result.rows.map(r => dbColumns.map(c => r[c]));
-        queryResult = { columns: dbColumns, rows: dbRows, description, sql };
-      } catch (e) {
-        dbError = e.message;
-        console.error('[AI DB Query]', e.message, '\nSQL:', sql);
+
+        const toolResultContent = dbError
+          ? `Query error: ${dbError}`
+          : `Query returned ${dbRows.length} rows.\nColumns: ${dbColumns.join(', ')}\nData (first 20 rows): ${JSON.stringify(dbRows.slice(0, 20))}`;
+        toolMessages.push({ role: 'tool', tool_call_id: toolCall.id, content: toolResultContent });
+        querySummaries.push({ description, sql: preparedSql, error: dbError, rowCount: dbRows.length, columns: dbColumns });
       }
 
       // Round 2: feed results back to AI for final answer
-      const toolResultContent = dbError
-        ? `Query error: ${dbError}`
-        : `Query returned ${dbRows.length} rows.\nColumns: ${dbColumns.join(', ')}\nData (first 20 rows): ${JSON.stringify(dbRows.slice(0, 20))}`;
-
       const round2 = await openai.chat.completions.create({
         model: 'gpt-4o',
         messages: [
           ...allMessages,
           r1msg,
-          { role: 'tool', tool_call_id: toolCall.id, content: toolResultContent }
+          ...toolMessages
         ],
         max_tokens: 1500,
         temperature: 0.2,
@@ -856,15 +868,17 @@ app.post('/api/ai/chat', async (req, res) => {
       if (hintMatch) {
         chartHint = hintMatch[1].toLowerCase();
         reply = reply.replace(/CHART_HINT:\s*(line_chart|bar_chart|table|kpi_cards)/i, '').trim();
-      } else if (dbRows.length > 0) {
+      } else if (queryResult?.rows?.length > 0) {
         // Auto-detect chart type
+        const dbColumns = queryResult.columns || [];
+        const dbRows = queryResult.rows || [];
         if (dbColumns.includes('date') || dbColumns.some(c => c.includes('date'))) chartHint = 'line_chart';
-        else if (dbRows.length <= 15 && dbColumns.length <= 4) chartHint = 'kpi_cards';
+        else if (dbRows.length === 1 && dbColumns.length <= 8) chartHint = 'kpi_cards';
         else if (dbRows.length > 1 && dbColumns.some(c => c.includes('channel') || c.includes('region') || c.includes('brand'))) chartHint = 'bar_chart';
         else chartHint = 'table';
       }
 
-      return res.json({ reply, queryResult, chartHint });
+      return res.json({ reply, queryResult, chartHint, querySummaries });
     }
 
     // No DB query needed — just return the text

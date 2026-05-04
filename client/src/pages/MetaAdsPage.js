@@ -6,6 +6,7 @@ import SheetTable from '../components/SheetTable';
 import { getMetaAds, fmt$, fmtNum, fmtPct } from '../utils/api';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
+function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
 function shortName(s, max = 24) {
   const name = String(s || 'Unknown');
   return name.length > max ? `${name.slice(0, max - 1)}…` : name;
@@ -39,7 +40,7 @@ function toTableRow(r) {
 }
 
 export default function MetaAdsPage() {
-  const [range, setRange] = useState({ start: '2026-03-01', end: toISO(new Date()) });
+  const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
   const [level, setLevel] = useState('adset');
   const [levelOpen, setLevelOpen] = useState(false);
   const [loading, setLoading] = useState(true);

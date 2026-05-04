@@ -122,7 +122,17 @@ function EmptyState() {
   return <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13}}>No data available</div>;
 }
 
-function Section({ section, data }) {
+function Section({ section, data, error }) {
+  if (error) {
+    return (
+      <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,padding:16,marginBottom:14}}>
+        {section.title && <div style={{fontSize:13,fontWeight:700,marginBottom:12,color:'var(--text)'}}>{section.title}</div>}
+        <div style={{padding:'12px',background:'var(--danger-dim)',border:'1px solid rgba(239,68,68,.25)',borderRadius:8,fontSize:12,color:'var(--danger)',lineHeight:1.5}}>
+          Query error: {error}
+        </div>
+      </div>
+    );
+  }
   const inner = section.type==='kpi_row' ? <KpiSection section={section} data={data}/>
     : section.type==='table' ? <TableSection section={section} data={data}/>
     : ['area_chart','line_chart','bar_chart'].includes(section.type) ? <ChartSection section={section} data={data} type={section.type}/>
@@ -296,6 +306,7 @@ export default function AiBuilderPage({ showToast, onDashboardCreated }) {
   const [input, setInput]             = useState('');
   const [aiLoading, setAiLoading]     = useState(false);
   const [sectionData, setSectionData] = useState({});
+  const [sectionErrors, setSectionErrors] = useState({});
   const [dataLoading, setDataLoading] = useState(false);
   const [showSave, setShowSave]       = useState(false);
   const [saveLoading, setSaveLoading] = useState(false);
@@ -350,9 +361,14 @@ export default function AiBuilderPage({ showToast, onDashboardCreated }) {
     if (!cfg?.sections) return;
     setDataLoading(true);
     setSectionData({});
+    setSectionErrors({});
     try {
       const res = await executeDashboard(cfg);
       setSectionData(res.results || {});
+      setSectionErrors(res.errors || {});
+      if (res.errors && Object.keys(res.errors).length > 0) {
+        showToast?.('Some dashboard sections could not load. Check the preview for details.', 'warn');
+      }
     } catch(e) {
       console.error('[Execute]', e);
       showToast?.('Could not load data', 'error');
@@ -391,6 +407,7 @@ export default function AiBuilderPage({ showToast, onDashboardCreated }) {
     setMessages([]);
     setConfig(null);
     setSectionData({});
+    setSectionErrors({});
     setSaveName('');
     setShowSave(false);
     setShowHistory(false);
@@ -404,6 +421,7 @@ export default function AiBuilderPage({ showToast, onDashboardCreated }) {
     setMessages(session.messages || []);
     setConfig(null);
     setSectionData({});
+    setSectionErrors({});
     setShowSave(false);
     setShowHistory(false);
     showToast?.('Session restored', 'info');
@@ -828,7 +846,7 @@ export default function AiBuilderPage({ showToast, onDashboardCreated }) {
             {dataLoading
               ? [1,2,3].map(i=><Skeleton key={i}/>)
               : (config?.sections||[]).map((sec,i)=>(
-                  <Section key={i} section={sec} data={sectionData[i]||[]}/>
+                  <Section key={i} section={sec} data={sectionData[i]||[]} error={sectionErrors[i]}/>
                 ))
             }
           </>

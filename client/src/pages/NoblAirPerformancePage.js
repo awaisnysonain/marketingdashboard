@@ -114,29 +114,37 @@ function toAirAttributionTableRow(r) {
 
 /* ────────────── PAGE ────────────── */
 export default function NoblAirPerformancePage() {
-  // Default range: NOBL Air launched Mar 2026 — show Mar 1 → today
-  const [range, setRange] = useState({ start: '2026-03-01', end: toISO(new Date()) });
+  // Default range: current month-to-date.
+  const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState({ rows: [], totals: {} });
   const [subData, setSubData] = useState(null);
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
+  const [airAttrLoading, setAirAttrLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
+    setAirAttrLoading(true);
+    setAirAttr({ rows: [], totals: {}, error: null });
     try {
-      const [perf, subs, attr] = await Promise.all([
+      const attrPromise = getNoblAirAttribution(range.start, range.end, 'ad')
+        .catch(e => ({ rows: [], totals: {}, error: e.message }));
+      const [perf, subs] = await Promise.all([
         getNoblAirPerformance(range.start, range.end, 14, 0),
         getNoblAirSubscribers(range.start, range.end),
-        getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message })),
       ]);
       setData({ rows: perf?.rows || [], totals: perf?.totals || {} });
       setSubData(subs || null);
+      setLoading(false);
+
+      const attr = await attrPromise;
       setAirAttr(attr || { rows: [], totals: {}, error: null });
     } catch (e) {
       setError(e.message || 'Failed to load');
     } finally {
       setLoading(false);
+      setAirAttrLoading(false);
     }
   }, [range]);
 
@@ -355,7 +363,9 @@ export default function NoblAirPerformancePage() {
 
           {/* ── NOBL Air ad attribution ── */}
           <Card title="NOBL Air Purchases by Meta Ad" subtitle="Exact NOBL Air orders from Triple Whale, with per-ad attach, TTP, and activation rates" style={{ marginBottom:16 }}>
-            {airAttr?.error ? (
+            {airAttrLoading ? (
+              <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
+            ) : airAttr?.error ? (
               <div style={{ color:'var(--danger)', fontSize:13 }}>NOBL Air ad attribution unavailable: {airAttr.error}</div>
             ) : airAttrRows.length === 0 ? <Empty msg="No NOBL Air ad attribution data yet. Run tw_air_attribution sync for this date range." /> : (
               <>

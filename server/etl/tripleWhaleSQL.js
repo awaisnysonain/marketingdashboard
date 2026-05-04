@@ -4,8 +4,8 @@
  * approach (which gave inflated MTA numbers + missed EU + missed Amazon).
  *
  * Tables refreshed:
- *   tw_summary_daily     — total_revenue (= Shopify + Amazon + EU when applicable),
- *                          total_spend (= blendedAds incl. EU shop), order counts.
+ *   tw_summary_daily     — total_revenue (= Shopify + Amazon for the selected brand),
+ *                          total_spend (= blendedAds for the selected brand), order counts.
  *   tw_channel_daily     — per-channel spend / revenue using Triple Attribution +
  *                          1-day click window (matches the TW dashboard UI).
  *   tw_geo_daily         — per-region revenue + spend (US/CA/AUS/DUBAI/EU/TOTAL).
@@ -33,10 +33,11 @@ const CHANNEL_MAP = {
   'twitter-ads':   'X',
 };
 
-// Per-brand config controls which sources contribute to total_revenue & total_spend
+// Per-brand config controls which sources contribute to total_revenue & total_spend.
+// FLO EU is a separate business unit and must not be included in FLO totals.
 const BRAND_CONFIG = {
-  NOBL: { includeAmazon: true,  euBrand: 'NOBL_EU' /* same shop, separate TW WS */ },
-  FLO:  { includeAmazon: false, euBrand: 'FLO_EU'  /* separate Shopify shop      */ },
+  NOBL: { includeAmazon: true,  euBrand: null      /* main Shopify includes EU   */ },
+  FLO:  { includeAmazon: false, euBrand: null      /* FLO US only; exclude EU    */ },
 };
 
 function nextYmd(ymd) {
@@ -256,13 +257,11 @@ async function refreshBrand(brand, startYmd, endYmd) {
     fetchChannelMetrics(brand, startYmd, endYmd),
   ]);
 
-  // EU shop: separate brand for the same product (FLO_EU is a different Shopify
-  // store; NOBL_EU is the same Shopify store via a different TW WS — only
-  // include EU revenue for FLO since NOBL's nobltravel.myshopify.com already
-  // includes EU customers in shopRev).
+  // Optional EU shop support. FLO EU is intentionally excluded from FLO totals;
+  // NOBL EU is also not added here because NOBL's main shop already includes EU.
   let euRev = {};
   let euSpend = {};
-  if (brand === 'FLO' && cfg.euBrand) {
+  if (cfg.euBrand) {
     try {
       const [er, es] = await Promise.all([
         fetchShopifyRevenue(cfg.euBrand, startYmd, endYmd),
@@ -291,10 +290,9 @@ async function refreshBrand(brand, startYmd, endYmd) {
     const ord      = orders[date] || { total_orders: 0, new_customer_orders: 0 };
     const reg      = regionRev[date] || { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
 
-    // For NOBL the shopRev already includes EU customers via single shop;
-    // for FLO we ADD the EU shop revenue separately.
-    // Either way, region.EU here is just for the geo breakdown.
-    const regionEUForGeo = brand === 'FLO' ? euVal : reg.EU;
+    // EU region is only a geo breakdown; separate EU stores are not included
+    // in the brand-level FLO total.
+    const regionEUForGeo = reg.EU;
 
     const mer = totalSp > 0 ? totalRev / totalSp : null;
     await pgRun(`

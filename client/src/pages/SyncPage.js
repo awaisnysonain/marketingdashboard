@@ -4,7 +4,7 @@ import { Icons } from '../components/Icons';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function toISO(d) { return d.toISOString().slice(0, 10); }
-function daysAgo(n) { const d = new Date(); d.setDate(d.getDate() - n); return toISO(d); }
+function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
 
 function fmtDuration(ms) {
   if (ms == null || isNaN(ms)) return '—';
@@ -148,7 +148,7 @@ export default function SyncPage({ showToast }) {
   const [syncing, setSyncing] = useState(false);
 
   // Backfill form state
-  const [bfFrom, setBfFrom] = useState(daysAgo(30));
+  const [bfFrom, setBfFrom] = useState(startOfMonthISO());
   const [bfTo, setBfTo] = useState(toISO(new Date()));
   const [bfTasks, setBfTasks] = useState(() =>
     Object.fromEntries(BACKFILL_TASKS.map(t => [t.key, t.key === 'klaviyo']))
