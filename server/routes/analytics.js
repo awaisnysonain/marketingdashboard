@@ -1139,15 +1139,20 @@ router.get('/nobl/air-subscribers', async (req, res) => {
       WHERE ROUND(contract_amount) IN (49, 79, 89, 99, 109, 119, 129, 139, 149, 159)
       GROUP BY tier ORDER BY tier`);
 
-    // TTP cohort over the requested date range
+    // TTP is a mature cohort metric. Do not restrict it to the selected MTD
+    // range, because recent subscribers are still inside the 14-day trial window.
     const ttpRes = await pgQuery(`
       SELECT
-        COUNT(*)::int                                                  AS total_in_range,
+        (SELECT COUNT(*)::int
+         FROM nobl_air_subscribers
+         WHERE DATE(created_at) BETWEEN $1::date AND $2::date)         AS total_in_range,
         COUNT(*) FILTER (WHERE is_mature)::int                         AS mature,
         COUNT(*) FILTER (WHERE is_mature AND is_converted)::int        AS converted,
-        COUNT(*) FILTER (WHERE is_same_day_cancel)::int                AS same_day_cancels
-      FROM nobl_air_subscribers
-      WHERE DATE(created_at) BETWEEN $1::date AND $2::date`, [start, end]);
+        (SELECT COUNT(*)::int
+         FROM nobl_air_subscribers
+         WHERE DATE(created_at) BETWEEN $1::date AND $2::date
+           AND is_same_day_cancel)                                     AS same_day_cancels
+      FROM nobl_air_subscribers`, [start, end]);
 
     // New subs per day (created_at)
     const dailyRes = await pgQuery(`

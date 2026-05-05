@@ -232,16 +232,22 @@ export default function NoblAirPerformancePage() {
           </p>
         </div>
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-          <select
-            value={region}
-            onChange={(e) => setRegion(e.target.value)}
-            style={{
-              padding:'6px 10px', fontSize:12, borderRadius:6,
-              border:'1px solid var(--border)', background:'var(--bg2)', color:'var(--text)',
-            }}
-          >
-            {REGIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-          </select>
+          <div style={{ position:'relative' }}>
+            <select
+              value={region}
+              onChange={(e) => setRegion(e.target.value)}
+              style={{
+                appearance:'none', WebkitAppearance:'none', MozAppearance:'none',
+                minWidth:130, height:34, padding:'0 34px 0 12px', fontSize:13,
+                borderRadius:8, border:'1px solid var(--border)',
+                background:'var(--bg2)', color:'var(--text)', cursor:'pointer',
+                boxShadow:'0 1px 2px rgba(15, 23, 42, 0.04)', fontWeight:500,
+              }}
+            >
+              {REGIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+            </select>
+            <span style={{ position:'absolute', right:11, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'var(--text3)', fontSize:11 }}>▼</span>
+          </div>
           <DateRangePicker
             start={range.start}
             end={range.end}
