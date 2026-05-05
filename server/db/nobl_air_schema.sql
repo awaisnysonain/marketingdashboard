@@ -173,6 +173,19 @@ CREATE TABLE IF NOT EXISTS shopify_product_daily (
 CREATE INDEX IF NOT EXISTS idx_prod_brand_date ON shopify_product_daily (brand, date DESC);
 CREATE INDEX IF NOT EXISTS idx_prod_title       ON shopify_product_daily (brand, product_title);
 
+-- ─── FLO Appstle subscription revenue daily ────────────────────────────────
+CREATE TABLE IF NOT EXISTS flo_appstle_revenue_daily (
+  date                DATE PRIMARY KEY,
+  shopify_sub_gross   NUMERIC(14,4) DEFAULT 0,
+  shopify_sub_disc    NUMERIC(14,4) DEFAULT 0,
+  shopify_sub_refunds NUMERIC(14,4) DEFAULT 0,
+  rebill_revenue      NUMERIC(14,4) DEFAULT 0,
+  new_sub_revenue     NUMERIC(14,4) DEFAULT 0,
+  sub_revenue_actual  NUMERIC(14,4) DEFAULT 0,
+  computed_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- ─── Backfill watermark — track which dates have been computed ──────────
 CREATE TABLE IF NOT EXISTS etl_watermarks (
   task_name       TEXT PRIMARY KEY,

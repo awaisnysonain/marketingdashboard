@@ -600,40 +600,16 @@ router.get('/subscriptions', async (req, res) => {
     if (brand === 'FLO') {
       const [dailyRes, summaryRes] = await Promise.all([
         pgQuery(
-          `WITH parsed AS (
-             SELECT *, CASE
-               WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object' THEN raw_json->'lastSuccessfulOrder'
-               WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string' THEN (raw_json->>'lastSuccessfulOrder')::jsonb
-               ELSE NULL
-             END AS success_json
-             FROM flo_appstle_subscribers
-           ), dates AS (
-             SELECT generate_series($1::date, $2::date, '1 day'::interval)::date AS date
-           ), new_subs AS (
-             SELECT DATE(created_at) AS date,
-                    COALESCE(SUM(order_amount), 0) AS new_sub_revenue
-             FROM parsed
-             WHERE DATE(created_at) BETWEEN $1::date AND $2::date
-             GROUP BY DATE(created_at)
-           ), rebills AS (
-             SELECT (success_json->>'orderDate')::timestamptz::date AS date,
-                    COALESCE(SUM((success_json->>'orderAmount')::numeric), 0) AS rebill_revenue
-             FROM parsed
-             WHERE success_json ? 'orderDate'
-               AND (success_json->>'orderDate')::timestamptz::date BETWEEN $1::date AND $2::date
-             GROUP BY (success_json->>'orderDate')::timestamptz::date
-           )
-           SELECT TO_CHAR(d.date, 'YYYY-MM-DD') AS date,
-                  0::numeric AS shopify_sub_gross,
-                  0::numeric AS shopify_sub_disc,
-                  0::numeric AS shopify_sub_refunds,
-                  COALESCE(n.new_sub_revenue, 0) AS new_sub_revenue,
-                  COALESCE(r.rebill_revenue, 0) AS rebill_revenue,
-                  COALESCE(n.new_sub_revenue, 0) + COALESCE(r.rebill_revenue, 0) AS sub_revenue_actual
-           FROM dates d
-           LEFT JOIN new_subs n ON n.date = d.date
-           LEFT JOIN rebills r ON r.date = d.date
-           ORDER BY d.date`,
+          `SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date,
+                  shopify_sub_gross,
+                  shopify_sub_disc,
+                  shopify_sub_refunds,
+                  new_sub_revenue,
+                  rebill_revenue,
+                  sub_revenue_actual
+           FROM flo_appstle_revenue_daily
+           WHERE date BETWEEN $1::date AND $2::date
+           ORDER BY date`,
           [start, end]
         ),
         pgQuery(

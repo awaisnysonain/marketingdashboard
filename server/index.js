@@ -230,6 +230,40 @@ async function initPostgresTables() {
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_created_at ON flo_appstle_subscribers (created_at)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_order_name ON flo_appstle_subscribers (order_name)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_status ON flo_appstle_subscribers (status)`);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS flo_appstle_billing_attempts (
+        subscription_appstle_id TEXT NOT NULL,
+        attempt_key TEXT NOT NULL,
+        attempt_id TEXT,
+        order_id TEXT,
+        order_name TEXT,
+        attempt_status TEXT,
+        attempt_date TIMESTAMPTZ,
+        amount NUMERIC(14,4),
+        currency_code TEXT,
+        is_successful BOOLEAN DEFAULT FALSE,
+        is_initial_order BOOLEAN DEFAULT FALSE,
+        raw_json JSONB,
+        etl_fetched_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (subscription_appstle_id, attempt_key)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_attempt_date ON flo_appstle_billing_attempts (attempt_date)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_attempt_success ON flo_appstle_billing_attempts (is_successful, is_initial_order, attempt_date)`);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_flo_appstle_attempt_order_id ON flo_appstle_billing_attempts (order_id)`);
+    await pgRun(`
+      CREATE TABLE IF NOT EXISTS flo_appstle_revenue_daily (
+        date DATE PRIMARY KEY,
+        shopify_sub_gross NUMERIC(14,4) DEFAULT 0,
+        shopify_sub_disc NUMERIC(14,4) DEFAULT 0,
+        shopify_sub_refunds NUMERIC(14,4) DEFAULT 0,
+        rebill_revenue NUMERIC(14,4) DEFAULT 0,
+        new_sub_revenue NUMERIC(14,4) DEFAULT 0,
+        sub_revenue_actual NUMERIC(14,4) DEFAULT 0,
+        computed_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_order_name ON nobl_air_subscribers (order_name)`).catch(() => {});
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_graph_order_id ON nobl_air_subscribers (graph_order_id)`).catch(() => {});
 

@@ -214,11 +214,15 @@ async function syncAppstleSubRevenue(startDate, endDate) {
  * (Available as a utility; main sync uses Shopify orders instead.)
  */
 async function fetchBillingAttempts(subscriptionId, page = 1, limit = 200) {
-  const url = `https://api.appstle.com/api/v1/subscription/${subscriptionId}/billing-attempts?page=${page}&limit=${limit}`;
+  const baseUrl = String(process.env.APPSTLE_BASE_URL || process.env.FLO_APPSTLE_BASE_URL || 'https://subscription-admin.appstle.com')
+    .replace(/\/+$/, '')
+    .replace(/\/api\/external\/v2$/, '')
+    .replace(/\/api\/v1$/, '');
+  const url = `${baseUrl}/api/v1/subscription/${subscriptionId}/billing-attempts?page=${page}&limit=${limit}`;
   const res = await fetch(url, {
     headers: {
-      'x-api-key': process.env.APPSTLE_API_KEY,
-      'x-shopify-domain': process.env.APPSTLE_SHOP,
+      'X-API-Key': process.env.APPSTLE_API_KEY,
+      'X-Shopify-Domain': process.env.APPSTLE_SHOP,
     },
     signal: AbortSignal.timeout(15_000),
   });

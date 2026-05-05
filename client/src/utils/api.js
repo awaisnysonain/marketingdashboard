@@ -1,5 +1,22 @@
 const B = '';
 
+async function fetchJson(url, routeHint = 'API route') {
+  const res = await fetch(url);
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    const body = await res.text();
+    const looksLikeHtml = body.trim().startsWith('<');
+    throw new Error(
+      looksLikeHtml
+        ? `${routeHint} returned HTML instead of JSON. Restart the server, hard-refresh the dashboard, and sign in again.`
+        : `Unexpected response format from ${routeHint}.`
+    );
+  }
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+  return data;
+}
+
 // ── App-level auth ───────────────────────────────────────────────
 export const appStatus  = () => fetch(`${B}/auth/app-status`).then(r=>r.json());
 export const appLogin   = (email,password) => fetch(`${B}/auth/app-login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})}).then(r=>r.json());
@@ -84,9 +101,13 @@ export const getOverview = (start, end) => fetch(`${B}/api/analytics/overview?st
 export const getNoblTopline = (start, end) => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(r=>r.json());
 export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(r=>r.json());
 export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(r=>r.json());
-export const getNoblSubs = (start, end) => fetch(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`).then(r=>r.json());
+export const getNoblSubs = (start, end) =>
+  fetchJson(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`, '/api/analytics/nobl/subscriptions');
 export const getSubscriptions = (start, end, brand = 'NOBL') =>
-  fetch(`${B}/api/analytics/subscriptions?start=${start}&end=${end}&brand=${encodeURIComponent(brand)}`).then(r=>r.json());
+  fetchJson(
+    `${B}/api/analytics/subscriptions?start=${start}&end=${end}&brand=${encodeURIComponent(brand)}`,
+    '/api/analytics/subscriptions'
+  );
 export const getNoblAirSubscribers = (start, end) =>
   fetch(`${B}/api/analytics/nobl/air-subscribers?start=${start}&end=${end}`).then(r => r.json());
 

@@ -141,6 +141,8 @@ You can also manually refresh any time via the **Refresh** button in the top bar
 - **Forecast** — Monthly revenue forecast table + charts (green=actual, yellow=current month)
 - **Raw Tables** — Browse any sheet tab with search, highlight, and annotate
 
+Subscription ETL and frontend logic for both NOBL and FLO is documented in `docs/SUBSCRIPTIONS_README.md`.
+
 ---
 
 ## 8. Troubleshooting
