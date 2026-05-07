@@ -57,7 +57,7 @@ const HEADERS = [
 ];
 
 const AIR_ATTR_HEADERS = [
-  'Ad', 'Ad Set', 'Campaign', 'Total Attributed Orders', 'Air Orders', 'Attributed Air Orders',
+  'Ad', 'Ad ID', 'Ad Set', 'Campaign', 'Total Attributed Orders', 'Air Orders', 'Attributed Air Orders',
   'Attach Rate', 'TTP Mature Air Orders', 'TTP Paid Air Orders', 'TTP Rate', 'Activation Rate',
   'Attributed Air Revenue',
 ];
@@ -103,6 +103,7 @@ function shortName(s, max = 28) {
 function toAirAttributionTableRow(r) {
   return {
     'Ad': r.ad_name || 'Unknown ad',
+    'Ad ID': r.ad_id || 'Unknown ad ID',
     'Ad Set': r.adset_name || 'Unknown ad set',
     'Campaign': r.campaign_name,
     'Total Attributed Orders': r.total_attributed_orders,
@@ -114,7 +115,7 @@ function toAirAttributionTableRow(r) {
     'TTP Rate': r.ttp_rate,
     'Activation Rate': r.activation_rate,
     'Attributed Air Revenue': r.attributed_air_revenue,
-    _ad: r.ad_id || `${r.campaign_id}-${r.adset_id}-${r.ad_name}`,
+    _ad: [r.campaign_id, r.adset_id, r.ad_id, r.ad_name].map(v => v || '').join('|'),
   };
 }
 
@@ -179,10 +180,10 @@ export default function NoblAirPerformancePage() {
     [airAttr]
   );
 
-  /* ── KPIs from totals (use the doc's TTP from subscriber cohort, not from daily) ── */
+  /* ── KPIs from performance totals: range attach × cohort TTP ── */
   const kpi = useMemo(() => {
     const t = data.totals || {};
-    const ttp = region === 'ALL' ? subData?.ttp_cohort?.ttp_rate : t.ttp_rate;
+    const ttp = t.ttp_rate;
     const attach = t.attach_rate;
     const activation = (attach != null && ttp != null) ? attach * ttp : null;
     return {
@@ -262,9 +263,9 @@ export default function NoblAirPerformancePage() {
           {/* ── Top KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
             <KpiCard label="Air Orders"            value={fmtNum(kpi.airOrders)}            color="nobl" />
-            <KpiCard label="Attach Rate"           value={fmtPct(kpi.attachRate || 0)}      color="teal" />
-            <KpiCard label="TTP Rate"              value={fmtPct(kpi.ttpRate || 0)}         color="purple" />
-            <KpiCard label="Activation Rate"       value={fmtPct(kpi.activationRate || 0)}  color="green" />
+            <KpiCard label="Range Attach Rate"     value={fmtPct(kpi.attachRate || 0)}      color="teal" />
+            <KpiCard label="Cohort TTP Rate"       value={fmtPct(kpi.ttpRate || 0)}         color="purple" />
+            <KpiCard label="Range Activation Rate" value={fmtPct(kpi.activationRate || 0)}  color="green" />
             <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" />
             <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" />
             {region === 'ALL' && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" />}
@@ -304,7 +305,7 @@ export default function NoblAirPerformancePage() {
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Attach / TTP / Activation">
+            <Card title="Daily Attach / TTP / Activation" subtitle="Daily activation uses that day's attach rate times the cohort TTP rate.">
               <ResponsiveContainer width="100%" height={250}>
                 <ComposedChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -392,7 +393,7 @@ export default function NoblAirPerformancePage() {
 
           {/* ── NOBL Air ad attribution ── */}
           {region === 'ALL' && (
-          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Exact NOBL Air orders from Triple Whale, with per-ad attach, TTP, and activation rates" style={{ marginBottom:16 }}>
+          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Grouped by campaign, ad set, ad ID, and ad name so same-name ads stay separate." style={{ marginBottom:16 }}>
             {airAttrLoading ? (
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
             ) : airAttr?.error ? (
@@ -439,7 +440,7 @@ export default function NoblAirPerformancePage() {
           )}
 
           {/* ── Daily detail table ── */}
-          <Card title="Daily Detail" subtitle="Mirrors the technical doc's Daily Input tab">
+          <Card title="Daily Detail" subtitle="Daily rates use each day's attach rate; top cards use the selected range total.">
             <SheetTable
               headers={HEADERS}
               rows={tableRows}

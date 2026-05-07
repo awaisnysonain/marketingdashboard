@@ -941,11 +941,12 @@ router.get('/meta/ads', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const brand = (req.query.brand || 'NOBL').toUpperCase();
   const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'adset';
+  const rowLimit = Math.max(100, Math.min(parseInt(req.query.limit || '5000', 10), 10000));
 
   const groupFields = {
-    campaign: ['campaign_id', 'campaign_name'],
-    adset: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name'],
-    ad: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
+    campaign: ['brand', 'campaign_id', 'campaign_name'],
+    adset: ['brand', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name'],
+    ad: ['brand', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
   }[level];
 
   try {
@@ -966,14 +967,14 @@ router.get('/meta/ads', async (req, res) => {
         CASE WHEN SUM(clicks) > 0 THEN SUM(spend) / SUM(clicks) ELSE NULL END AS cpc,
         CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm
       FROM tw_ads_daily
-      WHERE brand = $1
+      WHERE ($1 = 'ALL' OR brand = $1)
         AND platform = 'META'
         AND date BETWEEN $2::date AND $3::date
       GROUP BY ${groupFields.join(', ')}
       HAVING SUM(spend) > 0 OR SUM(purchases) > 0
       ORDER BY spend DESC
-      LIMIT 500
-    `, [brand, start, end]);
+      LIMIT $4
+    `, [brand, start, end, rowLimit]);
 
     const totals = r.rows.reduce((acc, row) => ({
       spend: acc.spend + Number(row.spend || 0),
@@ -990,7 +991,7 @@ router.get('/meta/ads', async (req, res) => {
     totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
     totals.cpm = totals.impressions > 0 ? totals.spend * 1000 / totals.impressions : null;
 
-    res.json({ rows: fmtRows(r.rows), totals, level, start, end });
+    res.json({ rows: fmtRows(r.rows), totals, level, brand, row_limit: rowLimit, start, end });
   } catch (e) {
     console.error('[Analytics /meta/ads]', e.message);
     res.status(500).json({ error: e.message });
@@ -1021,6 +1022,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
           AND channel = 'facebook-ads'
           AND model = 'Triple Attribution'
           AND attribution_window = '1_day'
+          AND COALESCE(ad_id, '') <> ''
           AND date BETWEEN $1::date AND $2::date
       ), sub_match AS (
         SELECT

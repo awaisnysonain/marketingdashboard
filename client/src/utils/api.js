@@ -145,8 +145,8 @@ export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
 };
-export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL') =>
-  fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${brand}`).then(r => {
+export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', limit = 5000) =>
+  fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${encodeURIComponent(brand)}&limit=${limit}`).then(r => {
     if (!r.ok) throw new Error(r.status);
     return r.json();
   });
@@ -182,14 +182,16 @@ export function fmtCell(val,header){
   // Prevents double-formatting when callers format upstream and SheetTable formats again.
   if(/^\s*[$€£¥]/.test(s) || /%\s*$/.test(s)) return s;
   const h=String(header);
+  const hl=h.toLowerCase();
+  if(hl==='brand'||hl==='campaign'||hl==='ad set'||hl==='ad'||/(^|\s)id($|\s)/.test(hl)) return s;
   // Date columns
   if(isDateField(h)&&DATE_RE.test(s)) return fmtDate(val);
   // Percent columns
   if(isPercent(h)) return fmtPct(val);
   // Currency columns
   if(isCurrency(h)) return fmt$(val);
-  const n=parseFloat(val);
-  if(!isNaN(n)){
+  const n=Number(s.trim());
+  if(s.trim()!==''&&Number.isFinite(n)){
     if(Number.isInteger(n)&&n>999) return fmtNum(n);
     if(!Number.isInteger(n)) return n.toLocaleString(undefined,{maximumFractionDigits:2});
   }

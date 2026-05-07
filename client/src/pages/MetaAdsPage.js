@@ -13,15 +13,20 @@ function shortName(s, max = 24) {
 }
 
 const HEADERS = [
-  'Campaign', 'Ad Set', 'Ad', 'Spend', 'Revenue', 'Purchases', 'ROAS', 'CAC',
+  'Brand', 'Campaign', 'Campaign ID', 'Ad Set', 'Ad Set ID', 'Ad', 'Ad ID',
+  'Spend', 'Revenue', 'Purchases', 'ROAS', 'CAC',
   'Impressions', 'Clicks', 'Link Clicks', 'CTR', 'CPC', 'CPM', 'Add To Cart', 'Checkout',
 ];
 
 function toTableRow(r) {
   return {
+    'Brand': r.brand,
     'Campaign': r.campaign_name || 'Unknown campaign',
+    'Campaign ID': r.campaign_id || 'Unknown campaign ID',
     'Ad Set': r.adset_name || 'Unknown ad set',
+    'Ad Set ID': r.adset_id || 'Unknown ad set ID',
     'Ad': r.ad_name || 'All ads',
+    'Ad ID': r.ad_id || 'Unknown ad ID',
     'Spend': r.spend,
     'Revenue': r.revenue,
     'Purchases': r.purchases,
@@ -35,14 +40,16 @@ function toTableRow(r) {
     'CPM': r.cpm,
     'Add To Cart': r.add_to_cart,
     'Checkout': r.initiate_checkout,
-    _key: r.ad_id || r.adset_id || r.campaign_id,
+    _key: [r.brand, r.campaign_id, r.adset_id, r.ad_id, r.ad_name].map(v => v || '').join('|'),
   };
 }
 
 export default function MetaAdsPage() {
   const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
-  const [level, setLevel] = useState('adset');
+  const [level, setLevel] = useState('ad');
   const [levelOpen, setLevelOpen] = useState(false);
+  const [brand, setBrand] = useState('ALL');
+  const [brandOpen, setBrandOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [data, setData] = useState({ rows: [], totals: {} });
@@ -50,14 +57,14 @@ export default function MetaAdsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await getMetaAds(range.start, range.end, level, 'NOBL');
+      const res = await getMetaAds(range.start, range.end, level, brand, 5000);
       setData({ rows: res.rows || [], totals: res.totals || {} });
     } catch (e) {
       setError(e.message || 'Failed to load Meta ads');
     } finally {
       setLoading(false);
     }
-  }, [range, level]);
+  }, [range, level, brand]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -73,9 +80,10 @@ export default function MetaAdsPage() {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, gap:12, flexWrap:'wrap' }}>
         <div>
           <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:'#1877f2' }}>Meta Ads</h1>
-          <p style={{ margin:'4px 0 0', fontSize:13, color:'var(--text3)' }}>Saved Triple Whale Meta performance by campaign, ad set, and ad</p>
+          <p style={{ margin:'4px 0 0', fontSize:13, color:'var(--text3)' }}>All saved Triple Whale Meta performance by campaign, ad set, and ad</p>
         </div>
         <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
+          <BrandDropdown value={brand} open={brandOpen} onOpenChange={setBrandOpen} onChange={setBrand} />
           <LevelDropdown value={level} open={levelOpen} onOpenChange={setLevelOpen} onChange={setLevel} />
           <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="meta-ads" />
         </div>
@@ -92,6 +100,7 @@ export default function MetaAdsPage() {
             <KpiCard label="ROAS" value={t.roas ? `${Number(t.roas).toFixed(2)}x` : '—'} />
             <KpiCard label="CAC" value={t.cac ? fmt$(t.cac) : '—'} />
             <KpiCard label="CTR" value={t.ctr ? fmtPct(t.ctr) : '—'} />
+            <KpiCard label="Rows" value={fmtNum((data.rows || []).length)} />
           </div>
 
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, marginBottom:16 }}>
@@ -115,6 +124,55 @@ export default function MetaAdsPage() {
             <SheetTable headers={HEADERS} rows={tableRows} keyField="_key" maxHeight="620px" defaultSortField="Spend" defaultSortDir="desc" />
           </div>
         </>
+      )}
+    </div>
+  );
+}
+
+function BrandDropdown({ value, open, onOpenChange, onChange }) {
+  const options = [
+    { value: 'ALL', label: 'All Brands' },
+    { value: 'NOBL', label: 'NOBL' },
+    { value: 'FLO', label: 'FLO' },
+  ];
+  const current = options.find(o => o.value === value) || options[0];
+
+  return (
+    <div style={{ position:'relative' }}>
+      <button
+        type="button"
+        onClick={() => onOpenChange(!open)}
+        onBlur={() => setTimeout(() => onOpenChange(false), 120)}
+        style={{
+          minWidth:124, height:40, display:'flex', alignItems:'center', justifyContent:'space-between', gap:12,
+          background:'var(--bg2)', color:'var(--text)', border:'1px solid var(--border2)', borderRadius:8,
+          padding:'0 12px', fontSize:12.5, fontWeight:500, boxShadow:'var(--shadow-sm)',
+        }}
+      >
+        <span>{current.label}</span>
+        <span style={{ width:8, height:8, borderRight:'1.6px solid currentColor', borderBottom:'1.6px solid currentColor', transform: open ? 'rotate(225deg)' : 'rotate(45deg)', marginTop: open ? 4 : -4 }} />
+      </button>
+      {open && (
+        <div style={{
+          position:'absolute', top:46, left:0, zIndex:50, minWidth:124, overflow:'hidden',
+          background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:8, boxShadow:'var(--shadow)',
+        }}>
+          {options.map(opt => (
+            <button
+              key={opt.value}
+              type="button"
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => { onChange(opt.value); onOpenChange(false); }}
+              style={{
+                width:'100%', textAlign:'left', padding:'9px 12px', border:0, display:'block',
+                background: opt.value === value ? 'var(--accent-dim)' : 'var(--bg2)',
+                color: opt.value === value ? 'var(--text)' : 'var(--text2)', fontSize:12.5,
+              }}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       )}
     </div>
   );

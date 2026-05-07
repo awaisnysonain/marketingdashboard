@@ -19,9 +19,11 @@ import { fmt$, fmtCell } from '../utils/api';
 function fmtVal(v, header) {
   if (v == null || v === '') return '—';
   if (typeof fmtCell === 'function') return fmtCell(v, header);
-  const n = parseFloat(v);
+  const raw = String(v).trim();
+  const n = typeof v === 'number' ? v : Number(raw);
   const h = String(header).toLowerCase();
-  if (!isNaN(n)) {
+  if (h === 'brand' || h === 'campaign' || h === 'ad set' || h === 'ad' || /(^|\s)id($|\s)/.test(h)) return String(v);
+  if ((typeof v === 'number' || raw !== '') && Number.isFinite(n)) {
     if (h.includes('revenue') || h.includes('spend') || h.includes('rev') || h.includes('cac') || h.includes('sub'))
       return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
     if (h.includes('roas') || h.includes('mer')) return n.toFixed(2) + 'x';
