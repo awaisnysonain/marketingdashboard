@@ -14,7 +14,7 @@
  *   - new_sub_revenue = sub_net_sales from non-rebill orders
  *   - rebill_revenue  = Appstle lastSuccessfulOrder.orderAmount by billing date
  *   - tier counts    = via Appstle.contractAmount join on order_name
- *   - TTP rate       = mature converted / mature (cohort over the date range)
+ *   - TTP rate       = mature converted / mature (full mature subscriber cohort)
  *   - same-day cancels = sub orders cancelled within 24h
  */
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
@@ -135,16 +135,22 @@ async function aggregateNoblAir(startDate, endDate) {
       FROM rebill_tiers
       GROUP BY date
     ),
-    -- TTP cohort metrics: for subs created on date X, what fraction matured & converted by today?
+    -- Same-day cancel counts still follow subscriber create date, but TTP itself
+    -- is the full mature subscriber cohort so recent dates do not use paid-air
+    -- order mix as a proxy for trial-to-paid conversion.
     ttp_cohorts AS (
       SELECT
         DATE(s.created_at) AS date,
-        SUM(CASE WHEN s.is_mature THEN 1 ELSE 0 END)::int                        AS mature_count,
-        SUM(CASE WHEN s.is_mature AND s.is_converted THEN 1 ELSE 0 END)::int     AS converted_count,
         SUM(CASE WHEN s.is_same_day_cancel THEN 1 ELSE 0 END)::int               AS same_day_cancels
       FROM nobl_air_subscribers s
       WHERE DATE(s.created_at) BETWEEN $1::date AND $2::date
       GROUP BY DATE(s.created_at)
+    ),
+    ttp_summary AS (
+      SELECT
+        COUNT(*) FILTER (WHERE is_mature)::int AS mature_count,
+        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int AS converted_count
+      FROM nobl_air_subscribers
     )
     SELECT
       d.date,
@@ -163,10 +169,8 @@ async function aggregateNoblAir(startDate, endDate) {
            THEN ROUND(d.air_orders::numeric / d.total_orders, 4)
            ELSE NULL END AS attach_rate,
       CASE
-        WHEN COALESCE(t.mature_count, 0) > 0
-          THEN ROUND(t.converted_count::numeric / t.mature_count, 4)
-        WHEN d.air_orders > 0
-          THEN ROUND(d.paid_air_orders::numeric / d.air_orders, 4)
+        WHEN COALESCE(ts.mature_count, 0) > 0
+          THEN ROUND(ts.converted_count::numeric / ts.mature_count, 4)
         ELSE NULL
       END AS ttp_rate,
       -- New tier columns
@@ -192,6 +196,7 @@ async function aggregateNoblAir(startDate, endDate) {
       COALESCE(rp.rebill_149, 0) AS rebill_149,
       COALESCE(rp.rebill_159, 0) AS rebill_159
     FROM daily_orders d
+    CROSS JOIN ttp_summary ts
     LEFT JOIN appstle_success     a  ON a.date = d.date
     LEFT JOIN ttp_cohorts        t  ON t.date = d.date
     LEFT JOIN new_tiers_pivot    np ON np.date = d.date

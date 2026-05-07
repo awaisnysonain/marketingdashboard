@@ -92,6 +92,49 @@ function fmtRows(rows) {
   });
 }
 
+async function loadNoblAirTtpCohort(countryCodes = null) {
+  const params = countryCodes ? [countryCodes] : [];
+  const joinRegion = countryCodes ? `
+    JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+      AND o.has_air
+      AND o.has_luggage
+      AND o.shipping_country = ANY($1::text[])
+      AND (
+        o.order_name = s.order_name
+        OR o.order_id = s.graph_order_id
+        OR o.order_id = CONCAT('gid://shopify/Order/', s.graph_order_id)
+        OR CONCAT('gid://shopify/Order/', o.order_id) = s.graph_order_id
+      )` : '';
+  const r = await pgQuery(`
+    SELECT
+      COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature)::int AS mature,
+      COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature AND s.is_converted)::int AS converted
+    FROM nobl_air_subscribers s
+    ${joinRegion}
+  `, params);
+  const row = r.rows[0] || {};
+  const mature = Number(row.mature || 0);
+  const converted = Number(row.converted || 0);
+  return {
+    mature,
+    converted,
+    ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
+  };
+}
+
+function applyNoblAirTtp(rows, ttpRate) {
+  return rows.map(row => {
+    const attachRate = row.attach_rate == null ? null : Number(row.attach_rate);
+    return {
+      ...row,
+      ttp_rate: ttpRate,
+      activation_rate: attachRate != null && ttpRate != null
+        ? Number((attachRate * ttpRate).toFixed(4))
+        : null,
+    };
+  });
+}
+
 async function loadNoblAirRegionalDaily(start, end, countryCodes) {
   const r = await pgQuery(`
     WITH o AS (
@@ -191,20 +234,17 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
       CASE WHEN d.total_orders > 0 THEN ROUND(d.air_orders::numeric / d.total_orders, 4) ELSE NULL END AS attach_rate,
       CASE
         WHEN COALESCE(t.mature_count, 0) > 0 THEN ROUND(t.converted_count::numeric / t.mature_count, 4)
-        WHEN d.air_orders > 0 THEN ROUND(d.paid_air_orders::numeric / d.air_orders, 4)
         ELSE NULL
       END AS ttp_rate,
       CASE
         WHEN d.total_orders > 0 AND (
           CASE
             WHEN COALESCE(t.mature_count, 0) > 0 THEN t.converted_count::numeric / NULLIF(t.mature_count, 0)
-            WHEN d.air_orders > 0 THEN d.paid_air_orders::numeric / NULLIF(d.air_orders, 0)
             ELSE NULL
           END
         ) IS NOT NULL THEN ROUND((d.air_orders::numeric / d.total_orders) * (
           CASE
             WHEN COALESCE(t.mature_count, 0) > 0 THEN t.converted_count::numeric / NULLIF(t.mature_count, 0)
-            WHEN d.air_orders > 0 THEN d.paid_air_orders::numeric / NULLIF(d.air_orders, 0)
             ELSE NULL
           END
         ), 4)
@@ -701,9 +741,11 @@ router.get('/nobl/air-performance', async (req, res) => {
 
   try {
     const effectiveEnd = await capNoblAirEndDate(end);
-    const daily = regionCountries[region]
-      ? await loadNoblAirRegionalDaily(start, effectiveEnd, regionCountries[region])
-      : fmtRows((await pgQuery(
+    const countryCodes = regionCountries[region] || null;
+    const [rawDaily, ttpCohort] = await Promise.all([
+      countryCodes
+        ? loadNoblAirRegionalDaily(start, effectiveEnd, countryCodes)
+        : pgQuery(
           `SELECT
              TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
              total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
@@ -719,7 +761,10 @@ router.get('/nobl/air-performance', async (req, res) => {
            WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
            ORDER BY date ASC`,
           [start, effectiveEnd]
-        )).rows);
+        ).then(r => fmtRows(r.rows)),
+      loadNoblAirTtpCohort(countryCodes),
+    ]);
+    const daily = applyNoblAirTtp(rawDaily, ttpCohort.ttp_rate);
     const rowsDesc = [...daily].reverse();
 
     const totals = daily.reduce((acc, r) => ({
@@ -738,9 +783,7 @@ router.get('/nobl/air-performance', async (req, res) => {
     totals.attach_rate = totals.total_orders > 0
       ? parseFloat((totals.air_orders / totals.total_orders).toFixed(4))
       : null;
-    totals.ttp_rate = totals.air_orders > 0
-      ? parseFloat((totals.paid_air_orders / totals.air_orders).toFixed(4))
-      : null;
+    totals.ttp_rate = ttpCohort.ttp_rate;
     totals.activation_rate = (totals.attach_rate != null && totals.ttp_rate != null)
       ? parseFloat((totals.attach_rate * totals.ttp_rate).toFixed(4))
       : null;
@@ -815,6 +858,7 @@ router.get('/nobl/air-performance', async (req, res) => {
       forecast,
       rolling_days: rollingDays,
       forecast_days: forecastDays,
+      ttp_cohort: ttpCohort,
       region,
       data_end: effectiveEnd,
       requested_end: end,
