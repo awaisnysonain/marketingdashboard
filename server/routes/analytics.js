@@ -92,13 +92,13 @@ function fmtRows(rows) {
   });
 }
 
-async function loadNoblAirMaturedTtp(start, end, countryCodes = null) {
-  const params = countryCodes ? [start, end, countryCodes] : [start, end];
+async function loadNoblAirOverallTtp(end, countryCodes = null) {
+  const params = countryCodes ? [end, countryCodes] : [end];
   const regionJoin = countryCodes ? `
     JOIN shopify_orders_raw o ON o.brand = 'NOBL'
       AND o.has_air
       AND o.has_luggage
-      AND o.shipping_country = ANY($3::text[])
+      AND o.shipping_country = ANY($2::text[])
       AND (
         o.order_name = s.order_name
         OR o.order_id = s.graph_order_id
@@ -108,11 +108,25 @@ async function loadNoblAirMaturedTtp(start, end, countryCodes = null) {
   const r = await pgQuery(`
     SELECT
       COUNT(DISTINCT s.appstle_id)::int AS mature,
-      COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_converted)::int AS converted
+      COUNT(DISTINCT s.appstle_id) FILTER (WHERE
+        COALESCE(
+          s.last_billing_date,
+          (CASE
+            WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'object'
+              THEN (s.raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+            WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'string'
+              THEN ((s.raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+            ELSE NULL
+          END)
+        ) > s.created_at
+      )::int AS converted,
+      COUNT(DISTINCT s.appstle_id) FILTER (WHERE
+        s.cancelled_on IS NOT NULL
+        AND s.cancelled_on <= s.created_at + INTERVAL '30 days'
+      )::int AS cancelled_30d
     FROM nobl_air_subscribers s
     ${regionJoin}
-    WHERE s.is_mature
-      AND DATE(s.created_at) + 14 BETWEEN $1::date AND $2::date
+    WHERE DATE(s.created_at) <= $1::date - INTERVAL '14 days'
   `, params);
   const row = r.rows[0] || {};
   const mature = Number(row.mature || 0);
@@ -120,7 +134,9 @@ async function loadNoblAirMaturedTtp(start, end, countryCodes = null) {
   return {
     mature,
     converted,
+    cancelled_30d: Number(row.cancelled_30d || 0),
     ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
+    cancel_rate_30d: mature > 0 ? Number((Number(row.cancelled_30d || 0) / mature).toFixed(4)) : null,
   };
 }
 
@@ -206,7 +222,21 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
       GROUP BY date
     ),
     regional_subscribers AS (
-      SELECT DISTINCT s.appstle_id, s.created_at, s.is_mature, s.is_converted, s.is_same_day_cancel
+      SELECT DISTINCT
+        s.appstle_id,
+        s.created_at,
+        s.cancelled_on,
+        COALESCE(
+          s.last_billing_date,
+          (CASE
+            WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'object'
+              THEN (s.raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+            WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'string'
+              THEN ((s.raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+            ELSE NULL
+          END)
+        ) AS paid_billing_date,
+        s.is_same_day_cancel
       FROM nobl_air_subscribers s
       JOIN shopify_orders_raw so ON so.brand = 'NOBL'
         AND so.has_air
@@ -230,11 +260,29 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
     ttp_cohorts AS (
       SELECT
         DATE(created_at) + 14 AS date,
-        COUNT(*) FILTER (WHERE is_mature)::int AS mature_count,
-        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int AS converted_count
+        COUNT(*)::int AS mature_count,
+        COUNT(*) FILTER (WHERE paid_billing_date > created_at)::int AS converted_count
       FROM regional_subscribers
       WHERE DATE(created_at) + 14 BETWEEN $1::date AND $2::date
       GROUP BY DATE(created_at) + 14
+    ),
+    lag_attach AS (
+      SELECT
+        d.date,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE NOT so.is_rebill) > 0
+            THEN ROUND(
+              COUNT(*) FILTER (WHERE so.has_air AND so.has_luggage)::numeric
+              / COUNT(*) FILTER (WHERE NOT so.is_rebill),
+              4
+            )
+          ELSE NULL
+        END AS attach_rate_14d_prior
+      FROM daily_orders d
+      LEFT JOIN shopify_orders_raw so ON so.brand = 'NOBL'
+        AND (so.created_at AT TIME ZONE 'UTC')::date = d.date - INTERVAL '14 days'
+        AND so.shipping_country = ANY($3::text[])
+      GROUP BY d.date
     )
     SELECT
       TO_CHAR(d.date, 'YYYY-MM-DD') AS date,
@@ -245,12 +293,12 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
         ELSE NULL
       END AS ttp_rate,
       CASE
-        WHEN d.total_orders > 0 AND (
+        WHEN la.attach_rate_14d_prior IS NOT NULL AND (
           CASE
             WHEN COALESCE(t.mature_count, 0) > 0 THEN t.converted_count::numeric / NULLIF(t.mature_count, 0)
             ELSE NULL
           END
-        ) IS NOT NULL THEN ROUND((d.air_orders::numeric / d.total_orders) * (
+        ) IS NOT NULL THEN ROUND(la.attach_rate_14d_prior * (
           CASE
             WHEN COALESCE(t.mature_count, 0) > 0 THEN t.converted_count::numeric / NULLIF(t.mature_count, 0)
             ELSE NULL
@@ -289,6 +337,7 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
     FROM daily_orders d
     LEFT JOIN ttp_cohorts t ON t.date = d.date
     LEFT JOIN same_day_cancel_cohorts sc ON sc.date = d.date
+    LEFT JOIN lag_attach la ON la.date = d.date
     LEFT JOIN new_tiers_pivot np ON np.date = d.date
     LEFT JOIN rebill_tiers_pivot rp ON rp.date = d.date
     ORDER BY d.date ASC
@@ -784,7 +833,7 @@ router.get('/nobl/air-performance', async (req, res) => {
            ORDER BY date ASC`,
           [start, effectiveEnd]
         ).then(r => fmtRows(r.rows)),
-      loadNoblAirMaturedTtp(start, effectiveEnd, countryCodes),
+      loadNoblAirOverallTtp(effectiveEnd, countryCodes),
     ]);
     const rowsDesc = [...daily].reverse();
 
@@ -1074,18 +1123,28 @@ router.get('/nobl/air-attribution', async (req, res) => {
         SELECT
           a.*,
           s.appstle_id,
-          s.is_converted
+          COALESCE(
+            s.last_billing_date,
+            (CASE
+              WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'object'
+                THEN (s.raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+              WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'string'
+                THEN ((s.raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+              ELSE NULL
+            END)
+          ) AS paid_billing_date,
+          s.created_at AS subscriber_created_at
         FROM tw_air_order_attribution a
         JOIN LATERAL (
-          SELECT appstle_id, created_at, is_mature, is_converted
+          SELECT appstle_id, created_at, last_billing_date, raw_json
           FROM nobl_air_subscribers
           WHERE order_name = a.order_name
           UNION
-          SELECT appstle_id, created_at, is_mature, is_converted
+          SELECT appstle_id, created_at, last_billing_date, raw_json
           FROM nobl_air_subscribers
           WHERE graph_order_id = CONCAT('gid://shopify/Order/', a.order_id)
           UNION
-          SELECT appstle_id, created_at, is_mature, is_converted
+          SELECT appstle_id, created_at, last_billing_date, raw_json
           FROM nobl_air_subscribers
           WHERE graph_order_id = a.order_id
         ) s ON true
@@ -1094,7 +1153,6 @@ router.get('/nobl/air-attribution', async (req, res) => {
           AND a.model = 'Triple Attribution'
           AND a.attribution_window = '1_day'
           AND COALESCE(a.ad_id, '') <> ''
-          AND s.is_mature
           AND DATE(s.created_at) + 14 BETWEEN $1::date AND $2::date
       ), air AS (
         SELECT
@@ -1108,9 +1166,9 @@ router.get('/nobl/air-attribution', async (req, res) => {
         SELECT
           ${groupCols},
           SUM(linear_weight)::numeric(14,2) AS ttp_mature_air_orders,
-          SUM(linear_weight) FILTER (WHERE is_converted)::numeric(14,2) AS ttp_paid_air_orders,
+          SUM(linear_weight) FILTER (WHERE paid_billing_date > subscriber_created_at)::numeric(14,2) AS ttp_paid_air_orders,
           COUNT(DISTINCT appstle_id)::int AS ttp_mature_subscribers,
-          COUNT(DISTINCT appstle_id) FILTER (WHERE is_converted)::int AS ttp_paid_subscribers
+          COUNT(DISTINCT appstle_id) FILTER (WHERE paid_billing_date > subscriber_created_at)::int AS ttp_paid_subscribers
         FROM cohort_attr
         GROUP BY ${groupCols}
       ),

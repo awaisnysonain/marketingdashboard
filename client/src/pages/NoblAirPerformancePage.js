@@ -144,7 +144,7 @@ export default function NoblAirPerformancePage() {
         getNoblAirPerformance(range.start, range.end, 14, 0, region),
         regionScoped ? Promise.resolve(null) : getNoblAirSubscribers(range.start, range.end),
       ]);
-      setData({ rows: perf?.rows || [], totals: perf?.totals || {} });
+      setData({ rows: perf?.rows || [], totals: perf?.totals || {}, ttpCohort: perf?.ttp_cohort || {} });
       setSubData(subs || null);
       setLoading(false);
 
@@ -186,12 +186,17 @@ export default function NoblAirPerformancePage() {
     const ttp = t.ttp_rate;
     const attach = t.attach_rate;
     const activation = (attach != null && ttp != null) ? attach * ttp : null;
+    const ttpCohort = data.ttpCohort || {};
     return {
       totalOrders: t.total_orders || 0,
       airOrders: t.air_orders || 0,
       attachRate: attach,
       ttpRate: ttp,                 // ← from nobl_air_subscribers cohort
       activationRate: activation,
+      matureSubs: ttpCohort.mature || 0,
+      convertedMatureSubs: ttpCohort.converted || 0,
+      cancelled30d: ttpCohort.cancelled_30d || 0,
+      cancelRate30d: ttpCohort.cancel_rate_30d,
       paidAirOrders: t.paid_air_orders || 0,
       zeroAirOrders: t.zero_air_orders || 0,
       sameDayCancels: region === 'ALL' ? (subData?.ttp_cohort?.same_day_cancels || t.same_day_cancels || 0) : (t.same_day_cancels || 0),
@@ -201,7 +206,7 @@ export default function NoblAirPerformancePage() {
       activeSubs: region === 'ALL' ? (subData?.active_count || 0) : null,
       activeArr:  region === 'ALL' ? (subData?.active_arr || 0) : null,
     };
-  }, [data.totals, subData, region]);
+  }, [data, subData, region]);
 
   const tierData = useMemo(
     () => (subData?.tiers || []).map(t => ({
@@ -263,9 +268,9 @@ export default function NoblAirPerformancePage() {
           {/* ── Top KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
             <KpiCard label="Air Orders"            value={fmtNum(kpi.airOrders)}            color="nobl" />
-            <KpiCard label="Range Attach Rate"     value={fmtPct(kpi.attachRate || 0)}      color="teal" />
-            <KpiCard label="Cohort TTP Rate"       value={fmtPct(kpi.ttpRate || 0)}         color="purple" />
-            <KpiCard label="Range Activation Rate" value={fmtPct(kpi.activationRate || 0)}  color="green" />
+            <KpiCard label="Overall Attach Rate"   value={fmtPct(kpi.attachRate || 0)}      color="teal" />
+            <KpiCard label="Overall TTP Rate"      value={fmtPct(kpi.ttpRate || 0)}         color="purple" />
+            <KpiCard label="Overall Activation"    value={fmtPct(kpi.activationRate || 0)}  color="green" />
             <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" />
             <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" />
             {region === 'ALL' && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" />}
@@ -277,7 +282,10 @@ export default function NoblAirPerformancePage() {
             <KpiCard label="Total Orders"      value={fmtNum(kpi.totalOrders)}      color="text" />
             <KpiCard label="Paid Air Orders"   value={fmtNum(kpi.paidAirOrders)}    color="nobl" />
             <KpiCard label="$0 Air Orders"     value={fmtNum(kpi.zeroAirOrders)}    color="warn" />
-            <KpiCard label="Same-Day Cancels"  value={fmtNum(kpi.sameDayCancels)}   color="red" />
+            <KpiCard label="Mature Subs"       value={fmtNum(kpi.matureSubs)}       color="purple" />
+            <KpiCard label="Converted Mature"  value={fmtNum(kpi.convertedMatureSubs)} color="green" />
+            <KpiCard label="30-Day Cancels"    value={fmtNum(kpi.cancelled30d)}     color="red" />
+            <KpiCard label="30-Day Cancel Rate" value={fmtPct(kpi.cancelRate30d || 0)} color="red" />
             <KpiCard label="New Sub Revenue"   value={fmt$(kpi.newSubRevenue)}      color="blue" />
           </div>
 
@@ -305,7 +313,7 @@ export default function NoblAirPerformancePage() {
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Daily Attach / TTP / Activation" subtitle="Daily TTP uses the cohort that reached day 14 that day; activation = daily attach × daily TTP.">
+            <Card title="Daily Attach / TTP / Activation" subtitle="Daily TTP uses the cohort that reached day 14 that day; daily activation = attach from 14 days earlier × daily TTP.">
               <ResponsiveContainer width="100%" height={250}>
                 <ComposedChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -440,7 +448,7 @@ export default function NoblAirPerformancePage() {
           )}
 
           {/* ── Daily detail table ── */}
-          <Card title="Daily Detail" subtitle="Daily TTP uses cohorts reaching day 14 on each date; top cards use the selected range total.">
+          <Card title="Daily Detail" subtitle="Daily TTP uses cohorts reaching day 14 on each date; daily activation uses attach from 14 days earlier.">
             <SheetTable
               headers={HEADERS}
               rows={tableRows}

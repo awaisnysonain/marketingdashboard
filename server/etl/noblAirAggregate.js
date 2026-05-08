@@ -146,11 +146,39 @@ async function aggregateNoblAir(startDate, endDate) {
     ttp_cohorts AS (
       SELECT
         DATE(created_at) + 14 AS date,
-        COUNT(*) FILTER (WHERE is_mature)::int AS mature_count,
-        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int AS converted_count
+        COUNT(*)::int AS mature_count,
+        COUNT(*) FILTER (WHERE
+          COALESCE(
+            last_billing_date,
+            (CASE
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
+                THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
+                THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+              ELSE NULL
+            END)
+          ) > created_at
+        )::int AS converted_count
       FROM nobl_air_subscribers
       WHERE DATE(created_at) + 14 BETWEEN $1::date AND $2::date
       GROUP BY DATE(created_at) + 14
+    ),
+    lag_attach AS (
+      SELECT
+        d.date,
+        CASE
+          WHEN COUNT(*) FILTER (WHERE NOT so.is_rebill) > 0
+            THEN ROUND(
+              COUNT(*) FILTER (WHERE so.has_air AND so.has_luggage)::numeric
+              / COUNT(*) FILTER (WHERE NOT so.is_rebill),
+              4
+            )
+          ELSE NULL
+        END AS attach_rate_14d_prior
+      FROM daily_orders d
+      LEFT JOIN shopify_orders_raw so ON so.brand = 'NOBL'
+        AND (so.created_at AT TIME ZONE 'UTC')::date = d.date - INTERVAL '14 days'
+      GROUP BY d.date
     )
     SELECT
       d.date,
@@ -173,6 +201,7 @@ async function aggregateNoblAir(startDate, endDate) {
           THEN ROUND(t.converted_count::numeric / t.mature_count, 4)
         ELSE NULL
       END AS ttp_rate,
+      la.attach_rate_14d_prior,
       -- New tier columns
       COALESCE(np.new_49, 0)  AS new_49,
       COALESCE(np.new_79, 0)  AS new_79,
@@ -199,14 +228,15 @@ async function aggregateNoblAir(startDate, endDate) {
     LEFT JOIN appstle_success     a  ON a.date = d.date
     LEFT JOIN ttp_cohorts        t  ON t.date = d.date
     LEFT JOIN same_day_cancel_cohorts sc ON sc.date = d.date
+    LEFT JOIN lag_attach la ON la.date = d.date
     LEFT JOIN new_tiers_pivot    np ON np.date = d.date
     LEFT JOIN rebill_tiers_pivot rp ON rp.date = d.date
     ORDER BY d.date`;
   const r = await pgQuery(sql, [startDate, endDate]);
   let written = 0;
   for (const row of r.rows) {
-    const activation = (row.attach_rate != null && row.ttp_rate != null)
-      ? Math.round(parseFloat(row.attach_rate) * parseFloat(row.ttp_rate) * 10000) / 10000
+    const activation = (row.attach_rate_14d_prior != null && row.ttp_rate != null)
+      ? Math.round(parseFloat(row.attach_rate_14d_prior) * parseFloat(row.ttp_rate) * 10000) / 10000
       : null;
     await pgRun(`
       INSERT INTO nobl_air_daily (
