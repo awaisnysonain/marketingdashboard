@@ -216,24 +216,24 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
       FROM rebill_tiers
       GROUP BY date
     ),
+    -- Daily TTP as 14-day matured cohort anchored to the report date
     ttp_cohorts AS (
       SELECT
-        DATE(s.created_at) AS date,
-        SUM(CASE WHEN s.is_mature THEN 1 ELSE 0 END)::int AS mature_count,
-        SUM(CASE WHEN s.is_mature AND s.is_converted THEN 1 ELSE 0 END)::int AS converted_count,
-        SUM(CASE WHEN s.is_same_day_cancel THEN 1 ELSE 0 END)::int AS same_day_cancels
-      FROM nobl_air_subscribers s
-      JOIN o ON o.order_name = s.order_name
-      WHERE o.has_air AND o.has_luggage
-        AND DATE(s.created_at) BETWEEN $1::date AND $2::date
-      GROUP BY DATE(s.created_at)
+        d.date,
+        -- Cohort is contracts created exactly 14 days before report date
+        SUM(CASE WHEN DATE(s.created_at) = d.date - INTERVAL '14 days' THEN 1 ELSE 0 END)::int AS mature_count,
+        SUM(CASE WHEN DATE(s.created_at) = d.date - INTERVAL '14 days' AND s.is_converted THEN 1 ELSE 0 END)::int AS converted_count,
+        0::int AS same_day_cancels
+      FROM daily_orders d
+      LEFT JOIN nobl_air_subscribers s ON TRUE
+      GROUP BY d.date
     )
     SELECT
       TO_CHAR(d.date, 'YYYY-MM-DD') AS date,
       d.total_orders, d.air_orders,
       CASE WHEN d.total_orders > 0 THEN ROUND(d.air_orders::numeric / d.total_orders, 4) ELSE NULL END AS attach_rate,
       CASE
-        WHEN COALESCE(t.mature_count, 0) > 0 THEN ROUND(t.converted_count::numeric / t.mature_count, 4)
+        WHEN COALESCE(t.mature_count, 0) > 0 THEN ROUND(t.converted_count::numeric / NULLIF(t.mature_count,0), 4)
         ELSE NULL
       END AS ttp_rate,
       CASE
@@ -531,6 +531,8 @@ router.get('/flo/topline', async (req, res) => {
 router.get('/channels', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const brand = (req.query.brand || '').toUpperCase();
+  const sortBy = String(req.query.sortBy || '').trim();
+  const sortDir = (String(req.query.dir || 'asc').toLowerCase() === 'desc') ? 'desc' : 'asc';
   try {
     let rows = [];
     if (brand === 'NOBL') {
@@ -574,6 +576,17 @@ router.get('/channels', async (req, res) => {
       ]);
       rows = [...fmtRows(noblRes.rows), ...fmtRows(floRes.rows)];
       rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    }
+    // Optional server-side sort if requested
+    if (sortBy) {
+      rows.sort((a, b) => {
+        const av = a[sortBy];
+        const bv = b[sortBy];
+        const cmp = (Number.isFinite(av) && Number.isFinite(bv))
+          ? av - bv
+          : String(av ?? '').localeCompare(String(bv ?? ''));
+        return sortDir === 'desc' ? -cmp : cmp;
+      });
     }
     res.json({ rows });
   } catch (e) {
@@ -742,29 +755,10 @@ router.get('/nobl/air-performance', async (req, res) => {
   try {
     const effectiveEnd = await capNoblAirEndDate(end);
     const countryCodes = regionCountries[region] || null;
-    const [rawDaily, ttpCohort] = await Promise.all([
-      countryCodes
-        ? loadNoblAirRegionalDaily(start, effectiveEnd, countryCodes)
-        : pgQuery(
-          `SELECT
-             TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
-             total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
-             zero_air_orders, paid_air_orders, rebill_orders, same_day_cancels,
-             tag_gross, tag_discounts, tag_net_sales,
-             sub_gross, sub_discounts, sub_net_sales,
-             rebill_revenue, new_sub_revenue,
-             combined_gross, combined_net_sales,
-             tag_refunds, sub_refunds, combined_net_revenue,
-             new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
-             rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159
-           FROM nobl_air_daily
-           WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-           ORDER BY date ASC`,
-          [start, effectiveEnd]
-        ).then(r => fmtRows(r.rows)),
-      loadNoblAirTtpCohort(countryCodes),
-    ]);
-    const daily = applyNoblAirTtp(rawDaily, ttpCohort.ttp_rate);
+    // Always compute daily using the regional loader so TTP/Activation are per-day (14d matured) and consistent
+    const daily = await (countryCodes
+      ? loadNoblAirRegionalDaily(start, effectiveEnd, countryCodes)
+      : loadNoblAirRegionalDaily(start, effectiveEnd, ['US','CA','AU','GB','DE','FR','IT','ES','NL','SE','NO','FI','DK','IE','CH','AT','BE','LU','PT','PL']));
     const rowsDesc = [...daily].reverse();
 
     const totals = daily.reduce((acc, r) => ({
@@ -783,7 +777,9 @@ router.get('/nobl/air-performance', async (req, res) => {
     totals.attach_rate = totals.total_orders > 0
       ? parseFloat((totals.air_orders / totals.total_orders).toFixed(4))
       : null;
-    totals.ttp_rate = ttpCohort.ttp_rate;
+    // Totals TTP as average of daily non-null ttp_rate to avoid a single constant overriding all days
+    const ttpVals = daily.map(r => r.ttp_rate).filter(v => v != null && !Number.isNaN(v));
+    totals.ttp_rate = ttpVals.length ? parseFloat((ttpVals.reduce((a,b)=>a+b,0) / ttpVals.length).toFixed(4)) : null;
     totals.activation_rate = (totals.attach_rate != null && totals.ttp_rate != null)
       ? parseFloat((totals.attach_rate * totals.ttp_rate).toFixed(4))
       : null;
@@ -858,7 +854,7 @@ router.get('/nobl/air-performance', async (req, res) => {
       forecast,
       rolling_days: rollingDays,
       forecast_days: forecastDays,
-      ttp_cohort: ttpCohort,
+      ttp_cohort: { note: 'Per-day TTP computed via 14d matured cohort; totals show avg of daily TTP' },
       region,
       data_end: effectiveEnd,
       requested_end: end,
@@ -875,6 +871,8 @@ router.get('/nobl/air-meta-adsets', async (req, res) => {
   const rowLimit = Math.max(10, Math.min(parseInt(req.query.limit || '50', 10), 100));
   const token = process.env.META_ADS_READ_TOKEN;
   const accountId = process.env.META_AD_ACCOUNT_ID;
+  const sortBy = String(req.query.sortBy || '').trim();
+  const sortDir = (String(req.query.dir || 'desc').toLowerCase() === 'asc') ? 'asc' : 'desc';
 
   if (!token || !accountId) {
     return res.status(400).json({ error: 'Missing META_AD_ACCOUNT_ID or META_ADS_READ_TOKEN' });
@@ -907,10 +905,20 @@ router.get('/nobl/air-meta-adsets', async (req, res) => {
       nextUrl = json?.paging?.next || null;
     }
 
-    const allRows = rawRows
+    let allRows = rawRows
       .map(normalizeMetaAdSet)
       .filter(row => row.spend > 0 || row.purchases > 0 || row.impressions > 0)
       .sort((a, b) => b.spend - a.spend);
+    if (sortBy) {
+      allRows = allRows.sort((a, b) => {
+        const av = a[sortBy];
+        const bv = b[sortBy];
+        const cmp = (Number.isFinite(av) && Number.isFinite(bv))
+          ? av - bv
+          : String(av ?? '').localeCompare(String(bv ?? ''));
+        return sortDir === 'desc' ? -cmp : cmp;
+      });
+    }
     const rows = allRows.slice(0, rowLimit);
 
     const totals = allRows.reduce((acc, row) => ({
