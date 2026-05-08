@@ -435,27 +435,31 @@ function computeFlags(contract) {
 
   // Appstle frequently leaves `lastBillingDate` null and instead records the most
   // recent paid event under `lastSuccessfulOrder` (a stringified or nested object).
-  // Convert = a successful paid order exists with orderAmount > 0.
   let lastSuccess = contract.lastSuccessfulOrder;
   if (typeof lastSuccess === 'string') {
     try { lastSuccess = JSON.parse(lastSuccess); } catch { lastSuccess = null; }
   }
-  const successAmount = lastSuccess?.orderAmount != null ? Number(lastSuccess.orderAmount) : 0;
-  const successDate = lastSuccess?.orderDate
-    ? new Date(lastSuccess.orderDate).getTime()
-    : (contract.lastBillingDate ? new Date(contract.lastBillingDate).getTime() : null);
+  const successAmount = toFiniteNumber(lastSuccess?.orderAmount) || 0;
+  const lastSuccessDate = lastSuccess?.orderDate ? new Date(lastSuccess.orderDate).getTime() : null;
+  const contractBillingDate = contract.lastBillingDate ? new Date(contract.lastBillingDate).getTime() : null;
+  const successDate = successAmount > 0 && lastSuccessDate
+    ? lastSuccessDate
+    : contractBillingDate;
 
   const cancelled = contract.cancelledOn ? new Date(contract.cancelledOn).getTime() : null;
 
   const isMature = created !== null && (now - created) >= TRIAL_DAYS * 86400 * 1000;
-  // Converted = customer was actually charged (orderAmount > 0). Per the technical
-  // doc, billing date alone isn't reliable because Appstle sometimes records the
-  // trial activation as a "billing" with $0 amount.
-  const isConverted = successAmount > 0;
+  // Converted = a paid billing event after trial creation.
+  const isConverted = created !== null && successDate !== null && successDate > created;
   // Same-day cancel = cancelled within 24h of creation (still a useful churn signal)
   const isSameDayCancel = (cancelled && created) ? ((cancelled - created) <= 86400 * 1000) : false;
 
-  return { isMature, isConverted, isSameDayCancel, lastBillingMs: successDate };
+  return {
+    isMature,
+    isConverted,
+    isSameDayCancel,
+    lastBillingDate: successDate ? new Date(successDate).toISOString() : null,
+  };
 }
 
 async function writeBatch(contracts, tableName) {
@@ -489,7 +493,7 @@ async function writeBatch(contracts, tableName) {
         c.startsAt || null,
         c.endsAt || null,
         c.nextBillingDate || null,
-        c.lastBillingDate || null,
+        c.lastBillingDate || flags.lastBillingDate,
         c.cancelledOn || null,
         flags.isMature,
         flags.isConverted,

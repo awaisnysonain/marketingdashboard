@@ -671,15 +671,30 @@ router.get('/nobl/subscriptions', async (req, res) => {
         [start, end]
       ),
       pgQuery(
-        `SELECT
+        `WITH subscribers AS (
+           SELECT
+             *,
+             COALESCE(
+               last_billing_date,
+               (CASE
+                 WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
+                   THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+                 WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
+                   THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+                 ELSE NULL
+               END)
+             ) AS paid_billing_date
+           FROM nobl_air_subscribers
+         )
+         SELECT
            COUNT(*) AS total,
             COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
             COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
             COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
             COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
-           COUNT(*) FILTER (WHERE is_converted) AS converted,
+           COUNT(*) FILTER (WHERE paid_billing_date > created_at) AS converted,
            AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
-         FROM nobl_air_subscribers`,
+         FROM subscribers`,
         []
       ),
     ]);
@@ -766,15 +781,30 @@ router.get('/subscriptions', async (req, res) => {
         [start, end]
       ),
       pgQuery(
-        `SELECT
+        `WITH subscribers AS (
+           SELECT
+             *,
+             COALESCE(
+               last_billing_date,
+               (CASE
+                 WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
+                   THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+                 WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
+                   THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+                 ELSE NULL
+               END)
+             ) AS paid_billing_date
+           FROM nobl_air_subscribers
+         )
+         SELECT
            COUNT(*) AS total,
-           COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
-           COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
-           COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
-           COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
-           COUNT(*) FILTER (WHERE is_converted) AS converted,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
+            COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
+           COUNT(*) FILTER (WHERE paid_billing_date > created_at) AS converted,
            AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
-         FROM nobl_air_subscribers`,
+         FROM subscribers`,
         []
       ),
     ]);
@@ -1262,41 +1292,86 @@ router.get('/nobl/air-subscribers', async (req, res) => {
 
     // Tier mix (the main 10 tiers)
     const tierRes = await pgQuery(`
+      WITH subscribers AS (
+        SELECT
+          *,
+          COALESCE(
+            last_billing_date,
+            (CASE
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
+                THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
+                THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+              ELSE NULL
+            END)
+          ) AS paid_billing_date
+        FROM nobl_air_subscribers
+      )
       SELECT
         ROUND(contract_amount)::int AS tier,
         COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE status = 'active')::int    AS active,
         COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
         COUNT(*) FILTER (WHERE status = 'paused')::int    AS paused,
-        COUNT(*) FILTER (WHERE is_mature)::int           AS mature,
-        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int AS converted
-      FROM nobl_air_subscribers
+        COUNT(*) FILTER (WHERE DATE(created_at) <= ($1::date - INTERVAL '14 days')::date)::int AS mature,
+        COUNT(*) FILTER (WHERE DATE(created_at) <= ($1::date - INTERVAL '14 days')::date AND paid_billing_date > created_at)::int AS converted
+      FROM subscribers
       WHERE ROUND(contract_amount) IN (49, 79, 89, 99, 109, 119, 129, 139, 149, 159)
-      GROUP BY tier ORDER BY tier`);
+      GROUP BY tier ORDER BY tier`, [end]);
 
     // TTP is a mature cohort metric. Do not restrict it to the selected MTD
     // range, because recent subscribers are still inside the 14-day trial window.
     const ttpRes = await pgQuery(`
+      WITH subscribers AS (
+        SELECT
+          *,
+          COALESCE(
+            last_billing_date,
+            (CASE
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
+                THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
+                THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+              ELSE NULL
+            END)
+          ) AS paid_billing_date
+        FROM nobl_air_subscribers
+      )
       SELECT
         (SELECT COUNT(*)::int
-         FROM nobl_air_subscribers
+         FROM subscribers
          WHERE DATE(created_at) BETWEEN $1::date AND $2::date)         AS total_in_range,
-        COUNT(*) FILTER (WHERE is_mature)::int                         AS mature,
-        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int        AS converted,
+        COUNT(*) FILTER (WHERE DATE(created_at) <= ($2::date - INTERVAL '14 days')::date)::int AS mature,
+        COUNT(*) FILTER (WHERE DATE(created_at) <= ($2::date - INTERVAL '14 days')::date AND paid_billing_date > created_at)::int AS converted,
         (SELECT COUNT(*)::int
-         FROM nobl_air_subscribers
+         FROM subscribers
          WHERE DATE(created_at) BETWEEN $1::date AND $2::date
-           AND is_same_day_cancel)                                     AS same_day_cancels
-      FROM nobl_air_subscribers`, [start, end]);
+            AND is_same_day_cancel)                                     AS same_day_cancels
+      FROM subscribers`, [start, end]);
 
     // New subs per day (created_at)
     const dailyRes = await pgQuery(`
+      WITH subscribers AS (
+        SELECT
+          *,
+          COALESCE(
+            last_billing_date,
+            (CASE
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
+                THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
+                THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+              ELSE NULL
+            END)
+          ) AS paid_billing_date
+        FROM nobl_air_subscribers
+      )
       SELECT
-        DATE(created_at) AS date,
+        TO_CHAR(DATE(created_at), 'YYYY-MM-DD') AS date,
         COUNT(*)::int                                                  AS new_subs,
-        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int        AS converted,
+        COUNT(*) FILTER (WHERE DATE(created_at) <= ($2::date - INTERVAL '14 days')::date AND paid_billing_date > created_at)::int AS converted,
         COUNT(*) FILTER (WHERE is_same_day_cancel)::int                AS same_day_cancels
-      FROM nobl_air_subscribers
+      FROM subscribers
       WHERE DATE(created_at) BETWEEN $1::date AND $2::date
       GROUP BY DATE(created_at) ORDER BY DATE(created_at)`, [start, end]);
 
