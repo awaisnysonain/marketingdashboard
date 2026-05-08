@@ -356,6 +356,19 @@ async function capNoblAirEndDate(end) {
   return latest && latest < end ? latest : end;
 }
 
+async function clampNoblAirStartDate(start) {
+  const r = await pgQuery(
+    `SELECT MIN(date)::text AS first_complete_date
+     FROM nobl_air_daily
+     WHERE air_orders > 0
+       AND ttp_rate IS NOT NULL
+       AND activation_rate IS NOT NULL`,
+    []
+  );
+  const firstComplete = r.rows[0]?.first_complete_date;
+  return firstComplete && start < firstComplete ? firstComplete : start;
+}
+
 // GET /overview
 router.get('/overview', async (req, res) => {
   const { start, end } = getDefaultDates(req);
@@ -842,10 +855,11 @@ router.get('/nobl/air-performance', async (req, res) => {
 
   try {
     const effectiveEnd = await capNoblAirEndDate(end);
+    const effectiveStart = await clampNoblAirStartDate(start);
     const countryCodes = regionCountries[region] || null;
     const [daily, ttpCohort] = await Promise.all([
       countryCodes
-        ? loadNoblAirRegionalDaily(start, effectiveEnd, countryCodes)
+        ? loadNoblAirRegionalDaily(effectiveStart, effectiveEnd, countryCodes)
         : pgQuery(
           `SELECT
              TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
@@ -861,7 +875,7 @@ router.get('/nobl/air-performance', async (req, res) => {
            FROM nobl_air_daily
            WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
            ORDER BY date ASC`,
-          [start, effectiveEnd]
+          [effectiveStart, effectiveEnd]
         ).then(r => fmtRows(r.rows)),
       loadNoblAirOverallTtp(effectiveEnd, countryCodes),
     ]);
@@ -960,7 +974,9 @@ router.get('/nobl/air-performance', async (req, res) => {
       forecast_days: forecastDays,
       ttp_cohort: ttpCohort,
       region,
+      data_start: effectiveStart,
       data_end: effectiveEnd,
+      requested_start: start,
       requested_end: end,
     });
   } catch (e) {
