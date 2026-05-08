@@ -58,11 +58,6 @@ function defaultColWidth(header) {
   return 160;
 }
 
-function isDateSortColumn(header) {
-  const h = String(header || '').trim().toLowerCase();
-  return h === 'date' || h === 'day' || h.endsWith(' date') || h.includes('created at') || h.includes('updated at');
-}
-
 // ─── component ───────────────────────────────────────────────────────────────
 export default function SheetTable({
   headers = [],            // string[] — visible column names
@@ -78,7 +73,7 @@ export default function SheetTable({
 }) {
   // ── search & sort
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState(() => isDateSortColumn(defaultSortField) ? defaultSortField : null);
+  const [sortBy, setSortBy] = useState(defaultSortField || null);
   const [sortDir, setSortDir] = useState(defaultSortDir);
 
   // ── cell selection state
@@ -127,14 +122,15 @@ export default function SheetTable({
     ? [...filtered].sort((a, b) => {
         const va = a[sortBy], vb = b[sortBy];
         if (va == null) return 1; if (vb == null) return -1;
-        const na = parseFloat(va), nb = parseFloat(vb);
-        if (!isNaN(na) && !isNaN(nb)) return sortDir === 'asc' ? na - nb : nb - na;
+        const textColumn = ['brand', 'campaign', 'ad set', 'ad'].includes(String(sortBy).toLowerCase()) || /(^|\s)id($|\s)/.test(String(sortBy).toLowerCase());
+        const na = typeof va === 'number' ? va : Number(String(va).trim());
+        const nb = typeof vb === 'number' ? vb : Number(String(vb).trim());
+        if (!textColumn && Number.isFinite(na) && Number.isFinite(nb)) return sortDir === 'asc' ? na - nb : nb - na;
         return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
       })
     : filtered;
 
   function handleSort(h) {
-    if (!isDateSortColumn(h)) return;
     if (sortBy === h) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
     else { setSortBy(h); setSortDir('asc'); }
   }

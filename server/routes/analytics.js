@@ -92,13 +92,13 @@ function fmtRows(rows) {
   });
 }
 
-async function loadNoblAirTtpCohort(countryCodes = null) {
-  const params = countryCodes ? [countryCodes] : [];
-  const joinRegion = countryCodes ? `
+async function loadNoblAirMaturedTtp(start, end, countryCodes = null) {
+  const params = countryCodes ? [start, end, countryCodes] : [start, end];
+  const regionJoin = countryCodes ? `
     JOIN shopify_orders_raw o ON o.brand = 'NOBL'
       AND o.has_air
       AND o.has_luggage
-      AND o.shipping_country = ANY($1::text[])
+      AND o.shipping_country = ANY($3::text[])
       AND (
         o.order_name = s.order_name
         OR o.order_id = s.graph_order_id
@@ -107,10 +107,12 @@ async function loadNoblAirTtpCohort(countryCodes = null) {
       )` : '';
   const r = await pgQuery(`
     SELECT
-      COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature)::int AS mature,
-      COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature AND s.is_converted)::int AS converted
+      COUNT(DISTINCT s.appstle_id)::int AS mature,
+      COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_converted)::int AS converted
     FROM nobl_air_subscribers s
-    ${joinRegion}
+    ${regionJoin}
+    WHERE s.is_mature
+      AND DATE(s.created_at) + 14 BETWEEN $1::date AND $2::date
   `, params);
   const row = r.rows[0] || {};
   const mature = Number(row.mature || 0);
@@ -120,19 +122,6 @@ async function loadNoblAirTtpCohort(countryCodes = null) {
     converted,
     ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
   };
-}
-
-function applyNoblAirTtp(rows, ttpRate) {
-  return rows.map(row => {
-    const attachRate = row.attach_rate == null ? null : Number(row.attach_rate);
-    return {
-      ...row,
-      ttp_rate: ttpRate,
-      activation_rate: attachRate != null && ttpRate != null
-        ? Number((attachRate * ttpRate).toFixed(4))
-        : null,
-    };
-  });
 }
 
 async function loadNoblAirRegionalDaily(start, end, countryCodes) {
@@ -216,17 +205,36 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
       FROM rebill_tiers
       GROUP BY date
     ),
-    -- Daily TTP as 14-day matured cohort anchored to the report date
+    regional_subscribers AS (
+      SELECT DISTINCT s.appstle_id, s.created_at, s.is_mature, s.is_converted, s.is_same_day_cancel
+      FROM nobl_air_subscribers s
+      JOIN shopify_orders_raw so ON so.brand = 'NOBL'
+        AND so.has_air
+        AND so.has_luggage
+        AND so.shipping_country = ANY($3::text[])
+        AND (
+          so.order_name = s.order_name
+          OR so.order_id = s.graph_order_id
+          OR so.order_id = CONCAT('gid://shopify/Order/', s.graph_order_id)
+          OR CONCAT('gid://shopify/Order/', so.order_id) = s.graph_order_id
+        )
+    ),
+    same_day_cancel_cohorts AS (
+      SELECT
+        DATE(created_at) AS date,
+        COUNT(*) FILTER (WHERE is_same_day_cancel)::int AS same_day_cancels
+      FROM regional_subscribers
+      WHERE DATE(created_at) BETWEEN $1::date AND $2::date
+      GROUP BY DATE(created_at)
+    ),
     ttp_cohorts AS (
       SELECT
-        d.date,
-        -- Cohort is contracts created exactly 14 days before report date
-        SUM(CASE WHEN DATE(s.created_at) = d.date - INTERVAL '14 days' THEN 1 ELSE 0 END)::int AS mature_count,
-        SUM(CASE WHEN DATE(s.created_at) = d.date - INTERVAL '14 days' AND s.is_converted THEN 1 ELSE 0 END)::int AS converted_count,
-        0::int AS same_day_cancels
-      FROM daily_orders d
-      LEFT JOIN nobl_air_subscribers s ON TRUE
-      GROUP BY d.date
+        DATE(created_at) + 14 AS date,
+        COUNT(*) FILTER (WHERE is_mature)::int AS mature_count,
+        COUNT(*) FILTER (WHERE is_mature AND is_converted)::int AS converted_count
+      FROM regional_subscribers
+      WHERE DATE(created_at) + 14 BETWEEN $1::date AND $2::date
+      GROUP BY DATE(created_at) + 14
     )
     SELECT
       TO_CHAR(d.date, 'YYYY-MM-DD') AS date,
@@ -250,7 +258,7 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
         ), 4)
         ELSE NULL
       END AS activation_rate,
-      d.zero_air_orders, d.paid_air_orders, d.rebill_orders, COALESCE(t.same_day_cancels, 0) AS same_day_cancels,
+      d.zero_air_orders, d.paid_air_orders, d.rebill_orders, COALESCE(sc.same_day_cancels, 0) AS same_day_cancels,
       d.tag_gross, d.tag_discounts, (d.tag_gross - d.tag_discounts) AS tag_net_sales,
       d.sub_gross, d.sub_discounts, (d.sub_gross - d.sub_discounts) AS sub_net_sales,
       d.rebill_revenue, (d.sub_gross - d.sub_discounts) AS new_sub_revenue,
@@ -280,6 +288,7 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
       COALESCE(rp.rebill_159, 0) AS rebill_159
     FROM daily_orders d
     LEFT JOIN ttp_cohorts t ON t.date = d.date
+    LEFT JOIN same_day_cancel_cohorts sc ON sc.date = d.date
     LEFT JOIN new_tiers_pivot np ON np.date = d.date
     LEFT JOIN rebill_tiers_pivot rp ON rp.date = d.date
     ORDER BY d.date ASC
@@ -755,10 +764,28 @@ router.get('/nobl/air-performance', async (req, res) => {
   try {
     const effectiveEnd = await capNoblAirEndDate(end);
     const countryCodes = regionCountries[region] || null;
-    // Always compute daily using the regional loader so TTP/Activation are per-day (14d matured) and consistent
-    const daily = await (countryCodes
-      ? loadNoblAirRegionalDaily(start, effectiveEnd, countryCodes)
-      : loadNoblAirRegionalDaily(start, effectiveEnd, ['US','CA','AU','GB','DE','FR','IT','ES','NL','SE','NO','FI','DK','IE','CH','AT','BE','LU','PT','PL']));
+    const [daily, ttpCohort] = await Promise.all([
+      countryCodes
+        ? loadNoblAirRegionalDaily(start, effectiveEnd, countryCodes)
+        : pgQuery(
+          `SELECT
+             TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+             total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
+             zero_air_orders, paid_air_orders, rebill_orders, same_day_cancels,
+             tag_gross, tag_discounts, tag_net_sales,
+             sub_gross, sub_discounts, sub_net_sales,
+             rebill_revenue, new_sub_revenue,
+             combined_gross, combined_net_sales,
+             tag_refunds, sub_refunds, combined_net_revenue,
+             new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+             rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159
+           FROM nobl_air_daily
+           WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+           ORDER BY date ASC`,
+          [start, effectiveEnd]
+        ).then(r => fmtRows(r.rows)),
+      loadNoblAirMaturedTtp(start, effectiveEnd, countryCodes),
+    ]);
     const rowsDesc = [...daily].reverse();
 
     const totals = daily.reduce((acc, r) => ({
@@ -777,9 +804,7 @@ router.get('/nobl/air-performance', async (req, res) => {
     totals.attach_rate = totals.total_orders > 0
       ? parseFloat((totals.air_orders / totals.total_orders).toFixed(4))
       : null;
-    // Totals TTP as average of daily non-null ttp_rate to avoid a single constant overriding all days
-    const ttpVals = daily.map(r => r.ttp_rate).filter(v => v != null && !Number.isNaN(v));
-    totals.ttp_rate = ttpVals.length ? parseFloat((ttpVals.reduce((a,b)=>a+b,0) / ttpVals.length).toFixed(4)) : null;
+    totals.ttp_rate = ttpCohort.ttp_rate;
     totals.activation_rate = (totals.attach_rate != null && totals.ttp_rate != null)
       ? parseFloat((totals.attach_rate * totals.ttp_rate).toFixed(4))
       : null;
@@ -854,7 +879,7 @@ router.get('/nobl/air-performance', async (req, res) => {
       forecast,
       rolling_days: rollingDays,
       forecast_days: forecastDays,
-      ttp_cohort: { note: 'Per-day TTP computed via 14d matured cohort; totals show avg of daily TTP' },
+      ttp_cohort: ttpCohort,
       region,
       data_end: effectiveEnd,
       requested_end: end,
@@ -1045,40 +1070,48 @@ router.get('/nobl/air-attribution', async (req, res) => {
           AND attribution_window = '1_day'
           AND COALESCE(ad_id, '') <> ''
           AND date BETWEEN $1::date AND $2::date
-      ), sub_match AS (
+      ), cohort_attr AS (
         SELECT
-          a.id,
-          BOOL_OR(COALESCE(s.is_mature, false)) AS is_mature,
-          BOOL_OR(COALESCE(s.is_mature, false) AND COALESCE(s.is_converted, false)) AS is_converted,
-          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature)::int AS ttp_mature_subscribers,
-          COUNT(DISTINCT s.appstle_id) FILTER (WHERE s.is_mature AND s.is_converted)::int AS ttp_paid_subscribers
-        FROM attr a
-        LEFT JOIN LATERAL (
-          SELECT appstle_id, is_mature, is_converted
+          a.*,
+          s.appstle_id,
+          s.is_converted
+        FROM tw_air_order_attribution a
+        JOIN LATERAL (
+          SELECT appstle_id, created_at, is_mature, is_converted
           FROM nobl_air_subscribers
           WHERE order_name = a.order_name
           UNION
-          SELECT appstle_id, is_mature, is_converted
+          SELECT appstle_id, created_at, is_mature, is_converted
           FROM nobl_air_subscribers
           WHERE graph_order_id = CONCAT('gid://shopify/Order/', a.order_id)
           UNION
-          SELECT appstle_id, is_mature, is_converted
+          SELECT appstle_id, created_at, is_mature, is_converted
           FROM nobl_air_subscribers
           WHERE graph_order_id = a.order_id
         ) s ON true
-        GROUP BY a.id
+        WHERE a.brand = 'NOBL'
+          AND a.channel = 'facebook-ads'
+          AND a.model = 'Triple Attribution'
+          AND a.attribution_window = '1_day'
+          AND COALESCE(a.ad_id, '') <> ''
+          AND s.is_mature
+          AND DATE(s.created_at) + 14 BETWEEN $1::date AND $2::date
       ), air AS (
         SELECT
           ${groupCols},
           COUNT(DISTINCT a.order_id)::int AS air_orders,
           SUM(a.linear_weight)::numeric(14,2) AS attributed_air_orders,
-          SUM(a.order_revenue * a.linear_weight)::numeric(14,2) AS attributed_air_revenue,
-          SUM(a.linear_weight) FILTER (WHERE sm.is_mature)::numeric(14,2) AS ttp_mature_air_orders,
-          SUM(a.linear_weight) FILTER (WHERE sm.is_converted)::numeric(14,2) AS ttp_paid_air_orders,
-          SUM(sm.ttp_mature_subscribers)::int AS ttp_mature_subscribers,
-          SUM(sm.ttp_paid_subscribers)::int AS ttp_paid_subscribers
+          SUM(a.order_revenue * a.linear_weight)::numeric(14,2) AS attributed_air_revenue
         FROM attr a
-        LEFT JOIN sub_match sm ON sm.id = a.id
+        GROUP BY ${groupCols}
+      ), cohort AS (
+        SELECT
+          ${groupCols},
+          SUM(linear_weight)::numeric(14,2) AS ttp_mature_air_orders,
+          SUM(linear_weight) FILTER (WHERE is_converted)::numeric(14,2) AS ttp_paid_air_orders,
+          COUNT(DISTINCT appstle_id)::int AS ttp_mature_subscribers,
+          COUNT(DISTINCT appstle_id) FILTER (WHERE is_converted)::int AS ttp_paid_subscribers
+        FROM cohort_attr
         GROUP BY ${groupCols}
       ),
       total AS (
@@ -1097,27 +1130,28 @@ router.get('/nobl/air-attribution', async (req, res) => {
         air.air_orders,
         air.attributed_air_orders,
         air.attributed_air_revenue,
-        COALESCE(air.ttp_mature_air_orders, 0)::numeric(14,2) AS ttp_mature_air_orders,
-        COALESCE(air.ttp_paid_air_orders, 0)::numeric(14,2) AS ttp_paid_air_orders,
-        air.ttp_mature_subscribers,
-        air.ttp_paid_subscribers,
+        COALESCE(cohort.ttp_mature_air_orders, 0)::numeric(14,2) AS ttp_mature_air_orders,
+        COALESCE(cohort.ttp_paid_air_orders, 0)::numeric(14,2) AS ttp_paid_air_orders,
+        COALESCE(cohort.ttp_mature_subscribers, 0)::int AS ttp_mature_subscribers,
+        COALESCE(cohort.ttp_paid_subscribers, 0)::int AS ttp_paid_subscribers,
         CASE
           WHEN COALESCE(total.total_attributed_orders, 0) > 0
             THEN ROUND(air.attributed_air_orders / total.total_attributed_orders, 4)
           ELSE NULL
         END AS attach_rate,
         CASE
-          WHEN COALESCE(air.ttp_mature_air_orders, 0) > 0
-            THEN ROUND(air.ttp_paid_air_orders / air.ttp_mature_air_orders, 4)
+          WHEN COALESCE(cohort.ttp_mature_air_orders, 0) > 0
+            THEN ROUND(cohort.ttp_paid_air_orders / cohort.ttp_mature_air_orders, 4)
           ELSE NULL
         END AS ttp_rate,
         CASE
-          WHEN COALESCE(total.total_attributed_orders, 0) > 0 AND COALESCE(air.ttp_mature_air_orders, 0) > 0
-            THEN ROUND((air.attributed_air_orders / total.total_attributed_orders) * (air.ttp_paid_air_orders / air.ttp_mature_air_orders), 4)
+          WHEN COALESCE(total.total_attributed_orders, 0) > 0 AND COALESCE(cohort.ttp_mature_air_orders, 0) > 0
+            THEN ROUND((air.attributed_air_orders / total.total_attributed_orders) * (cohort.ttp_paid_air_orders / cohort.ttp_mature_air_orders), 4)
           ELSE NULL
         END AS activation_rate
       FROM air
       LEFT JOIN total ON ${totalJoin}
+      LEFT JOIN cohort ON ${groupFields.map(field => `COALESCE(air.${field}, '') = COALESCE(cohort.${field}, '')`).join(' AND ')}
       ORDER BY attributed_air_orders DESC, attributed_air_revenue DESC
       LIMIT 500
     `, [start, end]);

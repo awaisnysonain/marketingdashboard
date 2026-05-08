@@ -305,7 +305,7 @@ export default function NoblAirPerformancePage() {
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Daily Attach / TTP / Activation" subtitle="Daily activation uses that day's attach rate times the cohort TTP rate.">
+            <Card title="Daily Attach / TTP / Activation" subtitle="Daily TTP uses the cohort that reached day 14 that day; activation = daily attach × daily TTP.">
               <ResponsiveContainer width="100%" height={250}>
                 <ComposedChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -393,7 +393,7 @@ export default function NoblAirPerformancePage() {
 
           {/* ── NOBL Air ad attribution ── */}
           {region === 'ALL' && (
-          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Grouped by campaign, ad set, ad ID, and ad name so same-name ads stay separate." style={{ marginBottom:16 }}>
+          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Only ads with NOBL Air sales. Attach uses selected-range sales; TTP uses cohorts reaching day 14 in the selected range." style={{ marginBottom:16 }}>
             {airAttrLoading ? (
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
             ) : airAttr?.error ? (
@@ -440,7 +440,7 @@ export default function NoblAirPerformancePage() {
           )}
 
           {/* ── Daily detail table ── */}
-          <Card title="Daily Detail" subtitle="Daily rates use each day's attach rate; top cards use the selected range total.">
+          <Card title="Daily Detail" subtitle="Daily TTP uses cohorts reaching day 14 on each date; top cards use the selected range total.">
             <SheetTable
               headers={HEADERS}
               rows={tableRows}
