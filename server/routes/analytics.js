@@ -950,6 +950,8 @@ router.get('/meta/ads', async (req, res) => {
   const brand = (req.query.brand || 'NOBL').toUpperCase();
   const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'adset';
   const rowLimit = Math.max(100, Math.min(parseInt(req.query.limit || '5000', 10), 10000));
+  const sortBy = String(req.query.sortBy || '').trim();
+  const sortDir = (String(req.query.dir || 'desc').toLowerCase() === 'asc') ? 'asc' : 'desc';
 
   const groupFields = {
     campaign: ['brand', 'campaign_id', 'campaign_name'],
@@ -999,7 +1001,18 @@ router.get('/meta/ads', async (req, res) => {
     totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
     totals.cpm = totals.impressions > 0 ? totals.spend * 1000 / totals.impressions : null;
 
-    res.json({ rows: fmtRows(r.rows), totals, level, brand, row_limit: rowLimit, start, end });
+    let rows = fmtRows(r.rows);
+    if (sortBy) {
+      rows.sort((a, b) => {
+        const av = a[sortBy];
+        const bv = b[sortBy];
+        const cmp = (Number.isFinite(av) && Number.isFinite(bv))
+          ? av - bv
+          : String(av ?? '').localeCompare(String(bv ?? ''));
+        return sortDir === 'desc' ? -cmp : cmp;
+      });
+    }
+    res.json({ rows, totals, level, brand, row_limit: rowLimit, start, end });
   } catch (e) {
     console.error('[Analytics /meta/ads]', e.message);
     res.status(500).json({ error: e.message });
