@@ -72,21 +72,27 @@ function regionsParam(selected) {
 function RegionMultiSelect({ value, onChange }) {
   const [open, setOpen] = useState(false);
   const selected = normalizeRegions(value);
+  const [draft, setDraft] = useState(selected);
+
+  // When opening, take a snapshot so toggles don't immediately trigger reloads.
+  useEffect(() => {
+    if (open) setDraft(normalizeRegions(value));
+  }, [open, value]);
 
   function toggle(v) {
     const vv = String(v).toUpperCase();
     if (vv === 'ALL') {
-      onChange(['ALL']);
+      setDraft(['ALL']);
       return;
     }
-    if (selected.includes('ALL')) {
-      onChange([vv]);
+    if (draft.includes('ALL')) {
+      setDraft([vv]);
       return;
     }
-    if (selected.includes(vv)) {
-      onChange(selected.filter(x => x !== vv));
+    if (draft.includes(vv)) {
+      setDraft(draft.filter(x => x !== vv));
     } else {
-      onChange([...selected, vv]);
+      setDraft([...draft, vv]);
     }
   }
 
@@ -141,8 +147,8 @@ function RegionMultiSelect({ value, onChange }) {
           >
             {REGION_OPTIONS.map(opt => {
               const checked = opt.value === 'ALL'
-                ? (selected.length === 1 && selected[0] === 'ALL')
-                : selected.includes(opt.value);
+                ? (draft.length === 1 && draft[0] === 'ALL')
+                : draft.includes(opt.value);
               return (
                 <label
                   key={opt.value}
@@ -175,7 +181,7 @@ function RegionMultiSelect({ value, onChange }) {
             <div style={{ display:'flex', justifyContent:'space-between', gap: 8, padding:'0 6px 4px' }}>
               <button
                 type="button"
-                onClick={() => onChange(['ALL'])}
+                onClick={() => setDraft(['ALL'])}
                 style={{
                   padding:'6px 10px',
                   fontSize: 11,
@@ -191,7 +197,7 @@ function RegionMultiSelect({ value, onChange }) {
               </button>
               <button
                 type="button"
-                onClick={() => setOpen(false)}
+                onClick={() => { onChange(normalizeRegions(draft)); setOpen(false); }}
                 style={{
                   padding:'6px 10px',
                   fontSize: 11,

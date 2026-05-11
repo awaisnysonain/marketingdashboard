@@ -143,10 +143,11 @@ async function loadNoblAirOverallTtp(end, countryCodes = null) {
 async function loadNoblAirRegionalDaily(start, end, countryCodes) {
   const r = await pgQuery(`
     WITH o AS (
-      SELECT *, (created_at AT TIME ZONE 'UTC')::date AS report_date
+      -- date_key is stored as UTC YYYY-MM-DD per schema doc; prefer it for sargable filters.
+      SELECT *, date_key AS report_date
       FROM shopify_orders_raw
       WHERE brand = 'NOBL'
-        AND (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+        AND date_key BETWEEN $1::date AND $2::date
         AND shipping_country = ANY($3::text[])
     ),
     daily_orders AS (
@@ -280,7 +281,7 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
         END AS attach_rate_14d_prior
       FROM daily_orders d
       LEFT JOIN shopify_orders_raw so ON so.brand = 'NOBL'
-        AND (so.created_at AT TIME ZONE 'UTC')::date = d.date - INTERVAL '14 days'
+        AND so.date_key = (d.date - INTERVAL '14 days')::date
         AND so.shipping_country = ANY($3::text[])
       GROUP BY d.date
     )
