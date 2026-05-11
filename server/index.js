@@ -24,6 +24,7 @@ const analyticsRouter = require('./routes/analytics');
 const { router: dashRouter, SCHEMA_CONTEXT, getClarifyPrompt } = require('./routes/aiDashboards');
 const syncStatusRouter = require('./routes/syncStatus');
 const syncEngine = require('./etl/syncEngine');
+const { ensureNoblAirRegionDailyTable } = require('./etl/noblAirAggregate');
 const twRouter    = require('./routes/triplewhale');
 const storeRouter = require('./routes/store');
 
@@ -266,6 +267,7 @@ async function initPostgresTables() {
     `);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_order_name ON nobl_air_subscribers (order_name)`).catch(() => {});
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_graph_order_id ON nobl_air_subscribers (graph_order_id)`).catch(() => {});
+    await ensureNoblAirRegionDailyTable();
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_orders_detail (

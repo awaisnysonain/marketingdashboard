@@ -140,6 +140,63 @@ CREATE TABLE IF NOT EXISTS nobl_air_daily (
   computed_at           TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Precomputed NOBL Air daily metrics for selectable region combinations.
+-- region_key examples: US, CA, AUS, US_CA, US_AUS, CA_AUS, US_CA_AUS.
+CREATE TABLE IF NOT EXISTS nobl_air_region_daily (
+  region_key            TEXT NOT NULL,
+  country_codes         TEXT[] NOT NULL,
+  date                  DATE NOT NULL,
+  total_orders          INT DEFAULT 0,
+  air_orders            INT DEFAULT 0,
+  paid_air_orders       INT DEFAULT 0,
+  zero_air_orders       INT DEFAULT 0,
+  rebill_orders         INT DEFAULT 0,
+  same_day_cancels      INT DEFAULT 0,
+  mature_count          INT DEFAULT 0,
+  converted_count       INT DEFAULT 0,
+  cancelled_30d_count   INT DEFAULT 0,
+  attach_rate           NUMERIC(8,4),
+  ttp_rate              NUMERIC(8,4),
+  activation_rate       NUMERIC(8,4),
+  cancel_rate_30d       NUMERIC(8,4),
+  tag_gross             NUMERIC(14,2) DEFAULT 0,
+  tag_discounts         NUMERIC(14,2) DEFAULT 0,
+  tag_net_sales         NUMERIC(14,2) DEFAULT 0,
+  tag_refunds           NUMERIC(14,2) DEFAULT 0,
+  sub_gross             NUMERIC(14,2) DEFAULT 0,
+  sub_discounts         NUMERIC(14,2) DEFAULT 0,
+  sub_net_sales         NUMERIC(14,2) DEFAULT 0,
+  sub_refunds           NUMERIC(14,2) DEFAULT 0,
+  rebill_revenue        NUMERIC(14,2) DEFAULT 0,
+  new_sub_revenue       NUMERIC(14,2) DEFAULT 0,
+  combined_gross        NUMERIC(14,2) DEFAULT 0,
+  combined_net_sales    NUMERIC(14,2) DEFAULT 0,
+  combined_net_revenue  NUMERIC(14,2) DEFAULT 0,
+  new_49                INT DEFAULT 0,
+  new_79                INT DEFAULT 0,
+  new_89                INT DEFAULT 0,
+  new_99                INT DEFAULT 0,
+  new_109               INT DEFAULT 0,
+  new_119               INT DEFAULT 0,
+  new_129               INT DEFAULT 0,
+  new_139               INT DEFAULT 0,
+  new_149               INT DEFAULT 0,
+  new_159               INT DEFAULT 0,
+  rebill_49             INT DEFAULT 0,
+  rebill_79             INT DEFAULT 0,
+  rebill_89             INT DEFAULT 0,
+  rebill_99             INT DEFAULT 0,
+  rebill_109            INT DEFAULT 0,
+  rebill_119            INT DEFAULT 0,
+  rebill_129            INT DEFAULT 0,
+  rebill_139            INT DEFAULT 0,
+  rebill_149            INT DEFAULT 0,
+  rebill_159            INT DEFAULT 0,
+  computed_at           TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY(region_key, date)
+);
+CREATE INDEX IF NOT EXISTS idx_nobl_air_region_daily_date ON nobl_air_region_daily (date DESC);
+
 -- ─── NOBL Air channel daily (attach rate by channel; placeholder until TW attribution wired) ─
 CREATE TABLE IF NOT EXISTS nobl_air_channel_daily (
   id              BIGSERIAL PRIMARY KEY,

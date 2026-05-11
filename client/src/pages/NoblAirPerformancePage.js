@@ -9,10 +9,15 @@ import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
 
 /* ────────────── helpers ────────────── */
-function toISO(d) { return d.toISOString().slice(0, 10); }
+function toISO(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 function startOfMonthISO() {
   const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  return toISO(new Date(d.getFullYear(), d.getMonth(), 1));
 }
 function fmtDateLabel(s) {
   if (!s) return '';

@@ -346,6 +346,50 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
   return fmtRows(r.rows);
 }
 
+async function loadNoblAirRegionalCachedDaily(start, end, regionKey) {
+  const r = await pgQuery(`
+    SELECT
+      TO_CHAR(date, 'YYYY-MM-DD') AS date,
+      total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
+      zero_air_orders, paid_air_orders, rebill_orders, same_day_cancels,
+      tag_gross, tag_discounts, tag_net_sales,
+      sub_gross, sub_discounts, sub_net_sales,
+      rebill_revenue, new_sub_revenue,
+      combined_gross, combined_net_sales,
+      tag_refunds, sub_refunds, combined_net_revenue,
+      new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+      rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159
+    FROM nobl_air_region_daily
+    WHERE region_key = $1
+      AND date BETWEEN $2::date AND $3::date
+    ORDER BY date ASC
+  `, [regionKey, start, end]);
+  return fmtRows(r.rows);
+}
+
+async function loadNoblAirRegionalCachedTtp(end, regionKey) {
+  const r = await pgQuery(`
+    SELECT
+      COALESCE(SUM(mature_count), 0)::int AS mature,
+      COALESCE(SUM(converted_count), 0)::int AS converted,
+      COALESCE(SUM(cancelled_30d_count), 0)::int AS cancelled_30d
+    FROM nobl_air_region_daily
+    WHERE region_key = $1
+      AND date <= $2::date
+  `, [regionKey, end]);
+  const row = r.rows[0] || {};
+  const mature = Number(row.mature || 0);
+  const converted = Number(row.converted || 0);
+  const cancelled30d = Number(row.cancelled_30d || 0);
+  return {
+    mature,
+    converted,
+    cancelled_30d: cancelled30d,
+    ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
+    cancel_rate_30d: mature > 0 ? Number((cancelled30d / mature).toFixed(4)) : null,
+  };
+}
+
 async function capNoblAirEndDate(end) {
   const r = await pgQuery(
     `SELECT MAX(end_date::date)::text AS latest_complete_date
@@ -860,6 +904,7 @@ router.get('/nobl/air-performance', async (req, res) => {
     const effectiveStart = await clampNoblAirStartDate(start);
     // Support multi-region like "US,CA". "ALL" means no region filter.
     let countryCodes = null;
+    let regionKey = null;
     if (region && region !== 'ALL') {
       const parts = region.split(',').map(s => s.trim()).filter(Boolean);
       const codes = [];
@@ -869,10 +914,14 @@ router.get('/nobl/air-performance', async (req, res) => {
       }
       // If nothing matched, treat as ALL (no filter) rather than returning empty data.
       countryCodes = codes.length ? Array.from(new Set(codes)) : null;
+      if (countryCodes) {
+        const keyParts = ['US', 'CA', 'AUS'].filter(p => parts.includes(p));
+        regionKey = keyParts.join('_');
+      }
     }
     const [daily, ttpCohort] = await Promise.all([
-      countryCodes
-        ? loadNoblAirRegionalDaily(effectiveStart, effectiveEnd, countryCodes)
+      regionKey
+        ? loadNoblAirRegionalCachedDaily(effectiveStart, effectiveEnd, regionKey)
         : pgQuery(
           `SELECT
              TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
@@ -890,7 +939,9 @@ router.get('/nobl/air-performance', async (req, res) => {
            ORDER BY date ASC`,
           [effectiveStart, effectiveEnd]
         ).then(r => fmtRows(r.rows)),
-      loadNoblAirOverallTtp(effectiveEnd, countryCodes),
+      regionKey
+        ? loadNoblAirRegionalCachedTtp(effectiveEnd, regionKey)
+        : loadNoblAirOverallTtp(effectiveEnd, countryCodes),
     ]);
     const rowsDesc = [...daily].reverse();
 

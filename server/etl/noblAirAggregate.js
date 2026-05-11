@@ -20,6 +20,79 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 const { pgRun, pgQuery } = require('../db/postgres');
 
+const REGION_COMBOS = [
+  { key: 'US', codes: ['US'] },
+  { key: 'CA', codes: ['CA'] },
+  { key: 'AUS', codes: ['AU'] },
+  { key: 'US_CA', codes: ['US', 'CA'] },
+  { key: 'US_AUS', codes: ['US', 'AU'] },
+  { key: 'CA_AUS', codes: ['CA', 'AU'] },
+  { key: 'US_CA_AUS', codes: ['US', 'CA', 'AU'] },
+];
+
+async function ensureNoblAirRegionDailyTable() {
+  await pgRun(`
+    CREATE TABLE IF NOT EXISTS nobl_air_region_daily (
+      region_key TEXT NOT NULL,
+      country_codes TEXT[] NOT NULL,
+      date DATE NOT NULL,
+      total_orders INT DEFAULT 0,
+      air_orders INT DEFAULT 0,
+      paid_air_orders INT DEFAULT 0,
+      zero_air_orders INT DEFAULT 0,
+      rebill_orders INT DEFAULT 0,
+      same_day_cancels INT DEFAULT 0,
+      mature_count INT DEFAULT 0,
+      converted_count INT DEFAULT 0,
+      cancelled_30d_count INT DEFAULT 0,
+      attach_rate NUMERIC(8,4),
+      ttp_rate NUMERIC(8,4),
+      activation_rate NUMERIC(8,4),
+      cancel_rate_30d NUMERIC(8,4),
+      tag_gross NUMERIC(14,2) DEFAULT 0,
+      tag_discounts NUMERIC(14,2) DEFAULT 0,
+      tag_net_sales NUMERIC(14,2) DEFAULT 0,
+      tag_refunds NUMERIC(14,2) DEFAULT 0,
+      sub_gross NUMERIC(14,2) DEFAULT 0,
+      sub_discounts NUMERIC(14,2) DEFAULT 0,
+      sub_net_sales NUMERIC(14,2) DEFAULT 0,
+      sub_refunds NUMERIC(14,2) DEFAULT 0,
+      rebill_revenue NUMERIC(14,2) DEFAULT 0,
+      new_sub_revenue NUMERIC(14,2) DEFAULT 0,
+      combined_gross NUMERIC(14,2) DEFAULT 0,
+      combined_net_sales NUMERIC(14,2) DEFAULT 0,
+      combined_net_revenue NUMERIC(14,2) DEFAULT 0,
+      new_49 INT DEFAULT 0,
+      new_79 INT DEFAULT 0,
+      new_89 INT DEFAULT 0,
+      new_99 INT DEFAULT 0,
+      new_109 INT DEFAULT 0,
+      new_119 INT DEFAULT 0,
+      new_129 INT DEFAULT 0,
+      new_139 INT DEFAULT 0,
+      new_149 INT DEFAULT 0,
+      new_159 INT DEFAULT 0,
+      rebill_49 INT DEFAULT 0,
+      rebill_79 INT DEFAULT 0,
+      rebill_89 INT DEFAULT 0,
+      rebill_99 INT DEFAULT 0,
+      rebill_109 INT DEFAULT 0,
+      rebill_119 INT DEFAULT 0,
+      rebill_129 INT DEFAULT 0,
+      rebill_139 INT DEFAULT 0,
+      rebill_149 INT DEFAULT 0,
+      rebill_159 INT DEFAULT 0,
+      computed_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY(region_key, date)
+    )
+  `);
+  await pgRun(`ALTER TABLE nobl_air_region_daily ADD COLUMN IF NOT EXISTS mature_count INT DEFAULT 0`);
+  await pgRun(`ALTER TABLE nobl_air_region_daily ADD COLUMN IF NOT EXISTS converted_count INT DEFAULT 0`);
+  await pgRun(`ALTER TABLE nobl_air_region_daily ADD COLUMN IF NOT EXISTS cancelled_30d_count INT DEFAULT 0`);
+  await pgRun(`ALTER TABLE nobl_air_region_daily ADD COLUMN IF NOT EXISTS cancel_rate_30d NUMERIC(8,4)`);
+  await pgRun(`CREATE INDEX IF NOT EXISTS idx_nobl_air_region_daily_date ON nobl_air_region_daily (date DESC)`);
+}
+
 /**
  * Aggregate NOBL Air metrics for a date range and upsert nobl_air_daily.
  * @param {string} startDate YYYY-MM-DD inclusive
@@ -295,7 +368,235 @@ async function aggregateNoblAir(startDate, endDate) {
     ]);
     written++;
   }
-  return { rows: written };
+  const regional = await aggregateNoblAirRegionalCombos(startDate, endDate);
+  return { rows: written + regional.rows, all_rows: written, regional_rows: regional.rows };
+}
+
+async function aggregateNoblAirRegionalCombos(startDate, endDate) {
+  await ensureNoblAirRegionDailyTable();
+  let totalRows = 0;
+
+  for (const combo of REGION_COMBOS) {
+    await pgRun(`
+      DELETE FROM nobl_air_region_daily
+      WHERE region_key = $1 AND date BETWEEN $2::date AND $3::date
+    `, [combo.key, startDate, endDate]);
+
+    const r = await pgRun(`
+      INSERT INTO nobl_air_region_daily (
+        region_key, country_codes, date,
+        total_orders, air_orders, paid_air_orders, zero_air_orders, rebill_orders, same_day_cancels,
+        mature_count, converted_count, cancelled_30d_count,
+        attach_rate, ttp_rate, activation_rate, cancel_rate_30d,
+        tag_gross, tag_discounts, tag_net_sales, tag_refunds,
+        sub_gross, sub_discounts, sub_net_sales, sub_refunds,
+        rebill_revenue, new_sub_revenue,
+        combined_gross, combined_net_sales, combined_net_revenue,
+        new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+        rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159,
+        computed_at
+      )
+      WITH o AS (
+        SELECT *, date_key AS report_date
+        FROM shopify_orders_raw
+        WHERE brand = 'NOBL'
+          AND date_key BETWEEN $3::date AND $4::date
+          AND shipping_country = ANY($2::text[])
+      ),
+      daily_orders AS (
+        SELECT
+          report_date AS date,
+          COUNT(*) FILTER (WHERE NOT is_rebill) AS total_orders,
+          COUNT(*) FILTER (WHERE has_air AND has_luggage) AS air_orders,
+          COUNT(*) FILTER (WHERE has_air AND has_luggage AND has_paid_air) AS paid_air_orders,
+          COUNT(*) FILTER (WHERE has_air AND has_luggage AND has_zero_air) AS zero_air_orders,
+          COUNT(*) FILTER (WHERE is_rebill) AS rebill_orders,
+          COALESCE(SUM(tag_gross) FILTER (WHERE NOT is_rebill), 0) AS tag_gross,
+          COALESCE(SUM(tag_discounts) FILTER (WHERE NOT is_rebill), 0) AS tag_discounts,
+          COALESCE(SUM(tag_refunds) FILTER (WHERE NOT is_rebill), 0) AS tag_refunds,
+          COALESCE(SUM(sub_gross) FILTER (WHERE NOT is_rebill), 0) AS sub_gross,
+          COALESCE(SUM(sub_discounts) FILTER (WHERE NOT is_rebill), 0) AS sub_discounts,
+          COALESCE(SUM(sub_refunds) FILTER (WHERE NOT is_rebill), 0) AS sub_refunds,
+          COALESCE(SUM(total_price) FILTER (WHERE is_rebill), 0) AS rebill_revenue
+        FROM o
+        GROUP BY report_date
+      ),
+      new_tiers AS (
+        SELECT o.report_date AS date, s.contract_amount, COUNT(*)::int AS n
+        FROM o
+        JOIN nobl_air_subscribers s ON s.order_name = o.order_name
+        WHERE o.has_air AND o.has_luggage
+        GROUP BY o.report_date, s.contract_amount
+      ),
+      rebill_tiers AS (
+        SELECT o.report_date AS date, s.contract_amount, COUNT(*)::int AS n
+        FROM o
+        LEFT JOIN nobl_air_subscribers s ON
+          s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+          OR s.customer_id = o.customer_id
+        WHERE o.is_rebill
+        GROUP BY o.report_date, s.contract_amount
+      ),
+      new_tiers_pivot AS (
+        SELECT
+          date,
+          SUM(CASE WHEN ROUND(contract_amount) = 49 THEN n ELSE 0 END)::int AS new_49,
+          SUM(CASE WHEN ROUND(contract_amount) = 79 THEN n ELSE 0 END)::int AS new_79,
+          SUM(CASE WHEN ROUND(contract_amount) = 89 THEN n ELSE 0 END)::int AS new_89,
+          SUM(CASE WHEN ROUND(contract_amount) = 99 THEN n ELSE 0 END)::int AS new_99,
+          SUM(CASE WHEN ROUND(contract_amount) = 109 THEN n ELSE 0 END)::int AS new_109,
+          SUM(CASE WHEN ROUND(contract_amount) = 119 THEN n ELSE 0 END)::int AS new_119,
+          SUM(CASE WHEN ROUND(contract_amount) = 129 THEN n ELSE 0 END)::int AS new_129,
+          SUM(CASE WHEN ROUND(contract_amount) = 139 THEN n ELSE 0 END)::int AS new_139,
+          SUM(CASE WHEN ROUND(contract_amount) = 149 THEN n ELSE 0 END)::int AS new_149,
+          SUM(CASE WHEN ROUND(contract_amount) = 159 THEN n ELSE 0 END)::int AS new_159
+        FROM new_tiers
+        GROUP BY date
+      ),
+      rebill_tiers_pivot AS (
+        SELECT
+          date,
+          SUM(CASE WHEN ROUND(contract_amount) = 49 THEN n ELSE 0 END)::int AS rebill_49,
+          SUM(CASE WHEN ROUND(contract_amount) = 79 THEN n ELSE 0 END)::int AS rebill_79,
+          SUM(CASE WHEN ROUND(contract_amount) = 89 THEN n ELSE 0 END)::int AS rebill_89,
+          SUM(CASE WHEN ROUND(contract_amount) = 99 THEN n ELSE 0 END)::int AS rebill_99,
+          SUM(CASE WHEN ROUND(contract_amount) = 109 THEN n ELSE 0 END)::int AS rebill_109,
+          SUM(CASE WHEN ROUND(contract_amount) = 119 THEN n ELSE 0 END)::int AS rebill_119,
+          SUM(CASE WHEN ROUND(contract_amount) = 129 THEN n ELSE 0 END)::int AS rebill_129,
+          SUM(CASE WHEN ROUND(contract_amount) = 139 THEN n ELSE 0 END)::int AS rebill_139,
+          SUM(CASE WHEN ROUND(contract_amount) = 149 THEN n ELSE 0 END)::int AS rebill_149,
+          SUM(CASE WHEN ROUND(contract_amount) = 159 THEN n ELSE 0 END)::int AS rebill_159
+        FROM rebill_tiers
+        GROUP BY date
+      ),
+      regional_subscribers AS (
+        SELECT DISTINCT
+          s.appstle_id,
+          s.created_at,
+          s.cancelled_on,
+          COALESCE(
+            s.last_billing_date,
+            (CASE
+              WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'object'
+                THEN (s.raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
+              WHEN jsonb_typeof(s.raw_json->'lastSuccessfulOrder') = 'string'
+                THEN ((s.raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
+              ELSE NULL
+            END)
+          ) AS paid_billing_date,
+          s.is_same_day_cancel
+        FROM nobl_air_subscribers s
+        JOIN shopify_orders_raw so ON so.brand = 'NOBL'
+          AND so.has_air
+          AND so.has_luggage
+          AND so.shipping_country = ANY($2::text[])
+          AND (
+            so.order_name = s.order_name
+            OR so.order_id = s.graph_order_id
+            OR so.order_id = CONCAT('gid://shopify/Order/', s.graph_order_id)
+            OR CONCAT('gid://shopify/Order/', so.order_id) = s.graph_order_id
+          )
+        WHERE DATE(s.created_at) BETWEEN ($3::date - INTERVAL '14 days')::date AND $4::date
+      ),
+      same_day_cancel_cohorts AS (
+        SELECT DATE(created_at) AS date, COUNT(*) FILTER (WHERE is_same_day_cancel)::int AS same_day_cancels
+        FROM regional_subscribers
+        WHERE DATE(created_at) BETWEEN $3::date AND $4::date
+        GROUP BY DATE(created_at)
+      ),
+      ttp_cohorts AS (
+        SELECT
+          DATE(created_at) + 14 AS date,
+          COUNT(*)::int AS mature_count,
+          COUNT(*) FILTER (WHERE paid_billing_date > created_at)::int AS converted_count,
+          COUNT(*) FILTER (WHERE cancelled_on IS NOT NULL AND cancelled_on <= created_at + INTERVAL '30 days')::int AS cancelled_30d_count
+        FROM regional_subscribers
+        WHERE DATE(created_at) + 14 BETWEEN $3::date AND $4::date
+        GROUP BY DATE(created_at) + 14
+      ),
+      lag_attach AS (
+        SELECT
+          d.date,
+          CASE
+            WHEN COUNT(*) FILTER (WHERE NOT so.is_rebill) > 0
+              THEN ROUND(
+                COUNT(*) FILTER (WHERE so.has_air AND so.has_luggage)::numeric
+                / COUNT(*) FILTER (WHERE NOT so.is_rebill),
+                4
+              )
+            ELSE NULL
+          END AS attach_rate_14d_prior
+        FROM daily_orders d
+        LEFT JOIN shopify_orders_raw so ON so.brand = 'NOBL'
+          AND so.date_key = (d.date - INTERVAL '14 days')::date
+          AND so.shipping_country = ANY($2::text[])
+        GROUP BY d.date
+      )
+      SELECT
+        $1 AS region_key,
+        $2::text[] AS country_codes,
+        d.date,
+        d.total_orders,
+        d.air_orders,
+        d.paid_air_orders,
+        d.zero_air_orders,
+        d.rebill_orders,
+        COALESCE(sc.same_day_cancels, 0) AS same_day_cancels,
+        COALESCE(t.mature_count, 0) AS mature_count,
+        COALESCE(t.converted_count, 0) AS converted_count,
+        COALESCE(t.cancelled_30d_count, 0) AS cancelled_30d_count,
+        CASE WHEN d.total_orders > 0 THEN ROUND(d.air_orders::numeric / d.total_orders, 4) ELSE NULL END AS attach_rate,
+        CASE WHEN COALESCE(t.mature_count, 0) > 0 THEN ROUND(t.converted_count::numeric / t.mature_count, 4) ELSE NULL END AS ttp_rate,
+        CASE WHEN la.attach_rate_14d_prior IS NOT NULL AND COALESCE(t.mature_count, 0) > 0
+          THEN ROUND(la.attach_rate_14d_prior * (t.converted_count::numeric / NULLIF(t.mature_count, 0)), 4)
+          ELSE NULL
+        END AS activation_rate,
+        CASE WHEN COALESCE(t.mature_count, 0) > 0 THEN ROUND(t.cancelled_30d_count::numeric / t.mature_count, 4) ELSE NULL END AS cancel_rate_30d,
+        d.tag_gross,
+        d.tag_discounts,
+        (d.tag_gross - d.tag_discounts) AS tag_net_sales,
+        d.tag_refunds,
+        d.sub_gross,
+        d.sub_discounts,
+        (d.sub_gross - d.sub_discounts) AS sub_net_sales,
+        d.sub_refunds,
+        d.rebill_revenue,
+        (d.sub_gross - d.sub_discounts) AS new_sub_revenue,
+        (d.tag_gross + d.sub_gross + d.rebill_revenue) AS combined_gross,
+        (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts + d.rebill_revenue) AS combined_net_sales,
+        (d.tag_gross + d.sub_gross - d.tag_discounts - d.sub_discounts - d.tag_refunds - d.sub_refunds + d.rebill_revenue) AS combined_net_revenue,
+        COALESCE(np.new_49, 0) AS new_49,
+        COALESCE(np.new_79, 0) AS new_79,
+        COALESCE(np.new_89, 0) AS new_89,
+        COALESCE(np.new_99, 0) AS new_99,
+        COALESCE(np.new_109, 0) AS new_109,
+        COALESCE(np.new_119, 0) AS new_119,
+        COALESCE(np.new_129, 0) AS new_129,
+        COALESCE(np.new_139, 0) AS new_139,
+        COALESCE(np.new_149, 0) AS new_149,
+        COALESCE(np.new_159, 0) AS new_159,
+        COALESCE(rp.rebill_49, 0) AS rebill_49,
+        COALESCE(rp.rebill_79, 0) AS rebill_79,
+        COALESCE(rp.rebill_89, 0) AS rebill_89,
+        COALESCE(rp.rebill_99, 0) AS rebill_99,
+        COALESCE(rp.rebill_109, 0) AS rebill_109,
+        COALESCE(rp.rebill_119, 0) AS rebill_119,
+        COALESCE(rp.rebill_129, 0) AS rebill_129,
+        COALESCE(rp.rebill_139, 0) AS rebill_139,
+        COALESCE(rp.rebill_149, 0) AS rebill_149,
+        COALESCE(rp.rebill_159, 0) AS rebill_159,
+        NOW()
+      FROM daily_orders d
+      LEFT JOIN ttp_cohorts t ON t.date = d.date
+      LEFT JOIN same_day_cancel_cohorts sc ON sc.date = d.date
+      LEFT JOIN lag_attach la ON la.date = d.date
+      LEFT JOIN new_tiers_pivot np ON np.date = d.date
+      LEFT JOIN rebill_tiers_pivot rp ON rp.date = d.date
+    `, [combo.key, combo.codes, startDate, endDate]);
+    totalRows += r.rowCount || 0;
+  }
+
+  return { rows: totalRows };
 }
 
 /**
@@ -338,4 +639,4 @@ async function aggregateProductDaily(brand, startDate, endDate) {
   return { rows: r.rowCount };
 }
 
-module.exports = { aggregateNoblAir, aggregateProductDaily };
+module.exports = { aggregateNoblAir, aggregateNoblAirRegionalCombos, aggregateProductDaily, ensureNoblAirRegionDailyTable };
