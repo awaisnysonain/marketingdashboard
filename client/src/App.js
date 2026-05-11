@@ -1,14 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef, Component } from 'react';
-import { appStatus, appLogout, triggerSync, getSyncStatus } from './utils/api';
+import {
+  BrowserRouter, Routes, Route, Navigate,
+  useLocation, useNavigate, useParams, Outlet, useOutletContext,
+} from 'react-router-dom';
+import { appStatus, appLogout, getSyncStatus } from './utils/api';
 import TopBar from './components/TopBar';
-import Sidebar, { CORE_TABS, STORE_TABS } from './components/Sidebar';
-import { Icons } from './components/Icons';
+import Sidebar from './components/Sidebar';
 import AiAssistant from './components/AiAssistant';
 import LoginPage from './pages/LoginPage';
 
 import OverviewPage      from './pages/OverviewPage';
-import NoblPage          from './pages/NoblPage';
-import FloPage           from './pages/FloPage';
 import ChannelsPage      from './pages/ChannelsPage';
 import SubsPage          from './pages/SubsPage';
 import AiBuilderPage     from './pages/AiBuilderPage';
@@ -27,48 +28,110 @@ function getSidebarState() {
   try { return localStorage.getItem('nobl-sidebar-collapsed') === 'true'; } catch { return false; }
 }
 
-const CORE_PAGE_MAP = {
-  'Overview':      OverviewPage,
-  'NOBL Air':      NoblPage,
-  'NOBL Air Performance': NoblAirPerformancePage,
-  'Pilates FLO':   FloPage,
-  'Channels':      ChannelsPage,
-  'Meta Ads':      MetaAdsPage,
-  'Subscriptions': SubsPage,
-  'Live Data':     LivePage,
-  // Store pages — comprehensive per-store views with all daily data
-  'Store:NOBL':    StoreNoblPage,
-  'Store:FLO':     StoreFLOPage,
+/* Map between sidebar tab ids and URL paths */
+const TAB_TO_PATH = {
+  'Overview':             '/overview',
+  'Channels':             '/channels',
+  'Meta Ads':             '/meta-ads',
+  'Subscriptions':        '/subscriptions',
+  'Live Data':            '/live',
+  'NOBL Air Performance': '/nobl-air-performance',
+  'Store:NOBL':           '/store/nobl',
+  'Store:FLO':            '/store/flo',
+  '__builder':            '/aibuilder',
+  '__sync':               '/sync',
 };
 
+function pathToActiveTab(pathname, dynamicTabs) {
+  if (pathname === '/' || pathname === '/overview') return 'Overview';
+  if (pathname.startsWith('/channels')) return 'Channels';
+  if (pathname.startsWith('/meta-ads')) return 'Meta Ads';
+  if (pathname.startsWith('/subscriptions')) return 'Subscriptions';
+  if (pathname.startsWith('/live')) return 'Live Data';
+  if (pathname.startsWith('/nobl-air-performance')) return 'NOBL Air Performance';
+  if (pathname.startsWith('/store/nobl')) return 'Store:NOBL';
+  if (pathname.startsWith('/store/flo')) return 'Store:FLO';
+  if (pathname.startsWith('/aibuilder')) return '__builder';
+  if (pathname.startsWith('/sync')) return '__sync';
+  const m = pathname.match(/^\/(dashboard|sheet)\/(.+)$/);
+  if (m) {
+    const id = decodeURIComponent(m[2]);
+    const hit = (dynamicTabs || []).find(t => t.id === id);
+    if (hit) return id;
+  }
+  return 'Overview';
+}
+
 export default function App() {
-  const [appUser, setAppUser]           = useState(undefined);
-  const [activeTab, setActiveTab]       = useState('Overview');
-  const [toast, setToast]               = useState(null);
-  const [theme, setTheme]               = useState(getInitialTheme);
-  const [refreshing, setRefreshing]     = useState(false);
-  const [syncStatus, setSyncStatus]     = useState(null);
+  return (
+    <BrowserRouter>
+      <AppRoot />
+    </BrowserRouter>
+  );
+}
+
+function AppRoot() {
+  const [appUser, setAppUser] = useState(undefined);
+
+  useEffect(() => {
+    appStatus().then(s => setAppUser(s.authenticated ? s.user : null)).catch(() => setAppUser(null));
+  }, []);
+
+  if (appUser === undefined) return <Spinner />;
+  if (!appUser) {
+    return (
+      <Routes>
+        <Route path="/login" element={<LoginPage onLogin={setAppUser} />} />
+        <Route path="*" element={<LoginPage onLogin={setAppUser} />} />
+      </Routes>
+    );
+  }
+
+  return (
+    <Routes>
+      <Route element={<Layout appUser={appUser} onLogout={() => setAppUser(null)} />}>
+        <Route path="/" element={<Navigate to="/overview" replace />} />
+        <Route path="/login" element={<Navigate to="/overview" replace />} />
+        <Route path="/overview"             element={<PageHost Comp={OverviewPage} />} />
+        <Route path="/channels"             element={<PageHost Comp={ChannelsPage} />} />
+        <Route path="/meta-ads"             element={<PageHost Comp={MetaAdsPage} />} />
+        <Route path="/subscriptions"        element={<PageHost Comp={SubsPage} />} />
+        <Route path="/live"                 element={<PageHost Comp={LivePage} />} />
+        <Route path="/nobl-air-performance" element={<PageHost Comp={NoblAirPerformancePage} />} />
+        <Route path="/store/nobl"           element={<PageHost Comp={StoreNoblPage} />} />
+        <Route path="/store/flo"            element={<PageHost Comp={StoreFLOPage} />} />
+        <Route path="/aibuilder"            element={<AiBuilderRoute />} />
+        <Route path="/sync"                 element={<PageHost Comp={SyncPage} />} />
+        <Route path="/dashboard/:id"        element={<DynamicDashRoute kind="dashboard" />} />
+        <Route path="/sheet/:id"            element={<DynamicDashRoute kind="sheet" />} />
+        <Route path="*"                     element={<Navigate to="/overview" replace />} />
+      </Route>
+    </Routes>
+  );
+}
+
+/* ── Layout: sidebar + topbar + outlet ────────────────────────────── */
+function Layout({ appUser, onLogout }) {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const [toast, setToast]                 = useState(null);
+  const [theme, setTheme]                 = useState(getInitialTheme);
+  const [refreshing, setRefreshing]       = useState(false);
+  const [syncStatus, setSyncStatus]       = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(getSidebarState);
-  const [dynamicTabs, setDynamicTabs]   = useState(() => {
+  const [dynamicTabs, setDynamicTabs]     = useState(() => {
     try { return JSON.parse(localStorage.getItem('nobl-dynamic-tabs') || '[]'); } catch { return []; }
   });
-  const [showAiBuilder, setShowAiBuilder] = useState(false);
-  const [showSync, setShowSync]           = useState(false);
-  const [pageKey, setPageKey]             = useState(0);
-  const prevTab = useRef(activeTab);
 
-  // Persist theme
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
     try { localStorage.setItem('nobl-theme', theme); } catch {}
   }, [theme]);
 
-  // Persist sidebar state
   useEffect(() => {
     try { localStorage.setItem('nobl-sidebar-collapsed', sidebarCollapsed); } catch {}
   }, [sidebarCollapsed]);
 
-  // Persist dynamic tabs
   useEffect(() => {
     try { localStorage.setItem('nobl-dynamic-tabs', JSON.stringify(dynamicTabs)); } catch {}
   }, [dynamicTabs]);
@@ -78,14 +141,7 @@ export default function App() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
-  // Auth check
   useEffect(() => {
-    appStatus().then(s => setAppUser(s.authenticated ? s.user : null)).catch(() => setAppUser(null));
-  }, []);
-
-  // Poll sync status every 60s
-  useEffect(() => {
-    if (!appUser) return;
     function fetchSync() {
       getSyncStatus().then(d => {
         const rec = d?.recent?.[0];
@@ -99,11 +155,12 @@ export default function App() {
     fetchSync();
     const id = setInterval(fetchSync, 60000);
     return () => clearInterval(id);
-  }, [appUser]);
+  }, []);
 
   async function handleLogout() {
     await appLogout().catch(() => {});
-    setAppUser(null);
+    onLogout();
+    navigate('/login');
   }
 
   async function handleRefresh() {
@@ -114,7 +171,6 @@ export default function App() {
     }
     setRefreshing(true);
     try {
-      // Hits /api/sync/trigger-daily — server-side single-flight + rate limit
       const res = await fetch('/api/sync/trigger-daily', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -137,22 +193,20 @@ export default function App() {
     }
   }
 
-  function handleTabChange(id) {
-    if (id === activeTab) return;
-    prevTab.current = activeTab;
-    setActiveTab(id);
-    setPageKey(k => k + 1);
-    setShowAiBuilder(false);
-    setShowSync(false);
+  function handleTabChange(tabId) {
+    const path = TAB_TO_PATH[tabId];
+    if (path) { navigate(path); return; }
+    const dyn = dynamicTabs.find(t => t.id === tabId);
+    if (dyn) {
+      navigate(`/${dyn.type === 'sheet' ? 'sheet' : 'dashboard'}/${encodeURIComponent(dyn.id)}`);
+    }
   }
 
   function handleAddDashboard() {
-    setShowAiBuilder(true);
-    setShowSync(false);
+    navigate('/aibuilder');
   }
 
   function handleDashboardCreated(dash) {
-    // dash = { id, label, subtitle, type:'dashboard', config }
     setDynamicTabs(prev => {
       const existing = prev.findIndex(t => t.id === dash.id);
       if (existing >= 0) {
@@ -162,14 +216,16 @@ export default function App() {
       }
       return [...prev, dash];
     });
-    setActiveTab(dash.id);
-    setShowAiBuilder(false);
     showToast(`Dashboard "${dash.label}" created`, 'success');
+    navigate(`/${dash.type === 'sheet' ? 'sheet' : 'dashboard'}/${encodeURIComponent(dash.id)}`);
   }
 
   function handleDeleteDynamic(id) {
     setDynamicTabs(prev => prev.filter(t => t.id !== id));
-    if (activeTab === id) setActiveTab('Overview');
+    const onThisOne =
+      location.pathname === `/dashboard/${id}` ||
+      location.pathname === `/sheet/${id}`;
+    if (onThisOne) navigate('/overview');
     showToast('Removed', 'info');
   }
 
@@ -189,30 +245,19 @@ export default function App() {
     showToast('Duplicated', 'success');
   }
 
-  if (appUser === undefined) return <Spinner />;
-  if (!appUser) return <LoginPage onLogin={setAppUser} />;
+  const activeTab = pathToActiveTab(location.pathname, dynamicTabs);
+  const isBuilderRoute = location.pathname.startsWith('/aibuilder');
+  const isSyncRoute    = location.pathname.startsWith('/sync');
 
-  // Determine which component to render
-  let PageComp = null;
-  let pageDynamic = null;
-
-  if (showSync) {
-    PageComp = SyncPage;
-  } else if (showAiBuilder) {
-    PageComp = AiBuilderPage;
-  } else if (CORE_PAGE_MAP[activeTab]) {
-    PageComp = CORE_PAGE_MAP[activeTab];
-  } else {
-    pageDynamic = dynamicTabs.find(t => t.id === activeTab);
-    if (pageDynamic) PageComp = GenericDashPage;
-    else PageComp = OverviewPage;
-  }
+  const topbarTitle =
+    isSyncRoute    ? 'Sync Status' :
+    isBuilderRoute ? 'AI Builder'  :
+    activeTab;
 
   return (
     <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg)' }}>
-      {/* Sidebar */}
       <Sidebar
-        active={showSync ? '__sync' : showAiBuilder ? '__builder' : activeTab}
+        active={activeTab}
         onChange={handleTabChange}
         dynamicTabs={dynamicTabs}
         onAddDashboard={handleAddDashboard}
@@ -223,10 +268,9 @@ export default function App() {
         onCollapse={() => setSidebarCollapsed(c => !c)}
       />
 
-      {/* Main area */}
       <div style={{ flex:1, display:'flex', flexDirection:'column', overflow:'hidden', minWidth:0 }}>
         <TopBar
-          activeTab={showSync ? 'Sync Status' : showAiBuilder ? 'AI Builder' : activeTab}
+          activeTab={topbarTitle}
           appUser={appUser}
           onRefresh={handleRefresh}
           refreshing={refreshing}
@@ -234,36 +278,29 @@ export default function App() {
           theme={theme}
           onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
           onLogout={handleLogout}
-          onOpenAiBuilder={() => { setShowAiBuilder(true); setShowSync(false); }}
-          onOpenSync={() => { setShowSync(true); setShowAiBuilder(false); }}
+          onOpenAiBuilder={() => navigate('/aibuilder')}
+          onOpenSync={() => navigate('/sync')}
           dynamicTabs={dynamicTabs}
         />
 
-        <main style={{ flex:1, overflowY: showAiBuilder ? 'hidden' : 'auto', overflowX:'hidden', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
+        <main style={{ flex:1, overflowY: isBuilderRoute ? 'hidden' : 'auto', overflowX:'hidden', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
           <div
-            key={`${activeTab}-${showSync}-${showAiBuilder}-${pageKey}`}
+            key={location.pathname}
             style={{
               width: '100%',
-              maxWidth: showAiBuilder ? 'none' : 1600,
-              margin: showAiBuilder ? 0 : '0 auto',
+              maxWidth: isBuilderRoute ? 'none' : 1600,
+              margin: isBuilderRoute ? 0 : '0 auto',
               boxSizing: 'border-box',
-              padding: showAiBuilder ? 0 : '20px 24px',
-              flex: showAiBuilder ? 1 : undefined,
-              minHeight: showAiBuilder ? 0 : undefined,
-              display: showAiBuilder ? 'flex' : 'block',
-              flexDirection: showAiBuilder ? 'column' : undefined,
+              padding: isBuilderRoute ? 0 : '20px 24px',
+              flex: isBuilderRoute ? 1 : undefined,
+              minHeight: isBuilderRoute ? 0 : undefined,
+              display: isBuilderRoute ? 'flex' : 'block',
+              flexDirection: isBuilderRoute ? 'column' : undefined,
               animation:'fadein .2s ease',
             }}
           >
-            <ErrorBoundary key={`${activeTab}-${pageKey}`}>
-              {PageComp === AiBuilderPage
-                ? <AiBuilderPage showToast={showToast} onDashboardCreated={handleDashboardCreated} />
-                : PageComp === SyncPage
-                  ? <SyncPage showToast={showToast} />
-                  : PageComp === GenericDashPage
-                    ? <GenericDashPage tab={pageDynamic} showToast={showToast} />
-                    : <PageComp showToast={showToast} />
-              }
+            <ErrorBoundary key={location.pathname}>
+              <Outlet context={{ showToast, dynamicTabs, onDashboardCreated: handleDashboardCreated }} />
             </ErrorBoundary>
           </div>
         </main>
@@ -273,6 +310,43 @@ export default function App() {
       <AiAssistant activeTab={activeTab} />
     </div>
   );
+}
+
+/* ── Route helpers ────────────────────────────────────────────────── */
+function PageHost({ Comp }) {
+  const { showToast } = useOutletContext();
+  return <Comp showToast={showToast} />;
+}
+
+function AiBuilderRoute() {
+  const { showToast, onDashboardCreated } = useOutletContext();
+  return <AiBuilderPage showToast={showToast} onDashboardCreated={onDashboardCreated} />;
+}
+
+function DynamicDashRoute({ kind }) {
+  const { showToast, dynamicTabs } = useOutletContext();
+  const { id } = useParams();
+  const decoded = decodeURIComponent(id || '');
+  const tab = (dynamicTabs || []).find(t => t.id === decoded);
+  if (!tab) {
+    return (
+      <div style={{ padding:'60px 32px', maxWidth:540, margin:'0 auto' }}>
+        <div style={{
+          background:'var(--bg3)', border:'1px solid var(--border2)',
+          borderRadius:12, padding:'24px 28px',
+        }}>
+          <div style={{ fontWeight:700, fontSize:15, marginBottom:8, color:'var(--text)' }}>
+            {kind === 'sheet' ? 'Sheet' : 'Dashboard'} not found
+          </div>
+          <div style={{ fontSize:13, color:'var(--text2)', lineHeight:1.7 }}>
+            This {kind} isn't in your sidebar. It may have been removed, or this link was created on a different browser
+            (custom dashboards are stored locally for now).
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return <GenericDashPage tab={tab} showToast={showToast} />;
 }
 
 /* ── Error Boundary ─────────────────────────────────────────────── */
@@ -297,7 +371,7 @@ class ErrorBoundary extends Component {
           </code>
           <button onClick={() => this.setState({ error:null })}
             style={{ marginTop:16, padding:'7px 18px', background:'var(--accent)', color:'#fff',
-              border:'none', borderRadius:8, fontSize:13, cursor:'pointer', fontWeight:600 }}>
+              border:'none', borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer' }}>
             Try again
           </button>
         </div>
@@ -307,34 +381,30 @@ class ErrorBoundary extends Component {
   }
 }
 
+/* ── Spinner / Toast ─────────────────────────────────────────────── */
 function Spinner() {
   return (
-    <div style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100vh', background:'var(--bg)', flexDirection:'column', gap:16 }}>
-      <div style={{
-        width:32, height:32,
-        background:'var(--accent)',
-        borderRadius:9, display:'flex', alignItems:'center', justifyContent:'center',
-        fontSize:14, fontWeight:800, color:'#fff',
-      }}>N</div>
-      <div style={{ width:24, height:24, border:'2px solid var(--border2)', borderTopColor:'var(--accent)', borderRadius:'50%', animation:'spin .8s linear infinite' }}/>
+    <div style={{ height:'100vh', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--bg)' }}>
+      <div style={{ width:32, height:32, border:'3px solid var(--border)', borderTopColor:'var(--accent)', borderRadius:'50%', animation:'spin .8s linear infinite' }} />
     </div>
   );
 }
 
 function Toast({ msg, type }) {
-  const col = { success:'var(--success)', error:'var(--danger)', info:'var(--accent)', warn:'var(--warn)' }[type] || 'var(--border2)';
+  const colors = {
+    info:    { bg:'var(--accent-dim)', border:'var(--accent)',  text:'var(--accent)'  },
+    success: { bg:'var(--success-dim)',border:'var(--success)', text:'var(--success)' },
+    error:   { bg:'var(--danger-dim)', border:'var(--danger)',  text:'var(--danger)'  },
+    warn:    { bg:'var(--warn-dim)',   border:'var(--warn)',    text:'var(--warn)'    },
+  }[type] || { bg:'var(--bg3)', border:'var(--border2)', text:'var(--text)' };
   return (
     <div style={{
-      position:'fixed', bottom:20, right:20,
-      background:'var(--bg2)', border:`1px solid ${col}`,
-      borderRadius:10, padding:'10px 16px',
-      display:'flex', alignItems:'center', gap:9,
-      zIndex:9999, fontSize:13, fontWeight:500,
-      animation:'fadein .2s ease',
-      boxShadow:'var(--shadow-sm)',
-      maxWidth:360,
+      position:'fixed', bottom:24, right:24, zIndex:2000,
+      background:colors.bg, border:`1px solid ${colors.border}`,
+      color:colors.text, padding:'10px 14px', borderRadius:8,
+      fontSize:12, fontWeight:500, maxWidth:360,
+      boxShadow:'var(--shadow)', animation:'fadein .2s ease',
     }}>
-      <span style={{ width:6, height:6, borderRadius:'50%', background:col, flexShrink:0 }}/>
       {msg}
     </div>
   );

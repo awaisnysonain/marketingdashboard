@@ -776,115 +776,197 @@ router.get('/nobl/subscriptions', async (req, res) => {
 });
 
 // GET /subscriptions?brand=NOBL|FLO
+async function fetchFloSubs(start, end) {
+  const [dailyRes, newSubRes, summaryRes] = await Promise.all([
+    pgQuery(
+      `SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date,
+              shopify_sub_gross, shopify_sub_disc, shopify_sub_refunds,
+              rebill_revenue
+       FROM flo_appstle_revenue_daily
+       WHERE date BETWEEN $1::date AND $2::date
+       ORDER BY date`,
+      [start, end]
+    ),
+    pgQuery(
+      `SELECT TO_CHAR((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
+              COUNT(*) AS new_sub_count,
+              COALESCE(SUM(contract_amount), 0) AS new_sub_revenue
+       FROM flo_appstle_subscribers
+       WHERE (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+       GROUP BY 1`,
+      [start, end]
+    ),
+    pgQuery(
+      `SELECT
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
+         COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
+         COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
+         COUNT(*) FILTER (WHERE is_converted) AS converted,
+         AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
+       FROM flo_appstle_subscribers`,
+      []
+    ),
+  ]);
+  const nsByDate = {};
+  for (const r of newSubRes.rows) {
+    nsByDate[r.date] = { count: parseInt(r.new_sub_count || 0), revenue: parseFloat(r.new_sub_revenue || 0) };
+  }
+  const byDate = {};
+  for (const r of dailyRes.rows) {
+    byDate[r.date] = { ...r, rebill_revenue: parseFloat(r.rebill_revenue || 0) };
+  }
+  for (const d of Object.keys(nsByDate)) {
+    if (!byDate[d]) byDate[d] = { date: d, shopify_sub_gross: 0, shopify_sub_disc: 0, shopify_sub_refunds: 0, rebill_revenue: 0 };
+  }
+  const daily = Object.values(byDate).map(r => {
+    const ns = nsByDate[r.date] || { count: 0, revenue: 0 };
+    return {
+      ...r,
+      new_sub_revenue: ns.revenue,
+      new_sub_count: ns.count,
+      sub_revenue_actual: (Number(r.rebill_revenue) || 0) + ns.revenue,
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  const s = summaryRes.rows[0] || {};
+  return {
+    brand: 'FLO',
+    daily: fmtRows(daily),
+    summary: {
+      total: parseInt(s.total || 0),
+      active: parseInt(s.active || 0),
+      cancelled: parseInt(s.cancelled || 0),
+      paused: parseInt(s.paused || 0),
+      converted: parseInt(s.converted || 0),
+      avg_order_amount: parseFloat(s.avg_order_amount || 0),
+    },
+  };
+}
+
+async function fetchNoblSubs(start, end) {
+  const [dailyRes, newSubRes, summaryRes] = await Promise.all([
+    pgQuery(
+      `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
+              sub_gross AS shopify_sub_gross,
+              sub_discounts AS shopify_sub_disc,
+              sub_refunds AS shopify_sub_refunds,
+              rebill_revenue
+       FROM nobl_air_daily
+       WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
+      [start, end]
+    ),
+    pgQuery(
+      `SELECT TO_CHAR((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
+              COUNT(*) AS new_sub_count,
+              COALESCE(SUM(contract_amount), 0) AS new_sub_revenue
+       FROM nobl_air_subscribers
+       WHERE (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+       GROUP BY 1`,
+      [start, end]
+    ),
+    pgQuery(
+      `SELECT
+         COUNT(*) AS total,
+         COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
+         COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
+         COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
+         COUNT(*) FILTER (WHERE is_converted) AS converted,
+         AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
+       FROM nobl_air_subscribers`,
+      []
+    ),
+  ]);
+  const nsByDate = {};
+  for (const r of newSubRes.rows) {
+    nsByDate[r.date] = { count: parseInt(r.new_sub_count || 0), revenue: parseFloat(r.new_sub_revenue || 0) };
+  }
+  const byDate = {};
+  for (const r of dailyRes.rows) {
+    byDate[r.date] = { ...r, rebill_revenue: parseFloat(r.rebill_revenue || 0) };
+  }
+  for (const d of Object.keys(nsByDate)) {
+    if (!byDate[d]) byDate[d] = { date: d, shopify_sub_gross: 0, shopify_sub_disc: 0, shopify_sub_refunds: 0, rebill_revenue: 0 };
+  }
+  const daily = Object.values(byDate).map(r => {
+    const ns = nsByDate[r.date] || { count: 0, revenue: 0 };
+    return {
+      ...r,
+      new_sub_revenue: ns.revenue,
+      new_sub_count: ns.count,
+      sub_revenue_actual: (Number(r.rebill_revenue) || 0) + ns.revenue,
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+  const s = summaryRes.rows[0] || {};
+  return {
+    brand: 'NOBL',
+    daily: fmtRows(daily),
+    summary: {
+      total: parseInt(s.total || 0),
+      active: parseInt(s.active || 0),
+      cancelled: parseInt(s.cancelled || 0),
+      paused: parseInt(s.paused || 0),
+      converted: parseInt(s.converted || 0),
+      avg_order_amount: parseFloat(s.avg_order_amount || 0),
+    },
+  };
+}
+
+function mergeBrandSubs(results) {
+  const numFields = ['shopify_sub_gross','shopify_sub_disc','shopify_sub_refunds','rebill_revenue','new_sub_revenue','new_sub_count','sub_revenue_actual'];
+  const byDate = {};
+  for (const res of results) {
+    for (const row of res.daily) {
+      if (!byDate[row.date]) {
+        byDate[row.date] = { date: row.date };
+        for (const f of numFields) byDate[row.date][f] = 0;
+      }
+      for (const f of numFields) byDate[row.date][f] += Number(row[f]) || 0;
+    }
+  }
+  const daily = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+
+  const sumKeys = ['total','active','cancelled','paused','converted'];
+  const summary = {};
+  for (const k of sumKeys) {
+    summary[k] = results.reduce((s, r) => s + (r.summary[k] || 0), 0);
+  }
+  // Weighted avg contract value by subscriber count
+  const totalSubs = results.reduce((s, r) => s + (r.summary.total || 0), 0);
+  summary.avg_order_amount = totalSubs > 0
+    ? results.reduce((s, r) => s + (r.summary.avg_order_amount || 0) * (r.summary.total || 0), 0) / totalSubs
+    : 0;
+
+  return {
+    brand: results.map(r => r.brand).join(','),
+    brands: results.map(r => r.brand),
+    daily,
+    summary,
+  };
+}
+
 router.get('/subscriptions', async (req, res) => {
   const { start, end } = getDefaultDates(req);
-  const brand = String(req.query.brand || 'NOBL').toUpperCase();
+  const brandParam = String(req.query.brand || 'NOBL').toUpperCase();
+  const brands = brandParam === 'ALL'
+    ? ['NOBL', 'FLO']
+    : brandParam.split(',').map(s => s.trim()).filter(b => b === 'NOBL' || b === 'FLO');
+  if (brands.length === 0) brands.push('NOBL');
 
   try {
-    if (brand === 'FLO') {
-      const [dailyRes, summaryRes] = await Promise.all([
-        pgQuery(
-          `SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date,
-                  shopify_sub_gross,
-                  shopify_sub_disc,
-                  shopify_sub_refunds,
-                  new_sub_revenue,
-                  rebill_revenue,
-                  sub_revenue_actual
-           FROM flo_appstle_revenue_daily
-           WHERE date BETWEEN $1::date AND $2::date
-           ORDER BY date`,
-          [start, end]
-        ),
-        pgQuery(
-          `SELECT
-             COUNT(*) AS total,
-             COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
-             COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
-             COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
-             COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
-             COUNT(*) FILTER (WHERE is_converted) AS converted,
-             AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
-           FROM flo_appstle_subscribers`,
-          []
-        ),
-      ]);
-      const s = summaryRes.rows[0] || {};
-      return res.json({
-        brand,
-        daily: fmtRows(dailyRes.rows),
-        summary: {
-          total: parseInt(s.total || 0),
-          active: parseInt(s.active || 0),
-          cancelled: parseInt(s.cancelled || 0),
-          paused: parseInt(s.paused || 0),
-          trialing: parseInt(s.trialing || 0),
-          converted: parseInt(s.converted || 0),
-          avg_order_amount: parseFloat(s.avg_order_amount || 0),
-        },
-      });
+    if (brands.length === 1) {
+      const r = brands[0] === 'FLO' ? await fetchFloSubs(start, end) : await fetchNoblSubs(start, end);
+      return res.json(r);
     }
-
-    const [dailyRes, summaryRes] = await Promise.all([
-      pgQuery(
-        `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
-                sub_gross AS shopify_sub_gross,
-                sub_discounts AS shopify_sub_disc,
-                sub_refunds AS shopify_sub_refunds,
-                rebill_revenue,
-                new_sub_revenue,
-                (sub_net_sales + rebill_revenue) AS sub_revenue_actual
-         FROM nobl_air_daily
-         WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
-        [start, end]
-      ),
-      pgQuery(
-        `WITH subscribers AS (
-           SELECT
-             *,
-             COALESCE(
-               last_billing_date,
-               (CASE
-                 WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
-                   THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
-                 WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
-                   THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
-                 ELSE NULL
-               END)
-             ) AS paid_billing_date
-           FROM nobl_air_subscribers
-         )
-         SELECT
-           COUNT(*) AS total,
-            COUNT(*) FILTER (WHERE LOWER(status) = 'active') AS active,
-            COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
-            COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
-            COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
-           COUNT(*) FILTER (WHERE paid_billing_date > created_at) AS converted,
-           AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
-         FROM subscribers`,
-        []
-      ),
-    ]);
-    const s = summaryRes.rows[0] || {};
-    res.json({
-      brand: 'NOBL',
-      daily: fmtRows(dailyRes.rows),
-      summary: {
-        total: parseInt(s.total || 0),
-        active: parseInt(s.active || 0),
-        cancelled: parseInt(s.cancelled || 0),
-        paused: parseInt(s.paused || 0),
-        trialing: parseInt(s.trialing || 0),
-        converted: parseInt(s.converted || 0),
-        avg_order_amount: parseFloat(s.avg_order_amount || 0),
-      },
-    });
+    const fetchers = brands.map(b => b === 'FLO' ? fetchFloSubs(start, end) : fetchNoblSubs(start, end));
+    const results = await Promise.all(fetchers);
+    return res.json(mergeBrandSubs(results));
   } catch (e) {
     console.error('[Analytics /subscriptions]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
+
+// ── Legacy single-brand inline implementation removed (now in fetchNoblSubs / fetchFloSubs above) ──
 
 // GET /nobl/air-performance
 router.get('/nobl/air-performance', async (req, res) => {

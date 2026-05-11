@@ -31,11 +31,12 @@ const FLO_WARN    = '#f59e0b';
 
 /* ── tabs ────────────────────────────────────────────────────────── */
 const TABS = [
-  { id:'overview',  label:'Overview'  },
-  { id:'channels',  label:'Channels'  },
-  { id:'regions',   label:'Regions'   },
-  { id:'products',  label:'Products'  },
-  { id:'email',     label:'Email'     },
+  { id:'overview',      label:'Overview'      },
+  { id:'channels',      label:'Channels'      },
+  { id:'regions',       label:'Regions'       },
+  { id:'products',      label:'Products'      },
+  { id:'subscriptions', label:'Subscriptions' },
+  { id:'email',         label:'Email'         },
 ];
 
 function merColor(v) {
@@ -68,7 +69,16 @@ export default function StoreFLOPage({ showToast }) {
   const channels = data?.channels || [];
   const geo      = data?.geo      || [];
   const products = data?.products || [];
+  const subDaily = data?.subs_daily || [];
+  const subStats = data?.subs_stats || {};
   const email    = data?.email    || [];
+
+  const subTotals = useMemo(() => subDaily.reduce((a, r) => ({
+    total:       a.total       + (Number(r.sub_revenue_actual) || 0),
+    rebill:      a.rebill      + (Number(r.rebill_revenue)     || 0),
+    newSubRev:   a.newSubRev   + (Number(r.new_sub_revenue)    || 0),
+    newSubCount: a.newSubCount + (Number(r.new_sub_count)      || 0),
+  }), { total:0, rebill:0, newSubRev:0, newSubCount:0 }), [subDaily]);
 
   const totals = useMemo(() => summary.reduce((a, r) => ({
     revenue: a.revenue + (r.total_revenue || 0),
@@ -184,11 +194,12 @@ export default function StoreFLOPage({ showToast }) {
             ))}
           </div>
 
-          {tab === 'overview'  && <OverviewTab  summary={summary} totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} />}
-          {tab === 'channels'  && <ChannelsTab  channels={channels} chAgg={chAgg} />}
-          {tab === 'regions'   && <RegionsTab   geo={geo} geoAgg={geoAgg} />}
-          {tab === 'products'  && <ProductsTab  products={products} prodAgg={prodAgg} />}
-          {tab === 'email'     && <EmailTab     email={email} emailTotals={emailTotals} />}
+          {tab === 'overview'      && <OverviewTab      summary={summary} totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} />}
+          {tab === 'channels'      && <ChannelsTab      channels={channels} chAgg={chAgg} />}
+          {tab === 'regions'       && <RegionsTab       geo={geo} geoAgg={geoAgg} />}
+          {tab === 'products'      && <ProductsTab      products={products} prodAgg={prodAgg} />}
+          {tab === 'subscriptions' && <SubscriptionsTab subDaily={subDaily} subStats={subStats} subTotals={subTotals} />}
+          {tab === 'email'         && <EmailTab         email={email} emailTotals={emailTotals} />}
         </>
       )}
     </div>
@@ -591,6 +602,98 @@ function ProductsTab({ products, prodAgg }) {
         <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Daily Product Data — Every Day</div>
         <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>Each row = one day × one product line, with channel spend breakdown</div>
         <SheetTable headers={PROD_DAILY_HEADERS} rows={dailyRows} maxHeight="600px" defaultSortField="Date" defaultSortDir="desc" />
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   SUBSCRIPTIONS TAB
+════════════════════════════════════════════════════════════════════ */
+const SUB_HEADERS = ['Date','New Subs','New Sub Rev','Rebill Rev','Total Sub Rev'];
+
+function SubscriptionsTab({ subDaily, subStats, subTotals }) {
+  const rows = subDaily.map(r => ({
+    Date:           r.date,
+    'New Subs':     r.new_sub_count ?? 0,
+    'New Sub Rev':  r.new_sub_revenue,
+    'Rebill Rev':   r.rebill_revenue,
+    'Total Sub Rev':r.sub_revenue_actual,
+  }));
+
+  // Daily array is desc; chart needs chronological order
+  const chartData = [...subDaily].reverse();
+
+  if (subDaily.length === 0 && (subStats.active || 0) === 0) {
+    return (
+      <div style={{ textAlign:'center', padding:'60px 20px', color:'var(--text3)', fontSize:14 }}>
+        No subscription activity in this date range.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
+      {/* Period KPIs (move with the date picker) */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
+        <KpiCard label="Period Sub Revenue" sub="in range" value={fmt$(subTotals.total)}         color="teal"   />
+        <KpiCard label="New Subs"           sub="in range" value={fmtNum(subTotals.newSubCount)} color="teal"   />
+        <KpiCard label="New Sub Revenue"    sub="in range" value={fmt$(subTotals.newSubRev)}     color="teal"   />
+        <KpiCard label="Rebill Revenue"     sub="in range" value={fmt$(subTotals.rebill)}        color="blue"   />
+      </div>
+      {/* All-time subscriber snapshot */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
+        <KpiCard label="Active Subs"        sub="all-time" value={fmtNum(subStats.active    || 0)} color="teal"   />
+        <KpiCard label="Converted"          sub="all-time" value={fmtNum(subStats.converted || 0)} color="blue"   />
+        <KpiCard label="Cancelled"          sub="all-time" value={fmtNum(subStats.cancelled || 0)} color="warn"   />
+        <KpiCard label="Avg Contract Value" sub="all-time" value={fmt$(subStats.avg_order_amount || 0)} color="purple" />
+      </div>
+
+      {/* Trend chart */}
+      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Subscription Revenue — Daily</div>
+        <ResponsiveContainer width="100%" height={240}>
+          <AreaChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
+            <defs>
+              <linearGradient id="fGradSub" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={FLO_ACCENT} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={FLO_ACCENT} stopOpacity={0}   />
+              </linearGradient>
+            </defs>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="date" tickFormatter={fmtLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
+            <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+            <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtLabel}
+              contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
+            <Legend wrapperStyle={{ fontSize:12 }} />
+            <Area type="monotone" dataKey="sub_revenue_actual" name="Total Sub Rev" stroke={FLO_ACCENT} fill="url(#fGradSub)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="rebill_revenue"     name="Rebill"        stroke="#6366f1"   fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
+            <Area type="monotone" dataKey="new_sub_revenue"    name="New Subs"      stroke={FLO_WARN}  fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
+          </AreaChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Stacked breakdown */}
+      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Rebill vs New Subscribers</div>
+        <ResponsiveContainer width="100%" height={220}>
+          <BarChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+            <XAxis dataKey="date" tickFormatter={fmtLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
+            <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+            <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtLabel}
+              contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
+            <Legend wrapperStyle={{ fontSize:12 }} />
+            <Bar dataKey="rebill_revenue"  name="Rebill"  fill="#6366f1"   stackId="rev" />
+            <Bar dataKey="new_sub_revenue" name="New Sub" fill={FLO_ACCENT} stackId="rev" />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Daily table */}
+      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Subscription Detail</div>
+        <SheetTable headers={SUB_HEADERS} rows={rows} maxHeight="500px" defaultSortField="Date" defaultSortDir="desc" />
       </div>
     </div>
   );

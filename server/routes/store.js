@@ -47,7 +47,7 @@ function fmtRows(rows) {
 router.get('/nobl', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
-    const [summaryRes, channelsRes, geoRes, subsRes, subsStatsRes, emailRes] = await Promise.all([
+    const [summaryRes, channelsRes, geoRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await Promise.all([
 
       // Daily summary — order_revenue is canonical (Shopify+Amazon, before refunds)
       // Falls back to total_revenue (TW attributed) until order_revenue backfill runs
@@ -83,26 +83,43 @@ router.get('/nobl', async (req, res) => {
         ORDER  BY date DESC, region
       `, [start, end]),
 
-      // Daily subscription revenue
+      // Daily rebill + shopify subscription revenue from the live aggregator.
+      // (nobl_air_sub_revenue_daily is no longer maintained — last write was
+      //  2026-05-03. Use nobl_air_daily instead.)
       pgQuery(`
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
-               shopify_sub_gross, shopify_sub_disc, shopify_sub_refunds,
-               rebill_revenue, new_sub_revenue, sub_revenue_actual
-        FROM   nobl_air_sub_revenue_daily
+               sub_gross  AS shopify_sub_gross,
+               sub_discounts AS shopify_sub_disc,
+               sub_refunds AS shopify_sub_refunds,
+               rebill_revenue
+        FROM   nobl_air_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
         ORDER  BY date DESC
       `, [start, end]),
 
-      // Subscriber stats (all-time snapshot)
+      // Daily new-sub count + revenue from Appstle subscribers
+      // (the aggregator's new_sub_revenue under-reports because Shopify
+      //  orders no longer carry sub_gross > 0 for NOBL).
+      pgQuery(`
+        SELECT TO_CHAR((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
+               COUNT(*) AS new_sub_count,
+               COALESCE(SUM(contract_amount), 0) AS new_sub_revenue
+        FROM   nobl_air_subscribers
+        WHERE  (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+        GROUP  BY 1
+      `, [start, end]),
+
+      // Subscriber stats (all-time snapshot from the live Appstle pull)
       pgQuery(`
         SELECT
-          COUNT(*)                                                     AS total,
-          SUM(CASE WHEN status='active'    THEN 1 ELSE 0 END)         AS active,
-          SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END)         AS cancelled,
-          SUM(CASE WHEN status='trialing'  THEN 1 ELSE 0 END)         AS trialing,
-          SUM(CASE WHEN status='converted' THEN 1 ELSE 0 END)         AS converted,
-          AVG(last_order_amount)                                       AS avg_order_amount
-        FROM appstle_subscriptions
+          COUNT(*)                                                            AS total,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'active')                    AS active,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled')                 AS cancelled,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'paused')                    AS paused,
+          COUNT(*) FILTER (WHERE is_converted)                                AS converted,
+          AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL
+                                       AND contract_amount > 0)               AS avg_order_amount
+        FROM nobl_air_subscribers
       `, []),
 
       // Klaviyo daily email data
@@ -149,14 +166,46 @@ router.get('/nobl', async (req, res) => {
       mer:            calcMer(r.revenue_actual, r.spend_actual),
     }));
 
-    const subs_daily = fmtRows(subsRes.rows);
+    // Merge rebill rows with new-sub rows by date.
+    const newSubByDate = {};
+    for (const r of subsNewRes.rows) {
+      newSubByDate[r.date] = {
+        count:   parseInt(r.new_sub_count || 0),
+        revenue: parseFloat(r.new_sub_revenue || 0),
+      };
+    }
+    const subsMerged = {};
+    for (const r of subsRebillRes.rows) {
+      subsMerged[r.date] = { ...r, rebill_revenue: parseFloat(r.rebill_revenue || 0) };
+    }
+    for (const d of Object.keys(newSubByDate)) {
+      if (!subsMerged[d]) {
+        subsMerged[d] = {
+          date: d, shopify_sub_gross: 0, shopify_sub_disc: 0,
+          shopify_sub_refunds: 0, rebill_revenue: 0,
+        };
+      }
+    }
+    const subs_daily = fmtRows(
+      Object.values(subsMerged)
+        .map(r => {
+          const ns = newSubByDate[r.date] || { count: 0, revenue: 0 };
+          return {
+            ...r,
+            new_sub_count:      ns.count,
+            new_sub_revenue:    ns.revenue,
+            sub_revenue_actual: (Number(r.rebill_revenue) || 0) + ns.revenue,
+          };
+        })
+        .sort((a, b) => b.date.localeCompare(a.date))   // desc, matches other daily blocks
+    );
 
     const ss = subsStatsRes.rows[0] || {};
     const subs_stats = {
       total:            parseInt(ss.total            || 0),
       active:           parseInt(ss.active           || 0),
       cancelled:        parseInt(ss.cancelled        || 0),
-      trialing:         parseInt(ss.trialing         || 0),
+      paused:           parseInt(ss.paused           || 0),
       converted:        parseInt(ss.converted        || 0),
       avg_order_amount: parseFloat(ss.avg_order_amount || 0),
     };
@@ -175,7 +224,7 @@ router.get('/nobl', async (req, res) => {
 router.get('/flo', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
-    const [summaryRes, channelsRes, geoRes, productsRes, emailRes] = await Promise.all([
+    const [summaryRes, channelsRes, geoRes, productsRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await Promise.all([
 
       // Daily summary — order_revenue is canonical
       pgQuery(`
@@ -220,6 +269,42 @@ router.get('/flo', async (req, res) => {
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
         ORDER  BY date DESC, product_line
       `, [start, end]),
+
+      // Daily rebill + shopify subscription revenue (Appstle-derived aggregator).
+      pgQuery(`
+        SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date,
+               shopify_sub_gross,
+               shopify_sub_disc,
+               shopify_sub_refunds,
+               rebill_revenue
+        FROM   flo_appstle_revenue_daily
+        WHERE  date BETWEEN $1::date AND $2::date
+        ORDER  BY date DESC
+      `, [start, end]),
+
+      // Daily new-sub count + revenue (the aggregator under-reports because
+      // Appstle order_amount is often $0 for trial signups; contract_amount is right).
+      pgQuery(`
+        SELECT TO_CHAR((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
+               COUNT(*) AS new_sub_count,
+               COALESCE(SUM(contract_amount), 0) AS new_sub_revenue
+        FROM   flo_appstle_subscribers
+        WHERE  (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+        GROUP  BY 1
+      `, [start, end]),
+
+      // All-time subscriber stats
+      pgQuery(`
+        SELECT
+          COUNT(*)                                                            AS total,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'active')                    AS active,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled')                 AS cancelled,
+          COUNT(*) FILTER (WHERE LOWER(status) = 'paused')                    AS paused,
+          COUNT(*) FILTER (WHERE is_converted)                                AS converted,
+          AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL
+                                       AND contract_amount > 0)               AS avg_order_amount
+        FROM flo_appstle_subscribers
+      `, []),
 
       // Klaviyo email
       pgQuery(`
@@ -267,9 +352,53 @@ router.get('/flo', async (req, res) => {
       mer: calcMer(r.revenue, r.spend),
     }));
 
+    // Merge rebill rows with new-sub rows by date.
+    const newSubByDate = {};
+    for (const r of subsNewRes.rows) {
+      newSubByDate[r.date] = {
+        count:   parseInt(r.new_sub_count || 0),
+        revenue: parseFloat(r.new_sub_revenue || 0),
+      };
+    }
+    const subsMerged = {};
+    for (const r of subsRebillRes.rows) {
+      subsMerged[r.date] = { ...r, rebill_revenue: parseFloat(r.rebill_revenue || 0) };
+    }
+    for (const d of Object.keys(newSubByDate)) {
+      if (!subsMerged[d]) {
+        subsMerged[d] = {
+          date: d, shopify_sub_gross: 0, shopify_sub_disc: 0,
+          shopify_sub_refunds: 0, rebill_revenue: 0,
+        };
+      }
+    }
+    const subs_daily = fmtRows(
+      Object.values(subsMerged)
+        .map(r => {
+          const ns = newSubByDate[r.date] || { count: 0, revenue: 0 };
+          return {
+            ...r,
+            new_sub_count:      ns.count,
+            new_sub_revenue:    ns.revenue,
+            sub_revenue_actual: (Number(r.rebill_revenue) || 0) + ns.revenue,
+          };
+        })
+        .sort((a, b) => b.date.localeCompare(a.date))
+    );
+
+    const ss = subsStatsRes.rows[0] || {};
+    const subs_stats = {
+      total:            parseInt(ss.total            || 0),
+      active:           parseInt(ss.active           || 0),
+      cancelled:        parseInt(ss.cancelled        || 0),
+      paused:           parseInt(ss.paused           || 0),
+      converted:        parseInt(ss.converted        || 0),
+      avg_order_amount: parseFloat(ss.avg_order_amount || 0),
+    };
+
     const email = fmtRows(emailRes.rows);
 
-    res.json({ summary, channels, geo, products, email });
+    res.json({ summary, channels, geo, products, subs_daily, subs_stats, email });
   } catch (e) {
     console.error('[Store /flo]', e.message);
     res.status(500).json({ error: e.message });

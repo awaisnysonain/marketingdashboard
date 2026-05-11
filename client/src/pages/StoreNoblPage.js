@@ -114,10 +114,11 @@ export default function StoreNoblPage({ showToast }) {
 
   // Sub totals
   const subTotals = useMemo(() => subDaily.reduce((a, r) => ({
-    total:  a.total  + (r.sub_revenue_actual || 0),
-    rebill: a.rebill + (r.rebill_revenue     || 0),
-    newSub: a.newSub + (r.new_sub_revenue    || 0),
-  }), { total:0, rebill:0, newSub:0 }), [subDaily]);
+    total:       a.total       + (Number(r.sub_revenue_actual) || 0),
+    rebill:      a.rebill      + (Number(r.rebill_revenue)     || 0),
+    newSubRev:   a.newSubRev   + (Number(r.new_sub_revenue)    || 0),
+    newSubCount: a.newSubCount + (Number(r.new_sub_count)      || 0),
+  }), { total:0, rebill:0, newSubRev:0, newSubCount:0 }), [subDaily]);
 
   // Email totals
   const emailTotals = useMemo(() => email.reduce((a, r) => ({
@@ -496,33 +497,43 @@ function RegionsTab({ geo, geoAgg }) {
 /* ═══════════════════════════════════════════════════════════════════
    SUBSCRIPTIONS TAB
 ════════════════════════════════════════════════════════════════════ */
-const SUB_HEADERS = ['Date','Total Sub Rev','Rebill Rev','New Sub Rev','Gross','Discount','Refunds'];
+const SUB_HEADERS = ['Date','New Subs','New Sub Rev','Rebill Rev','Total Sub Rev'];
 
 function SubscriptionsTab({ subDaily, subStats, subTotals }) {
   const rows = subDaily.map(r => ({
     Date:           r.date,
-    'Total Sub Rev':r.sub_revenue_actual,
-    'Rebill Rev':   r.rebill_revenue,
+    'New Subs':     r.new_sub_count ?? 0,
     'New Sub Rev':  r.new_sub_revenue,
-    Gross:          r.shopify_sub_gross,
-    Discount:       r.shopify_sub_disc,
-    Refunds:        r.shopify_sub_refunds,
+    'Rebill Rev':   r.rebill_revenue,
+    'Total Sub Rev':r.sub_revenue_actual,
   }));
 
+  // Daily array is desc; chart needs chronological order
   const chartData = [...subDaily].reverse();
+
+  if (subDaily.length === 0 && (subStats.active || 0) === 0) {
+    return (
+      <div style={{ textAlign:'center', padding:'60px 20px', color:'var(--text3)', fontSize:14 }}>
+        No subscription activity in this date range.
+      </div>
+    );
+  }
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      {/* Subscriber snapshot KPIs */}
+      {/* Period KPIs (move with the date picker) */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
-        <KpiCard label="Active Subs"     value={fmtNum(subStats.active    || 0)} color="nobl"   />
-        <KpiCard label="Total Subs"      value={fmtNum(subStats.total     || 0)} color="blue"   />
-        <KpiCard label="Cancelled"       value={fmtNum(subStats.cancelled || 0)} color="warn"   />
-        <KpiCard label="Trialing"        value={fmtNum(subStats.trialing  || 0)} color="teal"   />
-        <KpiCard label="Avg Order"       value={fmt$(subStats.avg_order_amount || 0)} color="purple" />
-        <KpiCard label="Period Sub Rev"  value={fmt$(subTotals.total)}           color="nobl"   />
-        <KpiCard label="Period Rebill"   value={fmt$(subTotals.rebill)}          color="blue"   />
-        <KpiCard label="Period New Subs" value={fmt$(subTotals.newSub)}          color="teal"   />
+        <KpiCard label="Period Sub Revenue" sub="in range" value={fmt$(subTotals.total)}        color="nobl"   />
+        <KpiCard label="New Subs"           sub="in range" value={fmtNum(subTotals.newSubCount)} color="teal"   />
+        <KpiCard label="New Sub Revenue"    sub="in range" value={fmt$(subTotals.newSubRev)}    color="teal"   />
+        <KpiCard label="Rebill Revenue"     sub="in range" value={fmt$(subTotals.rebill)}       color="blue"   />
+      </div>
+      {/* All-time subscriber snapshot */}
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
+        <KpiCard label="Active Subs"        sub="all-time" value={fmtNum(subStats.active    || 0)} color="nobl"   />
+        <KpiCard label="Converted"          sub="all-time" value={fmtNum(subStats.converted || 0)} color="blue"   />
+        <KpiCard label="Cancelled"          sub="all-time" value={fmtNum(subStats.cancelled || 0)} color="warn"   />
+        <KpiCard label="Avg Contract Value" sub="all-time" value={fmt$(subStats.avg_order_amount || 0)} color="purple" />
       </div>
 
       {/* Trend chart */}
