@@ -40,12 +40,179 @@ const STATUS_COLORS = {
   expired:   '#64748b',
   unknown:   '#94a3b8',
 };
-const REGIONS = [
+const REGION_OPTIONS = [
   { value: 'ALL', label: 'All Regions' },
-  { value: 'US', label: 'USA' },
-  { value: 'CA', label: 'Canada' },
+  { value: 'US',  label: 'USA' },
+  { value: 'CA',  label: 'Canada' },
   { value: 'AUS', label: 'AUS' },
 ];
+
+function normalizeRegions(next) {
+  const vals = Array.from(new Set((next || []).map(v => String(v).toUpperCase()))).filter(Boolean);
+  if (vals.length === 0) return ['ALL'];
+  if (vals.includes('ALL')) return ['ALL'];
+  // Only allow known values
+  const allowed = new Set(REGION_OPTIONS.filter(o => o.value !== 'ALL').map(o => o.value));
+  const cleaned = vals.filter(v => allowed.has(v));
+  return cleaned.length ? cleaned : ['ALL'];
+}
+
+function regionsLabel(selected) {
+  const s = normalizeRegions(selected);
+  if (s.length === 1 && s[0] === 'ALL') return 'All Regions';
+  const map = Object.fromEntries(REGION_OPTIONS.map(o => [o.value, o.label]));
+  return s.map(v => map[v] || v).join(' + ');
+}
+
+function regionsParam(selected) {
+  const s = normalizeRegions(selected);
+  return (s.length === 1 && s[0] === 'ALL') ? 'ALL' : s.join(',');
+}
+
+function RegionMultiSelect({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const selected = normalizeRegions(value);
+
+  function toggle(v) {
+    const vv = String(v).toUpperCase();
+    if (vv === 'ALL') {
+      onChange(['ALL']);
+      return;
+    }
+    if (selected.includes('ALL')) {
+      onChange([vv]);
+      return;
+    }
+    if (selected.includes(vv)) {
+      onChange(selected.filter(x => x !== vv));
+    } else {
+      onChange([...selected, vv]);
+    }
+  }
+
+  return (
+    <div style={{ position:'relative' }}>
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        style={{
+          appearance:'none',
+          minWidth: 180,
+          height: 34,
+          padding: '0 34px 0 12px',
+          fontSize: 13,
+          borderRadius: 8,
+          border: '1px solid var(--border)',
+          background: 'var(--bg2)',
+          color: 'var(--text)',
+          cursor: 'pointer',
+          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+          fontWeight: 500,
+          textAlign: 'left',
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+        title={regionsLabel(selected)}
+      >
+        {regionsLabel(selected)}
+      </button>
+      <span style={{ position:'absolute', right:11, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'var(--text3)', fontSize:11 }}>▼</span>
+
+      {open && (
+        <>
+          <div
+            onClick={() => setOpen(false)}
+            style={{ position:'fixed', inset:0, zIndex: 500 }}
+          />
+          <div
+            style={{
+              position:'absolute',
+              top: 38,
+              left: 0,
+              zIndex: 600,
+              minWidth: 220,
+              background:'var(--bg2)',
+              border:'1px solid var(--border2)',
+              borderRadius: 10,
+              boxShadow:'var(--shadow)',
+              padding: '8px 8px',
+            }}
+          >
+            {REGION_OPTIONS.map(opt => {
+              const checked = opt.value === 'ALL'
+                ? (selected.length === 1 && selected[0] === 'ALL')
+                : selected.includes(opt.value);
+              return (
+                <label
+                  key={opt.value}
+                  style={{
+                    display:'flex',
+                    alignItems:'center',
+                    gap: 8,
+                    padding: '7px 8px',
+                    borderRadius: 8,
+                    cursor:'pointer',
+                    userSelect:'none',
+                    color:'var(--text2)',
+                    fontSize: 12,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggle(opt.value)}
+                    style={{ width: 14, height: 14 }}
+                  />
+                  <span style={{ fontWeight: opt.value === 'ALL' ? 600 : 500, color:'var(--text)' }}>{opt.label}</span>
+                </label>
+              );
+            })}
+
+            <div style={{ height: 1, background:'var(--border)', margin:'6px 6px' }} />
+            <div style={{ display:'flex', justifyContent:'space-between', gap: 8, padding:'0 6px 4px' }}>
+              <button
+                type="button"
+                onClick={() => onChange(['ALL'])}
+                style={{
+                  padding:'6px 10px',
+                  fontSize: 11,
+                  background:'var(--bg3)',
+                  border:'1px solid var(--border2)',
+                  borderRadius: 8,
+                  color:'var(--text2)',
+                  cursor:'pointer',
+                  fontFamily: 'var(--font-body)',
+                }}
+              >
+                Reset
+              </button>
+              <button
+                type="button"
+                onClick={() => setOpen(false)}
+                style={{
+                  padding:'6px 10px',
+                  fontSize: 11,
+                  background:'var(--accent)',
+                  border:'1px solid var(--accent)',
+                  borderRadius: 8,
+                  color:'#fff',
+                  cursor:'pointer',
+                  fontFamily: 'var(--font-body)',
+                  fontWeight: 600,
+                }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 /* ────────────── headers (full table) ────────────── */
 const HEADERS = [
@@ -129,19 +296,21 @@ export default function NoblAirPerformancePage() {
   const [subData, setSubData] = useState(null);
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
   const [airAttrLoading, setAirAttrLoading] = useState(false);
-  const [region, setRegion] = useState('ALL');
+  const [regions, setRegions] = useState(['ALL']);
+
+  const regionParam = useMemo(() => regionsParam(regions), [regions]);
+  const regionScoped = regionParam !== 'ALL';
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     setAirAttrLoading(true);
     setAirAttr({ rows: [], totals: {}, error: null });
     try {
-      const regionScoped = region !== 'ALL';
       const attrPromise = regionScoped
         ? Promise.resolve({ rows: [], totals: {}, error: null })
         : getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message }));
       const [perf, subs] = await Promise.all([
-        getNoblAirPerformance(range.start, range.end, 14, 0, region),
+        getNoblAirPerformance(range.start, range.end, 14, 0, regionParam),
         regionScoped ? Promise.resolve(null) : getNoblAirSubscribers(range.start, range.end),
       ]);
       setData({ rows: perf?.rows || [], totals: perf?.totals || {}, ttpCohort: perf?.ttp_cohort || {} });
@@ -156,7 +325,7 @@ export default function NoblAirPerformancePage() {
       setLoading(false);
       setAirAttrLoading(false);
     }
-  }, [range, region]);
+  }, [range, regionParam, regionScoped]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -199,14 +368,14 @@ export default function NoblAirPerformancePage() {
       cancelRate30d: ttpCohort.cancel_rate_30d,
       paidAirOrders: t.paid_air_orders || 0,
       zeroAirOrders: t.zero_air_orders || 0,
-      sameDayCancels: region === 'ALL' ? (subData?.ttp_cohort?.same_day_cancels || t.same_day_cancels || 0) : (t.same_day_cancels || 0),
+      sameDayCancels: !regionScoped ? (subData?.ttp_cohort?.same_day_cancels || t.same_day_cancels || 0) : (t.same_day_cancels || 0),
       combinedNetRevenue: t.combined_net_revenue || 0,
       rebillRevenue: t.rebill_revenue || 0,
       newSubRevenue: t.new_sub_revenue || 0,
-      activeSubs: region === 'ALL' ? (subData?.active_count || 0) : null,
-      activeArr:  region === 'ALL' ? (subData?.active_arr || 0) : null,
+      activeSubs: !regionScoped ? (subData?.active_count || 0) : null,
+      activeArr:  !regionScoped ? (subData?.active_arr || 0) : null,
     };
-  }, [data, subData, region]);
+  }, [data, subData, regionScoped]);
 
   const tierData = useMemo(
     () => (subData?.tiers || []).map(t => ({
@@ -238,22 +407,7 @@ export default function NoblAirPerformancePage() {
           </p>
         </div>
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-          <div style={{ position:'relative' }}>
-            <select
-              value={region}
-              onChange={(e) => setRegion(e.target.value)}
-              style={{
-                appearance:'none', WebkitAppearance:'none', MozAppearance:'none',
-                minWidth:130, height:34, padding:'0 34px 0 12px', fontSize:13,
-                borderRadius:8, border:'1px solid var(--border)',
-                background:'var(--bg2)', color:'var(--text)', cursor:'pointer',
-                boxShadow:'0 1px 2px rgba(15, 23, 42, 0.04)', fontWeight:500,
-              }}
-            >
-              {REGIONS.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-            </select>
-            <span style={{ position:'absolute', right:11, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'var(--text3)', fontSize:11 }}>▼</span>
-          </div>
+          <RegionMultiSelect value={regions} onChange={(next) => setRegions(normalizeRegions(next))} />
           <DateRangePicker
             start={range.start}
             end={range.end}
@@ -273,8 +427,8 @@ export default function NoblAirPerformancePage() {
             <KpiCard label="Overall Activation"    value={fmtPct(kpi.activationRate || 0)}  color="green" />
             <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" />
             <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" />
-            {region === 'ALL' && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" />}
-            {region === 'ALL' && <KpiCard label="Active ARR (est.)" value={fmt$(kpi.activeArr)} color="purple" />}
+            {!regionScoped && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" />}
+            {!regionScoped && <KpiCard label="Active ARR (est.)" value={fmt$(kpi.activeArr)} color="purple" />}
           </div>
 
           {/* ── Secondary KPI row ── */}
@@ -340,7 +494,7 @@ export default function NoblAirPerformancePage() {
           </div>
 
           {/* ── Row 2: tier mix bar + status pie ── */}
-          {region === 'ALL' && (
+          {!regionScoped && (
           <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16, marginBottom:16 }}>
             <Card title="Subscriber Tier Mix" subtitle="Active / Cancelled / Paused per tier">
               {tierData.length === 0 ? <Empty msg="No tier data" /> : (
@@ -400,7 +554,7 @@ export default function NoblAirPerformancePage() {
           </Card>
 
           {/* ── NOBL Air ad attribution ── */}
-          {region === 'ALL' && (
+          {!regionScoped && (
           <Card title="NOBL Air Purchases by Meta Ad" subtitle="Only ads with NOBL Air sales. Attach uses selected-range sales; TTP uses cohorts reaching day 14 in the selected range." style={{ marginBottom:16 }}>
             {airAttrLoading ? (
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />

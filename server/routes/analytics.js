@@ -846,7 +846,8 @@ router.get('/nobl/air-performance', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const rollingDays = Math.max(7, Math.min(parseInt(req.query.rollingDays || '14', 10), 60));
   const forecastDays = Math.max(7, Math.min(parseInt(req.query.forecastDays || '14', 10), 60));
-  const region = String(req.query.region || 'ALL').toUpperCase();
+  const regionRaw = String(req.query.region || 'ALL').trim();
+  const region = regionRaw.toUpperCase();
   const regionCountries = {
     US: ['US'],
     CA: ['CA'],
@@ -856,7 +857,18 @@ router.get('/nobl/air-performance', async (req, res) => {
   try {
     const effectiveEnd = await capNoblAirEndDate(end);
     const effectiveStart = await clampNoblAirStartDate(start);
-    const countryCodes = regionCountries[region] || null;
+    // Support multi-region like "US,CA". "ALL" means no region filter.
+    let countryCodes = null;
+    if (region && region !== 'ALL') {
+      const parts = region.split(',').map(s => s.trim()).filter(Boolean);
+      const codes = [];
+      for (const p of parts) {
+        const cs = regionCountries[p];
+        if (cs) codes.push(...cs);
+      }
+      // If nothing matched, treat as ALL (no filter) rather than returning empty data.
+      countryCodes = codes.length ? Array.from(new Set(codes)) : null;
+    }
     const [daily, ttpCohort] = await Promise.all([
       countryCodes
         ? loadNoblAirRegionalDaily(effectiveStart, effectiveEnd, countryCodes)
@@ -973,7 +985,7 @@ router.get('/nobl/air-performance', async (req, res) => {
       rolling_days: rollingDays,
       forecast_days: forecastDays,
       ttp_cohort: ttpCohort,
-      region,
+      region: region || 'ALL',
       data_start: effectiveStart,
       data_end: effectiveEnd,
       requested_start: start,

@@ -112,8 +112,11 @@ export const getNoblAirSubscribers = (start, end) =>
   fetch(`${B}/api/analytics/nobl/air-subscribers?start=${start}&end=${end}`).then(r => r.json());
 
 export const getNoblAirPerformance = async (start, end, rollingDays = 14, forecastDays = 14, region = 'ALL') => {
+  // region can be a single code ("US") or a comma-separated list ("US,CA").
+  // Keep it as a string for URL encoding.
+  const regionParam = Array.isArray(region) ? region.join(',') : region;
   const res = await fetch(
-    `${B}/api/analytics/nobl/air-performance?start=${start}&end=${end}&rollingDays=${rollingDays}&forecastDays=${forecastDays}&region=${encodeURIComponent(region)}`
+    `${B}/api/analytics/nobl/air-performance?start=${start}&end=${end}&rollingDays=${rollingDays}&forecastDays=${forecastDays}&region=${encodeURIComponent(regionParam)}`
   );
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
