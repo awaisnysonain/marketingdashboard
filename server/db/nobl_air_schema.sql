@@ -141,7 +141,8 @@ CREATE TABLE IF NOT EXISTS nobl_air_daily (
 );
 
 -- Precomputed NOBL Air daily metrics for selectable region combinations.
--- region_key examples: US, CA, AUS, US_CA, US_AUS, CA_AUS, US_CA_AUS.
+-- region_key examples: US, CA, AUS, DUBAI, HK, INTL, US_CA, US_CA_AUS_INTL.
+-- INTL represents blank / unknown shipping country values.
 CREATE TABLE IF NOT EXISTS nobl_air_region_daily (
   region_key            TEXT NOT NULL,
   country_codes         TEXT[] NOT NULL,

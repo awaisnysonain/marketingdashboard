@@ -20,15 +20,30 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 const { pgRun, pgQuery } = require('../db/postgres');
 
-const REGION_COMBOS = [
-  { key: 'US', codes: ['US'] },
-  { key: 'CA', codes: ['CA'] },
-  { key: 'AUS', codes: ['AU'] },
-  { key: 'US_CA', codes: ['US', 'CA'] },
-  { key: 'US_AUS', codes: ['US', 'AU'] },
-  { key: 'CA_AUS', codes: ['CA', 'AU'] },
-  { key: 'US_CA_AUS', codes: ['US', 'CA', 'AU'] },
+const REGION_BUCKETS = [
+  { key: 'US', codes: ['US'], includeBlank: false },
+  { key: 'CA', codes: ['CA'], includeBlank: false },
+  { key: 'AUS', codes: ['AU'], includeBlank: false },
+  { key: 'DUBAI', codes: ['AE'], includeBlank: false },
+  { key: 'HK', codes: ['HK'], includeBlank: false },
+  { key: 'INTL', codes: [], includeBlank: true },
 ];
+
+function regionCombos() {
+  const out = [];
+  const n = REGION_BUCKETS.length;
+  for (let mask = 1; mask < (1 << n); mask += 1) {
+    const buckets = REGION_BUCKETS.filter((_, i) => mask & (1 << i));
+    out.push({
+      key: buckets.map(b => b.key).join('_'),
+      codes: Array.from(new Set(buckets.flatMap(b => b.codes))),
+      includeBlank: buckets.some(b => b.includeBlank),
+    });
+  }
+  return out;
+}
+
+const REGION_COMBOS = regionCombos();
 
 async function ensureNoblAirRegionDailyTable() {
   await pgRun(`
@@ -376,7 +391,8 @@ async function aggregateNoblAirRegionalCombos(startDate, endDate) {
   await ensureNoblAirRegionDailyTable();
   let totalRows = 0;
 
-  for (const combo of REGION_COMBOS) {
+  // First compute the six base buckets from raw Shopify/Appstle rows.
+  for (const combo of REGION_BUCKETS) {
     await pgRun(`
       DELETE FROM nobl_air_region_daily
       WHERE region_key = $1 AND date BETWEEN $2::date AND $3::date
@@ -401,7 +417,10 @@ async function aggregateNoblAirRegionalCombos(startDate, endDate) {
         FROM shopify_orders_raw
         WHERE brand = 'NOBL'
           AND date_key BETWEEN $3::date AND $4::date
-          AND shipping_country = ANY($2::text[])
+          AND (
+            shipping_country = ANY($2::text[])
+            OR ($5::boolean AND COALESCE(NULLIF(shipping_country, ''), '') = '')
+          )
       ),
       daily_orders AS (
         SELECT
@@ -489,7 +508,10 @@ async function aggregateNoblAirRegionalCombos(startDate, endDate) {
         JOIN shopify_orders_raw so ON so.brand = 'NOBL'
           AND so.has_air
           AND so.has_luggage
-          AND so.shipping_country = ANY($2::text[])
+          AND (
+            so.shipping_country = ANY($2::text[])
+            OR ($5::boolean AND COALESCE(NULLIF(so.shipping_country, ''), '') = '')
+          )
           AND (
             so.order_name = s.order_name
             OR so.order_id = s.graph_order_id
@@ -529,7 +551,10 @@ async function aggregateNoblAirRegionalCombos(startDate, endDate) {
         FROM daily_orders d
         LEFT JOIN shopify_orders_raw so ON so.brand = 'NOBL'
           AND so.date_key = (d.date - INTERVAL '14 days')::date
-          AND so.shipping_country = ANY($2::text[])
+          AND (
+            so.shipping_country = ANY($2::text[])
+            OR ($5::boolean AND COALESCE(NULLIF(so.shipping_country, ''), '') = '')
+          )
         GROUP BY d.date
       )
       SELECT
@@ -592,7 +617,92 @@ async function aggregateNoblAirRegionalCombos(startDate, endDate) {
       LEFT JOIN lag_attach la ON la.date = d.date
       LEFT JOIN new_tiers_pivot np ON np.date = d.date
       LEFT JOIN rebill_tiers_pivot rp ON rp.date = d.date
-    `, [combo.key, combo.codes, startDate, endDate]);
+    `, [combo.key, combo.codes, startDate, endDate, combo.includeBlank]);
+    totalRows += r.rowCount || 0;
+  }
+
+  // Then derive every multi-region combination by summing the base bucket rows.
+  // This avoids re-running the expensive raw Shopify/subscriber joins 57 more times.
+  for (const combo of REGION_COMBOS.filter(c => !REGION_BUCKETS.some(b => b.key === c.key))) {
+    const parts = combo.key.split('_');
+    await pgRun(`
+      DELETE FROM nobl_air_region_daily
+      WHERE region_key = $1 AND date BETWEEN $2::date AND $3::date
+    `, [combo.key, startDate, endDate]);
+
+    const r = await pgRun(`
+      INSERT INTO nobl_air_region_daily (
+        region_key, country_codes, date,
+        total_orders, air_orders, paid_air_orders, zero_air_orders, rebill_orders, same_day_cancels,
+        mature_count, converted_count, cancelled_30d_count,
+        attach_rate, ttp_rate, activation_rate, cancel_rate_30d,
+        tag_gross, tag_discounts, tag_net_sales, tag_refunds,
+        sub_gross, sub_discounts, sub_net_sales, sub_refunds,
+        rebill_revenue, new_sub_revenue,
+        combined_gross, combined_net_sales, combined_net_revenue,
+        new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+        rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159,
+        computed_at
+      )
+      SELECT
+        $1 AS region_key,
+        $2::text[] AS country_codes,
+        date,
+        SUM(total_orders)::int,
+        SUM(air_orders)::int,
+        SUM(paid_air_orders)::int,
+        SUM(zero_air_orders)::int,
+        SUM(rebill_orders)::int,
+        SUM(same_day_cancels)::int,
+        SUM(mature_count)::int,
+        SUM(converted_count)::int,
+        SUM(cancelled_30d_count)::int,
+        CASE WHEN SUM(total_orders) > 0 THEN ROUND(SUM(air_orders)::numeric / SUM(total_orders), 4) ELSE NULL END,
+        CASE WHEN SUM(mature_count) > 0 THEN ROUND(SUM(converted_count)::numeric / SUM(mature_count), 4) ELSE NULL END,
+        CASE WHEN SUM(total_orders) > 0 AND SUM(mature_count) > 0
+          THEN ROUND((SUM(air_orders)::numeric / SUM(total_orders)) * (SUM(converted_count)::numeric / SUM(mature_count)), 4)
+          ELSE NULL
+        END,
+        CASE WHEN SUM(mature_count) > 0 THEN ROUND(SUM(cancelled_30d_count)::numeric / SUM(mature_count), 4) ELSE NULL END,
+        SUM(tag_gross),
+        SUM(tag_discounts),
+        SUM(tag_net_sales),
+        SUM(tag_refunds),
+        SUM(sub_gross),
+        SUM(sub_discounts),
+        SUM(sub_net_sales),
+        SUM(sub_refunds),
+        SUM(rebill_revenue),
+        SUM(new_sub_revenue),
+        SUM(combined_gross),
+        SUM(combined_net_sales),
+        SUM(combined_net_revenue),
+        SUM(new_49)::int,
+        SUM(new_79)::int,
+        SUM(new_89)::int,
+        SUM(new_99)::int,
+        SUM(new_109)::int,
+        SUM(new_119)::int,
+        SUM(new_129)::int,
+        SUM(new_139)::int,
+        SUM(new_149)::int,
+        SUM(new_159)::int,
+        SUM(rebill_49)::int,
+        SUM(rebill_79)::int,
+        SUM(rebill_89)::int,
+        SUM(rebill_99)::int,
+        SUM(rebill_109)::int,
+        SUM(rebill_119)::int,
+        SUM(rebill_129)::int,
+        SUM(rebill_139)::int,
+        SUM(rebill_149)::int,
+        SUM(rebill_159)::int,
+        NOW()
+      FROM nobl_air_region_daily
+      WHERE region_key = ANY($3::text[])
+        AND date BETWEEN $4::date AND $5::date
+      GROUP BY date
+    `, [combo.key, combo.codes, parts, startDate, endDate]);
     totalRows += r.rowCount || 0;
   }
 

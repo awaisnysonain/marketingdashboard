@@ -893,10 +893,14 @@ router.get('/nobl/air-performance', async (req, res) => {
   const forecastDays = Math.max(7, Math.min(parseInt(req.query.forecastDays || '14', 10), 60));
   const regionRaw = String(req.query.region || 'ALL').trim();
   const region = regionRaw.toUpperCase();
+  const regionOrder = ['US', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL'];
   const regionCountries = {
     US: ['US'],
     CA: ['CA'],
     AUS: ['AU'],
+    DUBAI: ['AE'],
+    HK: ['HK'],
+    INTL: [],
   };
 
   try {
@@ -910,12 +914,13 @@ router.get('/nobl/air-performance', async (req, res) => {
       const codes = [];
       for (const p of parts) {
         const cs = regionCountries[p];
-        if (cs) codes.push(...cs);
+        if (cs !== undefined) codes.push(...cs);
       }
+      const validParts = regionOrder.filter(p => parts.includes(p));
       // If nothing matched, treat as ALL (no filter) rather than returning empty data.
-      countryCodes = codes.length ? Array.from(new Set(codes)) : null;
-      if (countryCodes) {
-        const keyParts = ['US', 'CA', 'AUS'].filter(p => parts.includes(p));
+      countryCodes = validParts.length ? Array.from(new Set(codes)) : null;
+      if (validParts.length) {
+        const keyParts = regionOrder.filter(p => parts.includes(p));
         regionKey = keyParts.join('_');
       }
     }

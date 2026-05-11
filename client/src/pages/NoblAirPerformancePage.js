@@ -47,9 +47,12 @@ const STATUS_COLORS = {
 };
 const REGION_OPTIONS = [
   { value: 'ALL', label: 'All Regions' },
-  { value: 'US',  label: 'USA' },
-  { value: 'CA',  label: 'Canada' },
-  { value: 'AUS', label: 'AUS' },
+  { value: 'US',    label: 'US — United States' },
+  { value: 'CA',    label: 'CA — Canada' },
+  { value: 'AUS',   label: 'AUS — Australia' },
+  { value: 'DUBAI', label: 'DUBAI — United Arab Emirates' },
+  { value: 'HK',    label: 'HK — Hong Kong' },
+  { value: 'INTL',  label: 'INTL — International / Unknown' },
 ];
 
 function normalizeRegions(next) {
