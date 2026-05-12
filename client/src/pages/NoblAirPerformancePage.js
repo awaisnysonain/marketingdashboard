@@ -45,6 +45,25 @@ const STATUS_COLORS = {
   expired:   '#64748b',
   unknown:   '#94a3b8',
 };
+
+const KPI_TOOLTIPS = {
+  airOrders: 'Air Orders\nData: SUM air_orders for the selected date range.\nFormula: count of NOBL orders with NOBLAIR + luggage.',
+  attachRate: 'Overall Attach Rate\nData: selected date range.\nFormula: SUM(air_orders) / SUM(total_orders). Total orders exclude rebills.',
+  ttpRate: 'Overall TTP Rate\nData: all mature subscribers as of the selected end date.\nFormula: converted mature subscribers / mature subscribers. Mature = created at least 14 days before end date. Converted = Appstle paid billing after creation OR Shopify rebill after creation.',
+  activationRate: 'Overall Activation\nFormula: Overall Attach Rate x Overall TTP Rate for the selected range.\nDaily rows use attach rate from 14 days prior x that day\'s TTP cohort.',
+  combinedNetRevenue: 'Combined Net Revenue\nData: selected date range from NOBL Air daily aggregate.\nFormula: tag_gross + sub_gross - tag_discounts - sub_discounts - tag_refunds - sub_refunds + Appstle rebill revenue.',
+  rebillRevenue: 'Rebill Revenue\nData: selected date range.\nSource: Appstle lastSuccessfulOrder.orderAmount bucketed by billing date.',
+  activeSubscribers: 'Active Subscribers\nData: all NOBL Air subscribers.\nFormula: count where Appstle status = active.',
+  activeArr: 'Active ARR (est.)\nData: all active NOBL Air subscribers.\nFormula: SUM(contract_amount) for active subscriptions. Label is kept as ARR estimate in the dashboard.',
+  totalOrders: 'Total Orders\nData: selected date range.\nFormula: count of NOBL Shopify orders where is_rebill = false.',
+  paidAirOrders: 'Paid Air Orders\nData: selected date range.\nFormula: count of orders with NOBLAIR + luggage + paid NOBLAIR line.',
+  zeroAirOrders: '$0 Air Orders\nData: selected date range.\nFormula: count of orders with NOBLAIR + luggage + zero-price NOBLAIR line.',
+  matureSubs: 'Mature Subs\nData: all subscribers mature as of selected end date.\nFormula: count of NOBL Air subscribers where UTC created_at date <= end date - 14 days.',
+  convertedMature: 'Converted Mature\nData: mature subscriber cohort as of selected end date.\nFormula: count of mature subscribers with Appstle paid billing after creation OR Shopify rebill after creation.',
+  cancels30d: '30-Day Cancels\nData: mature subscribers as of selected end date.\nFormula: count where cancelled_on <= created_at + 30 days.',
+  cancelRate30d: '30-Day Cancel Rate\nData: mature subscribers as of selected end date.\nFormula: 30-day cancels / mature subscribers.',
+  newSubRevenue: 'New Sub Revenue\nData: selected date range.\nFormula: sub_gross - sub_discounts for new non-rebill subscription orders.',
+};
 const REGION_OPTIONS = [
   { value: 'ALL', label: 'All Regions' },
   { value: 'US',    label: 'US — United States' },
@@ -435,26 +454,26 @@ export default function NoblAirPerformancePage() {
         <>
           {/* ── Top KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Air Orders"            value={fmtNum(kpi.airOrders)}            color="nobl" />
-            <KpiCard label="Overall Attach Rate"   value={fmtPct(kpi.attachRate || 0)}      color="teal" />
-            <KpiCard label="Overall TTP Rate"      value={fmtPct(kpi.ttpRate || 0)}         color="purple" />
-            <KpiCard label="Overall Activation"    value={fmtPct(kpi.activationRate || 0)}  color="green" />
-            <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" />
-            <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" />
-            {!regionScoped && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" />}
-            {!regionScoped && <KpiCard label="Active ARR (est.)" value={fmt$(kpi.activeArr)} color="purple" />}
+            <KpiCard label="Air Orders"            value={fmtNum(kpi.airOrders)}            color="nobl" tooltip={KPI_TOOLTIPS.airOrders} />
+            <KpiCard label="Overall Attach Rate"   value={fmtPct(kpi.attachRate || 0)}      color="teal" tooltip={KPI_TOOLTIPS.attachRate} />
+            <KpiCard label="Overall TTP Rate"      value={fmtPct(kpi.ttpRate || 0)}         color="purple" tooltip={KPI_TOOLTIPS.ttpRate} />
+            <KpiCard label="Overall Activation"    value={fmtPct(kpi.activationRate || 0)}  color="green" tooltip={KPI_TOOLTIPS.activationRate} />
+            <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" tooltip={KPI_TOOLTIPS.combinedNetRevenue} />
+            <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" tooltip={KPI_TOOLTIPS.rebillRevenue} />
+            {!regionScoped && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" tooltip={KPI_TOOLTIPS.activeSubscribers} />}
+            {!regionScoped && <KpiCard label="Active ARR (est.)" value={fmt$(kpi.activeArr)} color="purple" tooltip={KPI_TOOLTIPS.activeArr} />}
           </div>
 
           {/* ── Secondary KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Total Orders"      value={fmtNum(kpi.totalOrders)}      color="text" />
-            <KpiCard label="Paid Air Orders"   value={fmtNum(kpi.paidAirOrders)}    color="nobl" />
-            <KpiCard label="$0 Air Orders"     value={fmtNum(kpi.zeroAirOrders)}    color="warn" />
-            <KpiCard label="Mature Subs"       value={fmtNum(kpi.matureSubs)}       color="purple" />
-            <KpiCard label="Converted Mature"  value={fmtNum(kpi.convertedMatureSubs)} color="green" />
-            <KpiCard label="30-Day Cancels"    value={fmtNum(kpi.cancelled30d)}     color="red" />
-            <KpiCard label="30-Day Cancel Rate" value={fmtPct(kpi.cancelRate30d || 0)} color="red" />
-            <KpiCard label="New Sub Revenue"   value={fmt$(kpi.newSubRevenue)}      color="blue" />
+            <KpiCard label="Total Orders"      value={fmtNum(kpi.totalOrders)}      color="text" tooltip={KPI_TOOLTIPS.totalOrders} />
+            <KpiCard label="Paid Air Orders"   value={fmtNum(kpi.paidAirOrders)}    color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
+            <KpiCard label="$0 Air Orders"     value={fmtNum(kpi.zeroAirOrders)}    color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
+            <KpiCard label="Mature Subs"       value={fmtNum(kpi.matureSubs)}       color="purple" tooltip={KPI_TOOLTIPS.matureSubs} />
+            <KpiCard label="Converted Mature"  value={fmtNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.convertedMature} />
+            <KpiCard label="30-Day Cancels"    value={fmtNum(kpi.cancelled30d)}     color="red" tooltip={KPI_TOOLTIPS.cancels30d} />
+            <KpiCard label="30-Day Cancel Rate" value={fmtPct(kpi.cancelRate30d || 0)} color="red" tooltip={KPI_TOOLTIPS.cancelRate30d} />
+            <KpiCard label="New Sub Revenue"   value={fmt$(kpi.newSubRevenue)}      color="blue" tooltip={KPI_TOOLTIPS.newSubRevenue} />
           </div>
 
           {/* ── Row 1: revenue trend + attach/TTP trend ── */}

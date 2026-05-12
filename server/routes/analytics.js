@@ -106,9 +106,12 @@ async function loadNoblAirOverallTtp(end, countryCodes = null) {
         OR CONCAT('gid://shopify/Order/', o.order_id) = s.graph_order_id
       )` : '';
   const r = await pgQuery(`
-    SELECT
-      COUNT(DISTINCT s.appstle_id)::int AS mature,
-      COUNT(DISTINCT s.appstle_id) FILTER (WHERE
+    WITH mature_subscribers AS (
+      SELECT DISTINCT
+        s.appstle_id,
+        s.customer_id,
+        s.created_at,
+        s.cancelled_on,
         COALESCE(
           s.last_billing_date,
           (CASE
@@ -118,15 +121,30 @@ async function loadNoblAirOverallTtp(end, countryCodes = null) {
               THEN ((s.raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
             ELSE NULL
           END)
-        ) > s.created_at
-      )::int AS converted,
-      COUNT(DISTINCT s.appstle_id) FILTER (WHERE
+        ) AS paid_billing_date
+      FROM nobl_air_subscribers s
+      ${regionJoin}
+      WHERE (s.created_at AT TIME ZONE 'UTC')::date <= $1::date - INTERVAL '14 days'
+    ), subscriber_rebills AS (
+      SELECT DISTINCT s.appstle_id
+      FROM mature_subscribers s
+      JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+        AND o.is_rebill
+        AND (
+          s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+          OR s.customer_id = o.customer_id
+        )
+      WHERE o.created_at > s.created_at
+    )
+    SELECT
+      COUNT(*)::int AS mature,
+      COUNT(*) FILTER (WHERE s.paid_billing_date > s.created_at OR rb.appstle_id IS NOT NULL)::int AS converted,
+      COUNT(*) FILTER (WHERE
         s.cancelled_on IS NOT NULL
         AND s.cancelled_on <= s.created_at + INTERVAL '30 days'
       )::int AS cancelled_30d
-    FROM nobl_air_subscribers s
-    ${regionJoin}
-    WHERE DATE(s.created_at) <= $1::date - INTERVAL '14 days'
+    FROM mature_subscribers s
+    LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id
   `, params);
   const row = r.rows[0] || {};
   const mature = Number(row.mature || 0);
@@ -143,11 +161,10 @@ async function loadNoblAirOverallTtp(end, countryCodes = null) {
 async function loadNoblAirRegionalDaily(start, end, countryCodes) {
   const r = await pgQuery(`
     WITH o AS (
-      -- date_key is stored as UTC YYYY-MM-DD per schema doc; prefer it for sargable filters.
-      SELECT *, date_key AS report_date
+      SELECT *, (created_at AT TIME ZONE 'UTC')::date AS report_date
       FROM shopify_orders_raw
       WHERE brand = 'NOBL'
-        AND date_key BETWEEN $1::date AND $2::date
+        AND (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
         AND shipping_country = ANY($3::text[])
     ),
     daily_orders AS (
@@ -223,10 +240,11 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
       GROUP BY date
     ),
     regional_subscribers AS (
-      SELECT DISTINCT
-        s.appstle_id,
-        s.created_at,
-        s.cancelled_on,
+        SELECT DISTINCT
+          s.appstle_id,
+          s.customer_id,
+          s.created_at,
+          s.cancelled_on,
         COALESCE(
           s.last_billing_date,
           (CASE
@@ -236,8 +254,8 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
               THEN ((s.raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
             ELSE NULL
           END)
-        ) AS paid_billing_date,
-        s.is_same_day_cancel
+          ) AS paid_billing_date,
+          s.is_same_day_cancel
       FROM nobl_air_subscribers s
       JOIN shopify_orders_raw so ON so.brand = 'NOBL'
         AND so.has_air
@@ -249,23 +267,35 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
           OR so.order_id = CONCAT('gid://shopify/Order/', s.graph_order_id)
           OR CONCAT('gid://shopify/Order/', so.order_id) = s.graph_order_id
         )
+      WHERE (s.created_at AT TIME ZONE 'UTC')::date BETWEEN ($1::date - INTERVAL '14 days')::date AND $2::date
+    ), regional_rebills AS (
+      SELECT DISTINCT s.appstle_id
+      FROM regional_subscribers s
+      JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+        AND o.is_rebill
+        AND (
+          s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+          OR s.customer_id = o.customer_id
+        )
+      WHERE o.created_at > s.created_at
     ),
     same_day_cancel_cohorts AS (
       SELECT
-        DATE(created_at) AS date,
+        (created_at AT TIME ZONE 'UTC')::date AS date,
         COUNT(*) FILTER (WHERE is_same_day_cancel)::int AS same_day_cancels
       FROM regional_subscribers
-      WHERE DATE(created_at) BETWEEN $1::date AND $2::date
-      GROUP BY DATE(created_at)
+      WHERE (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+      GROUP BY (created_at AT TIME ZONE 'UTC')::date
     ),
     ttp_cohorts AS (
       SELECT
-        DATE(created_at) + 14 AS date,
+        (created_at AT TIME ZONE 'UTC')::date + 14 AS date,
         COUNT(*)::int AS mature_count,
-        COUNT(*) FILTER (WHERE paid_billing_date > created_at)::int AS converted_count
+        COUNT(*) FILTER (WHERE paid_billing_date > created_at OR rb.appstle_id IS NOT NULL)::int AS converted_count
       FROM regional_subscribers
-      WHERE DATE(created_at) + 14 BETWEEN $1::date AND $2::date
-      GROUP BY DATE(created_at) + 14
+      LEFT JOIN regional_rebills rb USING (appstle_id)
+      WHERE (created_at AT TIME ZONE 'UTC')::date + 14 BETWEEN $1::date AND $2::date
+      GROUP BY (created_at AT TIME ZONE 'UTC')::date + 14
     ),
     lag_attach AS (
       SELECT
@@ -281,7 +311,7 @@ async function loadNoblAirRegionalDaily(start, end, countryCodes) {
         END AS attach_rate_14d_prior
       FROM daily_orders d
       LEFT JOIN shopify_orders_raw so ON so.brand = 'NOBL'
-        AND so.date_key = (d.date - INTERVAL '14 days')::date
+        AND (so.created_at AT TIME ZONE 'UTC')::date = (d.date - INTERVAL '14 days')::date
         AND so.shipping_country = ANY($3::text[])
       GROUP BY d.date
     )
@@ -731,7 +761,11 @@ router.get('/nobl/subscriptions', async (req, res) => {
       pgQuery(
         `WITH subscribers AS (
            SELECT
-             *,
+             appstle_id,
+             customer_id,
+             status,
+             contract_amount,
+             created_at,
              COALESCE(
                last_billing_date,
                (CASE
@@ -743,6 +777,16 @@ router.get('/nobl/subscriptions', async (req, res) => {
                END)
              ) AS paid_billing_date
            FROM nobl_air_subscribers
+         ), subscriber_rebills AS (
+           SELECT DISTINCT s.appstle_id
+           FROM subscribers s
+           JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+             AND o.is_rebill
+             AND (
+               s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+               OR s.customer_id = o.customer_id
+             )
+           WHERE o.created_at > s.created_at
          )
          SELECT
            COUNT(*) AS total,
@@ -750,9 +794,10 @@ router.get('/nobl/subscriptions', async (req, res) => {
             COUNT(*) FILTER (WHERE LOWER(status) = 'cancelled') AS cancelled,
             COUNT(*) FILTER (WHERE LOWER(status) = 'paused') AS paused,
             COUNT(*) FILTER (WHERE LOWER(status) = 'trialing') AS trialing,
-           COUNT(*) FILTER (WHERE paid_billing_date > created_at) AS converted,
+           COUNT(*) FILTER (WHERE paid_billing_date > created_at OR rb.appstle_id IS NOT NULL) AS converted,
            AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL AND contract_amount > 0) AS avg_order_amount
-         FROM subscribers`,
+         FROM subscribers s
+         LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id`,
         []
       ),
     ]);
@@ -1320,6 +1365,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
         SELECT
           a.*,
           s.appstle_id,
+          s.customer_id,
           COALESCE(
             s.last_billing_date,
             (CASE
@@ -1333,15 +1379,15 @@ router.get('/nobl/air-attribution', async (req, res) => {
           s.created_at AS subscriber_created_at
         FROM tw_air_order_attribution a
         JOIN LATERAL (
-          SELECT appstle_id, created_at, last_billing_date, raw_json
+          SELECT appstle_id, customer_id, created_at, last_billing_date, raw_json
           FROM nobl_air_subscribers
           WHERE order_name = a.order_name
           UNION
-          SELECT appstle_id, created_at, last_billing_date, raw_json
+          SELECT appstle_id, customer_id, created_at, last_billing_date, raw_json
           FROM nobl_air_subscribers
           WHERE graph_order_id = CONCAT('gid://shopify/Order/', a.order_id)
           UNION
-          SELECT appstle_id, created_at, last_billing_date, raw_json
+          SELECT appstle_id, customer_id, created_at, last_billing_date, raw_json
           FROM nobl_air_subscribers
           WHERE graph_order_id = a.order_id
         ) s ON true
@@ -1350,7 +1396,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
           AND a.model = 'Triple Attribution'
           AND a.attribution_window = '1_day'
           AND COALESCE(a.ad_id, '') <> ''
-          AND DATE(s.created_at) + 14 BETWEEN $1::date AND $2::date
+          AND (s.created_at AT TIME ZONE 'UTC')::date + 14 BETWEEN $1::date AND $2::date
       ), air AS (
         SELECT
           ${groupCols},
@@ -1363,10 +1409,30 @@ router.get('/nobl/air-attribution', async (req, res) => {
         SELECT
           ${groupCols},
           SUM(linear_weight)::numeric(14,2) AS ttp_mature_air_orders,
-          SUM(linear_weight) FILTER (WHERE paid_billing_date > subscriber_created_at)::numeric(14,2) AS ttp_paid_air_orders,
+          SUM(linear_weight) FILTER (WHERE paid_billing_date > subscriber_created_at OR EXISTS (
+            SELECT 1
+            FROM shopify_orders_raw o
+            WHERE o.brand = 'NOBL'
+              AND o.is_rebill
+              AND (
+                ca.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+                OR ca.customer_id = o.customer_id
+              )
+              AND o.created_at > ca.subscriber_created_at
+          ))::numeric(14,2) AS ttp_paid_air_orders,
           COUNT(DISTINCT appstle_id)::int AS ttp_mature_subscribers,
-          COUNT(DISTINCT appstle_id) FILTER (WHERE paid_billing_date > subscriber_created_at)::int AS ttp_paid_subscribers
-        FROM cohort_attr
+          COUNT(DISTINCT appstle_id) FILTER (WHERE paid_billing_date > subscriber_created_at OR EXISTS (
+            SELECT 1
+            FROM shopify_orders_raw o
+            WHERE o.brand = 'NOBL'
+              AND o.is_rebill
+              AND (
+                ca.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+                OR ca.customer_id = o.customer_id
+              )
+              AND o.created_at > ca.subscriber_created_at
+          ))::int AS ttp_paid_subscribers
+        FROM cohort_attr ca
         GROUP BY ${groupCols}
       ),
       total AS (
@@ -1461,7 +1527,12 @@ router.get('/nobl/air-subscribers', async (req, res) => {
     const tierRes = await pgQuery(`
       WITH subscribers AS (
         SELECT
-          *,
+          appstle_id,
+          customer_id,
+          status,
+          contract_amount,
+          created_at,
+          is_same_day_cancel,
           COALESCE(
             last_billing_date,
             (CASE
@@ -1473,6 +1544,16 @@ router.get('/nobl/air-subscribers', async (req, res) => {
             END)
           ) AS paid_billing_date
         FROM nobl_air_subscribers
+      ), subscriber_rebills AS (
+        SELECT DISTINCT s.appstle_id
+        FROM subscribers s
+        JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+          AND o.is_rebill
+          AND (
+            s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+            OR s.customer_id = o.customer_id
+          )
+        WHERE o.created_at > s.created_at
       )
       SELECT
         ROUND(contract_amount)::int AS tier,
@@ -1480,9 +1561,10 @@ router.get('/nobl/air-subscribers', async (req, res) => {
         COUNT(*) FILTER (WHERE status = 'active')::int    AS active,
         COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
         COUNT(*) FILTER (WHERE status = 'paused')::int    AS paused,
-        COUNT(*) FILTER (WHERE DATE(created_at) <= ($1::date - INTERVAL '14 days')::date)::int AS mature,
-        COUNT(*) FILTER (WHERE DATE(created_at) <= ($1::date - INTERVAL '14 days')::date AND paid_billing_date > created_at)::int AS converted
-      FROM subscribers
+        COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'UTC')::date <= ($1::date - INTERVAL '14 days')::date)::int AS mature,
+        COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'UTC')::date <= ($1::date - INTERVAL '14 days')::date AND (paid_billing_date > created_at OR rb.appstle_id IS NOT NULL))::int AS converted
+      FROM subscribers s
+      LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id
       WHERE ROUND(contract_amount) IN (49, 79, 89, 99, 109, 119, 129, 139, 149, 159)
       GROUP BY tier ORDER BY tier`, [end]);
 
@@ -1491,7 +1573,10 @@ router.get('/nobl/air-subscribers', async (req, res) => {
     const ttpRes = await pgQuery(`
       WITH subscribers AS (
         SELECT
-          *,
+          appstle_id,
+          customer_id,
+          created_at,
+          is_same_day_cancel,
           COALESCE(
             last_billing_date,
             (CASE
@@ -1503,24 +1588,38 @@ router.get('/nobl/air-subscribers', async (req, res) => {
             END)
           ) AS paid_billing_date
         FROM nobl_air_subscribers
+      ), subscriber_rebills AS (
+        SELECT DISTINCT s.appstle_id
+        FROM subscribers s
+        JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+          AND o.is_rebill
+          AND (
+            s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+            OR s.customer_id = o.customer_id
+          )
+        WHERE o.created_at > s.created_at
       )
       SELECT
         (SELECT COUNT(*)::int
          FROM subscribers
-         WHERE DATE(created_at) BETWEEN $1::date AND $2::date)         AS total_in_range,
-        COUNT(*) FILTER (WHERE DATE(created_at) <= ($2::date - INTERVAL '14 days')::date)::int AS mature,
-        COUNT(*) FILTER (WHERE DATE(created_at) <= ($2::date - INTERVAL '14 days')::date AND paid_billing_date > created_at)::int AS converted,
+         WHERE (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date)         AS total_in_range,
+        COUNT(*) FILTER (WHERE (s.created_at AT TIME ZONE 'UTC')::date <= ($2::date - INTERVAL '14 days')::date)::int AS mature,
+        COUNT(*) FILTER (WHERE (s.created_at AT TIME ZONE 'UTC')::date <= ($2::date - INTERVAL '14 days')::date AND (s.paid_billing_date > s.created_at OR rb.appstle_id IS NOT NULL))::int AS converted,
         (SELECT COUNT(*)::int
          FROM subscribers
-         WHERE DATE(created_at) BETWEEN $1::date AND $2::date
+         WHERE (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
             AND is_same_day_cancel)                                     AS same_day_cancels
-      FROM subscribers`, [start, end]);
+      FROM subscribers s
+      LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id`, [start, end]);
 
     // New subs per day (created_at)
     const dailyRes = await pgQuery(`
       WITH subscribers AS (
         SELECT
-          *,
+          appstle_id,
+          customer_id,
+          created_at,
+          is_same_day_cancel,
           COALESCE(
             last_billing_date,
             (CASE
@@ -1532,15 +1631,26 @@ router.get('/nobl/air-subscribers', async (req, res) => {
             END)
           ) AS paid_billing_date
         FROM nobl_air_subscribers
+      ), subscriber_rebills AS (
+        SELECT DISTINCT s.appstle_id
+        FROM subscribers s
+        JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+          AND o.is_rebill
+          AND (
+            s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
+            OR s.customer_id = o.customer_id
+          )
+        WHERE o.created_at > s.created_at
       )
       SELECT
-        TO_CHAR(DATE(created_at), 'YYYY-MM-DD') AS date,
+        TO_CHAR((s.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
         COUNT(*)::int                                                  AS new_subs,
-        COUNT(*) FILTER (WHERE DATE(created_at) <= ($2::date - INTERVAL '14 days')::date AND paid_billing_date > created_at)::int AS converted,
+        COUNT(*) FILTER (WHERE (s.created_at AT TIME ZONE 'UTC')::date <= ($2::date - INTERVAL '14 days')::date AND (s.paid_billing_date > s.created_at OR rb.appstle_id IS NOT NULL))::int AS converted,
         COUNT(*) FILTER (WHERE is_same_day_cancel)::int                AS same_day_cancels
-      FROM subscribers
-      WHERE DATE(created_at) BETWEEN $1::date AND $2::date
-      GROUP BY DATE(created_at) ORDER BY DATE(created_at)`, [start, end]);
+      FROM subscribers s
+      LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id
+      WHERE (s.created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
+      GROUP BY (s.created_at AT TIME ZONE 'UTC')::date ORDER BY (s.created_at AT TIME ZONE 'UTC')::date`, [start, end]);
 
     // Estimated MRR — sum of contract_amount for active subs (assumes monthly billing)
     const mrrRes = await pgQuery(`
