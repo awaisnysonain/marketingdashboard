@@ -108,12 +108,21 @@ async function ensureNoblAirRegionDailyTable() {
   await pgRun(`CREATE INDEX IF NOT EXISTS idx_nobl_air_region_daily_date ON nobl_air_region_daily (date DESC)`);
 }
 
+async function ensureNoblAirDailyCohortColumns() {
+  await pgRun(`ALTER TABLE nobl_air_daily ADD COLUMN IF NOT EXISTS mature_count INT DEFAULT 0`);
+  await pgRun(`ALTER TABLE nobl_air_daily ADD COLUMN IF NOT EXISTS converted_count INT DEFAULT 0`);
+  await pgRun(`ALTER TABLE nobl_air_daily ADD COLUMN IF NOT EXISTS cancelled_30d_count INT DEFAULT 0`);
+  await pgRun(`ALTER TABLE nobl_air_daily ADD COLUMN IF NOT EXISTS cancel_rate_30d NUMERIC(8,4)`);
+}
+
 /**
  * Aggregate NOBL Air metrics for a date range and upsert nobl_air_daily.
  * @param {string} startDate YYYY-MM-DD inclusive
  * @param {string} endDate   YYYY-MM-DD inclusive
  */
 async function aggregateNoblAir(startDate, endDate) {
+  await ensureNoblAirDailyCohortColumns();
+
   // The big "build everything for this range" CTE.
   // We compute per-date metrics, then upsert each row.
   const sql = `
@@ -270,7 +279,10 @@ async function aggregateNoblAir(startDate, endDate) {
         COUNT(*)::int AS mature_count,
         COUNT(*) FILTER (WHERE
           s.paid_billing_date > s.created_at OR rb.appstle_id IS NOT NULL
-        )::int AS converted_count
+        )::int AS converted_count,
+        COUNT(*) FILTER (WHERE
+          s.cancelled_on IS NOT NULL AND s.cancelled_on <= s.created_at + INTERVAL '30 days'
+        )::int AS cancelled_30d_count
       FROM subs_base s
       LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id
       WHERE (s.created_at AT TIME ZONE 'UTC')::date + 14 BETWEEN $1::date AND $2::date
@@ -314,6 +326,14 @@ async function aggregateNoblAir(startDate, endDate) {
           THEN ROUND(t.converted_count::numeric / t.mature_count, 4)
         ELSE NULL
       END AS ttp_rate,
+      COALESCE(t.mature_count, 0) AS mature_count,
+      COALESCE(t.converted_count, 0) AS converted_count,
+      COALESCE(t.cancelled_30d_count, 0) AS cancelled_30d_count,
+      CASE
+        WHEN COALESCE(t.mature_count, 0) > 0
+          THEN ROUND(t.cancelled_30d_count::numeric / t.mature_count, 4)
+        ELSE NULL
+      END AS cancel_rate_30d,
       la.attach_rate_14d_prior,
       -- New tier columns
       COALESCE(np.new_49, 0)  AS new_49,
@@ -356,6 +376,7 @@ async function aggregateNoblAir(startDate, endDate) {
         date,
         total_orders, air_orders, paid_air_orders, zero_air_orders, rebill_orders, same_day_cancels,
         attach_rate, ttp_rate, activation_rate,
+        mature_count, converted_count, cancelled_30d_count, cancel_rate_30d,
         tag_gross, tag_discounts, tag_net_sales, tag_refunds,
         sub_gross, sub_discounts, sub_net_sales, sub_refunds,
         rebill_revenue, new_sub_revenue,
@@ -369,10 +390,11 @@ async function aggregateNoblAir(startDate, endDate) {
         $8,$9,$10,
         $11,$12,$13,$14,
         $15,$16,$17,$18,
-        $19,$20,
-        $21,$22,$23,
-        $24,$25,$26,$27,$28,$29,$30,$31,$32,$33,
-        $34,$35,$36,$37,$38,$39,$40,$41,$42,$43,
+        $19,$20,$21,$22,
+        $23,$24,
+        $25,$26,$27,
+        $28,$29,$30,$31,$32,$33,$34,$35,$36,$37,
+        $38,$39,$40,$41,$42,$43,$44,$45,$46,$47,
         NOW()
       )
       ON CONFLICT (date) DO UPDATE SET
@@ -380,6 +402,8 @@ async function aggregateNoblAir(startDate, endDate) {
         paid_air_orders=EXCLUDED.paid_air_orders, zero_air_orders=EXCLUDED.zero_air_orders,
         rebill_orders=EXCLUDED.rebill_orders, same_day_cancels=EXCLUDED.same_day_cancels,
         attach_rate=EXCLUDED.attach_rate, ttp_rate=EXCLUDED.ttp_rate, activation_rate=EXCLUDED.activation_rate,
+        mature_count=EXCLUDED.mature_count, converted_count=EXCLUDED.converted_count,
+        cancelled_30d_count=EXCLUDED.cancelled_30d_count, cancel_rate_30d=EXCLUDED.cancel_rate_30d,
         tag_gross=EXCLUDED.tag_gross, tag_discounts=EXCLUDED.tag_discounts,
         tag_net_sales=EXCLUDED.tag_net_sales, tag_refunds=EXCLUDED.tag_refunds,
         sub_gross=EXCLUDED.sub_gross, sub_discounts=EXCLUDED.sub_discounts,
@@ -399,6 +423,7 @@ async function aggregateNoblAir(startDate, endDate) {
       row.date,
       row.total_orders, row.air_orders, row.paid_air_orders, row.zero_air_orders, row.rebill_orders, row.same_day_cancels,
       row.attach_rate, row.ttp_rate, activation,
+      row.mature_count, row.converted_count, row.cancelled_30d_count, row.cancel_rate_30d,
       row.tag_gross, row.tag_discounts, row.tag_net_sales, row.tag_refunds,
       row.sub_gross, row.sub_discounts, row.sub_net_sales, row.sub_refunds,
       row.rebill_revenue, row.new_sub_revenue,

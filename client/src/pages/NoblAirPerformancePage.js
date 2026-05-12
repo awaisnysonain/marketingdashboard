@@ -342,13 +342,16 @@ export default function NoblAirPerformancePage() {
       const attrPromise = regionScoped
         ? Promise.resolve({ rows: [], totals: {}, error: null })
         : getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message }));
-      const [perf, subs] = await Promise.all([
-        getNoblAirPerformance(range.start, range.end, 14, 0, regionParam),
-        regionScoped ? Promise.resolve(null) : getNoblAirSubscribers(range.start, range.end),
-      ]);
+      const subsPromise = regionScoped
+        ? Promise.resolve(null)
+        : getNoblAirSubscribers(range.start, range.end).catch(() => null);
+      const perf = await getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
       setData({ rows: perf?.rows || [], totals: perf?.totals || {}, ttpCohort: perf?.ttp_cohort || {} });
-      setSubData(subs || null);
+      setSubData(null);
       setLoading(false);
+
+      const subs = await subsPromise;
+      setSubData(subs || null);
 
       const attr = await attrPromise;
       setAirAttr(attr || { rows: [], totals: {}, error: null });

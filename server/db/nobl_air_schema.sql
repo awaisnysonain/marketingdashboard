@@ -101,6 +101,10 @@ CREATE TABLE IF NOT EXISTS nobl_air_daily (
   attach_rate           NUMERIC(8,4),                 -- air_orders / total_orders
   ttp_rate              NUMERIC(8,4),                 -- mature converted / mature
   activation_rate       NUMERIC(8,4),                 -- attach * ttp
+  mature_count          INT DEFAULT 0,
+  converted_count       INT DEFAULT 0,
+  cancelled_30d_count   INT DEFAULT 0,
+  cancel_rate_30d       NUMERIC(8,4),
   -- Revenue per the doc (all amounts in USD)
   tag_gross             NUMERIC(14,2) DEFAULT 0,
   tag_discounts         NUMERIC(14,2) DEFAULT 0,

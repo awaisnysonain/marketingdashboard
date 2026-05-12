@@ -93,6 +93,28 @@ function fmtRows(rows) {
 }
 
 async function loadNoblAirOverallTtp(end, countryCodes = null) {
+  if (!countryCodes) {
+    const r = await pgQuery(`
+      SELECT
+        COALESCE(SUM(mature_count), 0)::int AS mature,
+        COALESCE(SUM(converted_count), 0)::int AS converted,
+        COALESCE(SUM(cancelled_30d_count), 0)::int AS cancelled_30d
+      FROM nobl_air_daily
+      WHERE date <= $1::date
+    `, [end]);
+    const row = r.rows[0] || {};
+    const mature = Number(row.mature || 0);
+    const converted = Number(row.converted || 0);
+    const cancelled30d = Number(row.cancelled_30d || 0);
+    return {
+      mature,
+      converted,
+      cancelled_30d: cancelled30d,
+      ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
+      cancel_rate_30d: mature > 0 ? Number((cancelled30d / mature).toFixed(4)) : null,
+    };
+  }
+
   const params = countryCodes ? [end, countryCodes] : [end];
   const regionJoin = countryCodes ? `
     JOIN shopify_orders_raw o ON o.brand = 'NOBL'
