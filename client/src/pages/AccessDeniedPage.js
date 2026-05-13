@@ -1,6 +1,6 @@
 import React from 'react';
 
-const ERP_URL = 'https://nysonianerp.com';
+const ERP_URL = 'https://erp.nysonik.com';
 
 export default function AccessDeniedPage({ reason }) {
   // reason: 'no-token' | 'invalid' | 'expired' | 'network'

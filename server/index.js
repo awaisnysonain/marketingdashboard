@@ -500,10 +500,22 @@ async function initPostgresTables() {
 
 // ── Middleware ──────────────────────────────────────────────────
 app.use(compression());
-app.use(helmet({ contentSecurityPolicy: false }));
+// Allow the ERP (and self) to iframe us; disable the default X-Frame-Options
+// (which is SAMEORIGIN) and instead set CSP frame-ancestors via a small
+// middleware so we don't fight helmet's CSP default-src requirement.
+const ERP_FRAME_ANCESTOR = process.env.ERP_FRAME_ANCESTOR || 'https://erp.nysonik.com';
+app.use(helmet({ contentSecurityPolicy: false, frameguard: false }));
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', `frame-ancestors 'self' ${ERP_FRAME_ANCESTOR}`);
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use(cors({ origin: true, credentials: true }));
+// In production we run inside the ERP iframe (cross-site), so the session
+// cookie must be SameSite=None + Secure. In dev (NODE_ENV !== 'production')
+// we keep Lax so plain http://localhost works.
+const isProd = process.env.NODE_ENV === 'production';
 app.use(session({
   store: new PgSession({ pool: pgPool, tableName: 'session', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'dev-secret',
@@ -511,8 +523,8 @@ app.use(session({
   cookie: {
     maxAge: 30*24*60*60*1000,
     httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
+    sameSite: isProd ? 'none' : 'lax',
+    secure:   isProd, // SameSite=None requires Secure
   }
 }));
 
@@ -604,7 +616,7 @@ app.get('/auth/app-status', async (req, res) => {
 // the ERP iframe with ?_erp_token=...&theme=light|dark. We POST the token
 // to the ERP verify endpoint server-side, then mint a session cookie that
 // lives until the ERP-issued expires_at.
-const ERP_VERIFY_URL = process.env.ERP_VERIFY_URL || 'https://nysonianerp.com/api/dashboard-token-verify.php';
+const ERP_VERIFY_URL = process.env.ERP_VERIFY_URL || 'https://erp.nysonik.com/api/dashboard-token-verify.php';
 
 function normalizeTheme(t) {
   const s = String(t || '').toLowerCase().trim();
