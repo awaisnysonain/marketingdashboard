@@ -22,6 +22,16 @@ export const appStatus  = () => fetch(`${B}/auth/app-status`).then(r=>r.json());
 export const appLogin   = (email,password) => fetch(`${B}/auth/app-login`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})}).then(r=>r.json());
 export const appSignup  = (email,password,name) => fetch(`${B}/auth/app-signup`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password,name})}).then(r=>r.json());
 export const appLogout  = () => fetch(`${B}/auth/app-logout`,{method:'POST'}).then(r=>r.json());
+export const verifyErpToken = (token, theme) => fetch(`${B}/auth/erp-verify`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  credentials: 'include',
+  body: JSON.stringify({ token, theme }),
+}).then(async r => {
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || `ERP verify failed (${r.status})`);
+  return data;
+});
 
 export const getStatus = () => fetch(`${B}/auth/status`).then(r=>r.json());
 export const getSummary = () => fetch(`${B}/api/summary`).then(r=>{ if(!r.ok)throw new Error(r.status); return r.json(); });

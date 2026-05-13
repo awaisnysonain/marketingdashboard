@@ -3,11 +3,11 @@ import {
   BrowserRouter, Routes, Route, Navigate,
   useLocation, useNavigate, useParams, Outlet, useOutletContext,
 } from 'react-router-dom';
-import { appStatus, appLogout, getSyncStatus } from './utils/api';
+import { appStatus, verifyErpToken, getSyncStatus } from './utils/api';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
 import AiAssistant from './components/AiAssistant';
-import LoginPage from './pages/LoginPage';
+import AccessDeniedPage from './pages/AccessDeniedPage';
 
 import OverviewPage      from './pages/OverviewPage';
 import ChannelsPage      from './pages/ChannelsPage';
@@ -21,8 +21,23 @@ import StoreFLOPage      from './pages/StoreFLOPage';
 import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
 import MetaAdsPage       from './pages/MetaAdsPage';
 
+function normalizeTheme(t) {
+  return String(t || '').toLowerCase() === 'light' ? 'light' : 'dark';
+}
 function getInitialTheme() {
-  try { return localStorage.getItem('nobl-theme') || 'dark'; } catch { return 'dark'; }
+  // Reads from URL ?theme=... first (ERP iframe launch), then localStorage, then default 'dark'.
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const fromUrl = p.get('theme');
+    if (fromUrl) return normalizeTheme(fromUrl);
+  } catch {}
+  try { return normalizeTheme(localStorage.getItem('nobl-theme') || 'dark'); } catch { return 'dark'; }
+}
+function applyTheme(theme) {
+  const t = normalizeTheme(theme);
+  try { document.documentElement.setAttribute('data-theme', t); } catch {}
+  try { localStorage.setItem('nobl-theme', t); } catch {}
+  return t;
 }
 function getSidebarState() {
   try { return localStorage.getItem('nobl-sidebar-collapsed') === 'true'; } catch { return false; }
@@ -72,24 +87,83 @@ export default function App() {
 
 function AppRoot() {
   const [appUser, setAppUser] = useState(undefined);
+  const [denyReason, setDenyReason] = useState(null); // 'no-token' | 'invalid' | 'expired' | 'network'
 
+  // Boot: apply theme from URL hint (if any), then run ERP verify or fall back to session.
   useEffect(() => {
-    appStatus().then(s => setAppUser(s.authenticated ? s.user : null)).catch(() => setAppUser(null));
+    const initial = getInitialTheme();
+    applyTheme(initial);
+
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('_erp_token');
+    const themeFromUrl = params.get('theme');
+
+    // Strip these params from the URL once read so they don't linger in history/share.
+    function scrubParams() {
+      try {
+        params.delete('_erp_token');
+        params.delete('theme');
+        const qs = params.toString();
+        const url = window.location.pathname + (qs ? '?' + qs : '') + window.location.hash;
+        window.history.replaceState({}, document.title, url);
+      } catch {}
+    }
+
+    async function boot() {
+      // 1) ERP token in URL → consume it to mint a session
+      if (token) {
+        try {
+          const r = await verifyErpToken(token, themeFromUrl || initial);
+          scrubParams();
+          if (r?.ok && r.user) {
+            applyTheme(r.user.theme || initial);
+            setAppUser(r.user);
+            return;
+          }
+          setDenyReason('invalid');
+          setAppUser(null);
+          return;
+        } catch (e) {
+          scrubParams();
+          // Distinguish "token rejected" from "couldn't reach upstream"
+          const msg = String(e?.message || '');
+          setDenyReason(/network|failed|fetch/i.test(msg) && !/expired|invalid/i.test(msg) ? 'network' : 'invalid');
+          setAppUser(null);
+          return;
+        }
+      }
+
+      // 2) No token → look for an existing ERP session
+      try {
+        const s = await appStatus();
+        if (s?.authenticated && s.user) {
+          if (s.user.theme) applyTheme(s.user.theme);
+          setAppUser(s.user);
+          return;
+        }
+        setDenyReason(s?.expired ? 'expired' : 'no-token');
+        setAppUser(null);
+      } catch {
+        setDenyReason('network');
+        setAppUser(null);
+      }
+    }
+
+    boot();
   }, []);
 
   if (appUser === undefined) return <Spinner />;
   if (!appUser) {
     return (
       <Routes>
-        <Route path="/login" element={<LoginPage onLogin={setAppUser} />} />
-        <Route path="*" element={<LoginPage onLogin={setAppUser} />} />
+        <Route path="*" element={<AccessDeniedPage reason={denyReason || 'no-token'} />} />
       </Routes>
     );
   }
 
   return (
     <Routes>
-      <Route element={<Layout appUser={appUser} onLogout={() => setAppUser(null)} />}>
+      <Route element={<Layout appUser={appUser} />}>
         <Route path="/" element={<Navigate to="/overview" replace />} />
         <Route path="/login" element={<Navigate to="/overview" replace />} />
         <Route path="/overview"             element={<PageHost Comp={OverviewPage} />} />
@@ -111,11 +185,10 @@ function AppRoot() {
 }
 
 /* ── Layout: sidebar + topbar + outlet ────────────────────────────── */
-function Layout({ appUser, onLogout }) {
+function Layout({ appUser }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [toast, setToast]                 = useState(null);
-  const [theme, setTheme]                 = useState(getInitialTheme);
   const [refreshing, setRefreshing]       = useState(false);
   const [syncStatus, setSyncStatus]       = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(getSidebarState);
@@ -123,10 +196,10 @@ function Layout({ appUser, onLogout }) {
     try { return JSON.parse(localStorage.getItem('nobl-dynamic-tabs') || '[]'); } catch { return []; }
   });
 
+  // Theme is driven by the ERP — react to user.theme changes (re-launch with a different theme).
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    try { localStorage.setItem('nobl-theme', theme); } catch {}
-  }, [theme]);
+    if (appUser?.theme) applyTheme(appUser.theme);
+  }, [appUser?.theme]);
 
   useEffect(() => {
     try { localStorage.setItem('nobl-sidebar-collapsed', sidebarCollapsed); } catch {}
@@ -156,12 +229,6 @@ function Layout({ appUser, onLogout }) {
     const id = setInterval(fetchSync, 60000);
     return () => clearInterval(id);
   }, []);
-
-  async function handleLogout() {
-    await appLogout().catch(() => {});
-    onLogout();
-    navigate('/login');
-  }
 
   async function handleRefresh() {
     if (refreshing) return;
@@ -275,9 +342,6 @@ function Layout({ appUser, onLogout }) {
           onRefresh={handleRefresh}
           refreshing={refreshing}
           syncStatus={syncStatus}
-          theme={theme}
-          onToggleTheme={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
-          onLogout={handleLogout}
           onOpenAiBuilder={() => navigate('/aibuilder')}
           onOpenSync={() => navigate('/sync')}
           dynamicTabs={dynamicTabs}

@@ -45,7 +45,6 @@ function HeaderBtn({ icon: Ic, label, onClick, danger, title: ttl, disabled, act
 export default function TopBar({
   activeTab, appUser,
   onRefresh, refreshing, syncStatus,
-  theme, onToggleTheme, onLogout,
   onOpenAiBuilder, onOpenSync,
   dynamicTabs,
 }) {
@@ -136,14 +135,6 @@ export default function TopBar({
 
         <div style={{ width: 1, height: 16, background: 'var(--border2)', margin: '0 1px' }} />
 
-        {/* Theme */}
-        <HeaderBtn
-          icon={theme === 'dark' ? Icons.Sun : Icons.Moon}
-          label={theme === 'dark' ? 'Light' : 'Dark'}
-          onClick={onToggleTheme}
-          small
-        />
-
         {/* User */}
         {appUser && (
           <div style={{
@@ -171,8 +162,6 @@ export default function TopBar({
           </div>
         )}
 
-        {/* Logout */}
-        <HeaderBtn icon={Icons.LogOut} onClick={onLogout} danger title="Sign out" />
       </div>
     </header>
   );

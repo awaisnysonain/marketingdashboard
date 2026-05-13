@@ -517,10 +517,23 @@ app.use(session({
 }));
 
 // ── App-level auth middleware ────────────────────────────────────
+// Accepts EITHER:
+//   - req.session.erp     — ERP-issued session (from POST /auth/erp-verify)
+//   - req.session.userId  — legacy local app_users session (kept for backward compat)
+// In dev, ERP_AUTH_BYPASS=true short-circuits everything as a fake admin.
 function requireAppAuth(req, res, next) {
-  if (!req.session?.userId)
-    return res.status(401).json({ error: 'Not authenticated', loginRequired: true });
-  next();
+  if (process.env.ERP_AUTH_BYPASS === 'true') return next();
+  // ERP session — verify it hasn't passed its issued expires_at.
+  if (req.session?.erp) {
+    const exp = Number(req.session.erp.expires_at || 0);
+    if (exp > 0 && exp * 1000 < Date.now()) {
+      req.session.destroy(() => {});
+      return res.status(401).json({ error: 'ERP session expired', loginRequired: true });
+    }
+    return next();
+  }
+  if (req.session?.userId) return next();
+  return res.status(401).json({ error: 'Not authenticated', loginRequired: true });
 }
 
 // ── Rate limiter for auth endpoints ─────────────────────────────
@@ -537,11 +550,127 @@ app.use('/api', requireAppAuth);
 
 // ── App-level auth routes ─────────────────────────────────────────
 app.get('/auth/app-status', async (req, res) => {
-  if (!req.session?.userId) return res.json({ authenticated: false });
-  const r = await pgQuery('SELECT id, email, name, role FROM app_users WHERE id=$1', [req.session.userId]);
-  const user = r.rows[0];
-  if (!user) { req.session.destroy(() => {}); return res.json({ authenticated: false }); }
-  res.json({ authenticated: true, user });
+  // Dev escape hatch
+  if (process.env.ERP_AUTH_BYPASS === 'true') {
+    return res.json({
+      authenticated: true,
+      user: {
+        id: 0, email: 'dev@local', name: 'Dev User', role: 'admin',
+        nav_group: 'dev', portals: ['*'], content_permissions: {},
+        theme: 'dark', expires_at: Math.floor(Date.now()/1000) + 7200,
+        source: 'bypass',
+      },
+    });
+  }
+
+  // ERP session — preferred when present
+  if (req.session?.erp) {
+    const e = req.session.erp;
+    const now = Math.floor(Date.now() / 1000);
+    if (Number(e.expires_at || 0) > 0 && e.expires_at < now) {
+      req.session.destroy(() => {});
+      return res.json({ authenticated: false, expired: true });
+    }
+    return res.json({
+      authenticated: true,
+      user: {
+        id:       e.id,
+        email:    e.email,
+        name:     e.name,
+        role:     e.role || 'viewer',
+        nav_group:           e.nav_group || null,
+        portals:             e.portals || [],
+        content_permissions: e.content_permissions || {},
+        theme:               e.theme || 'dark',
+        expires_at:          e.expires_at || null,
+        source:              'erp',
+      },
+    });
+  }
+
+  // Legacy local-account fallback (kept so existing app_users sessions don't break)
+  if (req.session?.userId) {
+    const r = await pgQuery('SELECT id, email, name, role FROM app_users WHERE id=$1', [req.session.userId]);
+    const user = r.rows[0];
+    if (!user) { req.session.destroy(() => {}); return res.json({ authenticated: false }); }
+    return res.json({ authenticated: true, user: { ...user, source: 'local' } });
+  }
+
+  return res.json({ authenticated: false });
+});
+
+// ── ERP token verification ────────────────────────────────────────
+// Frontend POSTs { token, theme } here when the dashboard is opened from
+// the ERP iframe with ?_erp_token=...&theme=light|dark. We POST the token
+// to the ERP verify endpoint server-side, then mint a session cookie that
+// lives until the ERP-issued expires_at.
+const ERP_VERIFY_URL = process.env.ERP_VERIFY_URL || 'https://nysonianerp.com/api/dashboard-token-verify.php';
+
+function normalizeTheme(t) {
+  const s = String(t || '').toLowerCase().trim();
+  return s === 'light' ? 'light' : 'dark';
+}
+
+app.post('/auth/erp-verify', authLimiter, async (req, res) => {
+  const token = String(req.body?.token || '').trim();
+  const theme = normalizeTheme(req.body?.theme);
+  if (!token) return res.status(400).json({ ok: false, error: 'Missing token' });
+
+  try {
+    // Forward to ERP as multipart form-data (matches the Postman spec)
+    const form = new URLSearchParams();
+    form.set('token', token);
+    const upstream = await fetch(ERP_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: form.toString(),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!data || data.valid !== true) {
+      return res.status(401).json({ ok: false, error: data?.error || 'Invalid or expired ERP token' });
+    }
+
+    const emp = data.employee || {};
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = Number(data.expires_at || (now + 7200));
+
+    // Stash on session
+    req.session.erp = {
+      id:                  emp.id || null,
+      email:               String(emp.email || '').toLowerCase().trim(),
+      name:                emp.name || '',
+      role:                roleForEmail(emp.email) === 'admin' ? 'admin' : 'viewer',
+      nav_group:           data.nav_group || null,
+      portals:             Array.isArray(data.portals) ? data.portals : [],
+      content_permissions: data.content_permissions || {},
+      theme,
+      issued_at:           Number(data.issued_at || now),
+      expires_at:          expiresAt,
+    };
+
+    // Trim cookie lifetime to the ERP token's own expiry (cap at 2h)
+    const ttlMs = Math.max(60_000, (expiresAt - now) * 1000);
+    req.session.cookie.maxAge = ttlMs;
+
+    res.json({
+      ok: true,
+      user: {
+        id:                  req.session.erp.id,
+        email:               req.session.erp.email,
+        name:                req.session.erp.name,
+        role:                req.session.erp.role,
+        nav_group:           req.session.erp.nav_group,
+        portals:             req.session.erp.portals,
+        content_permissions: req.session.erp.content_permissions,
+        theme:               req.session.erp.theme,
+        expires_at:          req.session.erp.expires_at,
+        source:              'erp',
+      },
+    });
+  } catch (e) {
+    console.error('[ERP verify]', e.message);
+    res.status(502).json({ ok: false, error: 'ERP verify request failed' });
+  }
 });
 
 // Single admin email — everyone else is 'viewer' regardless of signup order.
