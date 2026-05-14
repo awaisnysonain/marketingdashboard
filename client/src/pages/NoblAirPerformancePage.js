@@ -719,16 +719,18 @@ export default function NoblAirPerformancePage() {
             <Card title="NOBL Air Revenue Forecast — Live Model" subtitle="Forecast assumptions refresh from live database/dashboard data; the sheet was only context for model structure." style={{ marginBottom: 16 }}>
               {currentForecastRow && (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:10, marginBottom:14 }}>
-                  <KpiCard size="sm" label="Current Month Actual Revenue" value={fmt$(currentForecastRow.actual_store_revenue)} tooltip="Actual NOBL store revenue month-to-date through the latest completed ETL date." />
-                  <KpiCard size="sm" label="Current Month Actual Orders" value={fmtNum(currentForecastRow.actual_orders)} tooltip="Actual non-rebill NOBL store orders month-to-date through the latest completed ETL date." />
+                  <KpiCard size="sm" label="Current Month Actual Revenue" value={fmt$(currentForecastRow.actual_store_revenue)} tooltip="Actual NOBL order revenue month-to-date through the latest completed ETL date, including rebills. Formula: Gross Sales - Discounts + Taxes + Shipping." />
+                  <KpiCard size="sm" label="Current Month Actual Orders" value={fmtNum(currentForecastRow.actual_orders)} tooltip="Actual NOBL store orders month-to-date through the latest completed ETL date, including rebills." />
                   <KpiCard size="sm" label="Current Month Projected Revenue" value={fmt$(currentForecastRow.store_revenue)} tooltip="Actual MTD store revenue multiplied by days in month / completed days." />
                   <KpiCard size="sm" label="Current Month Projected Orders" value={fmtNum(currentForecastRow.orders)} tooltip="Actual MTD orders multiplied by days in month / completed days." />
+                  <KpiCard size="sm" label="Current Month Eligible Orders" value={fmtNum(currentForecastRow.eligible_orders)} tooltip="Projected non-rebill store orders. Attach rate applies to this eligible order base, not to rebill orders." />
                 </div>
               )}
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:10 }}>
                 <KpiCard size="sm" label="Forecast Activation" value={fmtPct(forecastAssumptions.forecast_activation_rate)} tooltip="Main forecast assumption. Formula: Overall Attach Rate × Overall TTP Rate, matching the Performance KPI definition." />
                 <KpiCard size="sm" label="Rolling 7d Perf Activation" value={fmtPct(forecastAssumptions.rolling_7d_activation_rate)} tooltip="Reference only. Weighted average of daily Performance activation_rate over the latest 7 complete days." />
-                <KpiCard size="sm" label="AOV" value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Formula: selected-period NOBL store revenue / selected-period non-rebill store orders." />
+                <KpiCard size="sm" label="AOV" value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Formula: selected-period order revenue / selected-period store orders, including rebills. Order revenue = Gross Sales - Discounts + Taxes + Shipping." />
+                <KpiCard size="sm" label="Eligible Order Rate" value={fmtPct(forecastAssumptions.eligible_order_rate)} tooltip="Formula: non-rebill store orders / all store orders. Used to convert total target orders into Air-eligible orders." />
                 <KpiCard size="sm" label="Avg Converted Tier" value={fmt$(forecastAssumptions.avg_tier_price_converted_subs)} tooltip="Formula: average Appstle contract amount for converted subscribers." />
                 <KpiCard size="sm" label="Tag Net / Air Order" value={fmt$(forecastAssumptions.tag_net_sales_per_air_order)} tooltip="Formula: selected-period Tag Net Sales / Air Orders." />
                 <KpiCard size="sm" label="Blended Net / Air Order" value={fmt$(forecastAssumptions.blended_net_rev_per_air_order)} tooltip="Formula: selected-period Combined Net Revenue / Air Orders." />
@@ -803,7 +805,7 @@ export default function NoblAirPerformancePage() {
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
                     <tr style={{ color:'var(--text3)', borderBottom:'1px solid var(--border)' }}>
-                      {['Month','Status','Actual Revenue','Actual Orders','Projected/Target Revenue','Projected/Target Orders','AOV','Activation','Est. Activations','Attach Rate','Est. Air Orders','Tag Rev','Sub Rev','Total Air Rev','Source'].map(h => (
+                      {['Month','Status','Actual Revenue','Actual Orders','Projected/Target Revenue','Projected/Target Orders','Air-Eligible Orders','AOV','Activation','Est. Activations','Attach Rate','Est. Air Orders','Tag Rev','Sub Rev','Total Air Rev','Source'].map(h => (
                         <th key={h} style={{ textAlign: h === 'Month' || h === 'Source' ? 'left' : 'right', padding:'8px 10px', fontWeight:600 }}>{h}</th>
                       ))}
                     </tr>
@@ -823,6 +825,7 @@ export default function NoblAirPerformancePage() {
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualNumber(r, 'actual_orders')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.store_revenue)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.orders)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.eligible_orders)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.aov)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.activation_rate)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.est_activations)}</td>
