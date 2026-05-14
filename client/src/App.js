@@ -22,16 +22,16 @@ import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
 import MetaAdsPage       from './pages/MetaAdsPage';
 
 function normalizeTheme(t) {
-  return String(t || '').toLowerCase() === 'light' ? 'light' : 'dark';
+  return 'light';
 }
 function getInitialTheme() {
-  // Reads from URL ?theme=... first (ERP iframe launch), then localStorage, then default 'dark'.
+  // The dashboard defaults to the white/light theme everywhere.
   try {
     const p = new URLSearchParams(window.location.search);
     const fromUrl = p.get('theme');
     if (fromUrl) return normalizeTheme(fromUrl);
   } catch {}
-  try { return normalizeTheme(localStorage.getItem('nobl-theme') || 'dark'); } catch { return 'dark'; }
+  try { return normalizeTheme(localStorage.getItem('nobl-theme') || 'light'); } catch { return 'light'; }
 }
 function applyTheme(theme) {
   const t = normalizeTheme(theme);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   AreaChart, Area, ComposedChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  LineChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import { getNoblAirPerformance, getNoblAirSubscribers, getNoblAirAttribution, fmt$, fmtNum, fmtPct } from '../utils/api';
@@ -44,6 +45,14 @@ const STATUS_COLORS = {
   trialing:  '#3b82f6',
   expired:   '#64748b',
   unknown:   '#94a3b8',
+};
+
+const FORECAST_STATUS_STYLES = {
+  actual: { label: 'Actual', bg: 'rgba(34,197,94,.14)', color: '#22c55e' },
+  current_projection: { label: 'MTD + Projection', bg: 'rgba(245,158,11,.16)', color: '#f59e0b' },
+  target: { label: 'Target', bg: 'rgba(99,102,241,.16)', color: '#818cf8' },
+  no_data: { label: 'No Data', bg: 'rgba(239,68,68,.14)', color: '#ef4444' },
+  total: { label: 'Full Year', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
 };
 
 const KPI_TOOLTIPS = {
@@ -330,6 +339,7 @@ export default function NoblAirPerformancePage() {
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
   const [airAttrLoading, setAirAttrLoading] = useState(false);
   const [regions, setRegions] = useState(['ALL']);
+  const [activeTab, setActiveTab] = useState('performance');
 
   const regionParam = useMemo(() => regionsParam(regions), [regions]);
   const regionScoped = regionParam !== 'ALL';
@@ -346,7 +356,12 @@ export default function NoblAirPerformancePage() {
         ? Promise.resolve(null)
         : getNoblAirSubscribers(range.start, range.end).catch(() => null);
       const perf = await getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
-      setData({ rows: perf?.rows || [], totals: perf?.totals || {}, ttpCohort: perf?.ttp_cohort || {} });
+      setData({
+        rows: perf?.rows || [],
+        totals: perf?.totals || {},
+        ttpCohort: perf?.ttp_cohort || {},
+        revenueForecast: perf?.revenue_forecast || null,
+      });
       setSubData(null);
       setLoading(false);
 
@@ -421,6 +436,18 @@ export default function NoblAirPerformancePage() {
     })),
     [subData]
   );
+  const revenueForecast = data.revenueForecast;
+  const forecastAssumptions = revenueForecast?.assumptions || {};
+  const forecastRows = revenueForecast?.rows || [];
+  const forecastFullYear = revenueForecast?.full_year || null;
+  const forecastTableRows = useMemo(
+    () => [...forecastRows, forecastFullYear].filter(Boolean),
+    [forecastRows, forecastFullYear]
+  );
+  const currentForecastRow = useMemo(
+    () => forecastRows.find(r => r.row_type === 'current_projection'),
+    [forecastRows]
+  );
   const statusData = useMemo(
     () => (subData?.status || []).map(s => ({
       name: s.status || 'unknown',
@@ -453,8 +480,35 @@ export default function NoblAirPerformancePage() {
         </div>
       </div>
 
+      <div style={{ display:'flex', gap:8, marginBottom:18, borderBottom:'1px solid var(--border)', paddingBottom:8 }}>
+        {[
+          ['performance', 'Performance'],
+          ['forecast', 'Forecast'],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setActiveTab(key)}
+            style={{
+              border:'1px solid var(--border2)',
+              background: activeTab === key ? 'var(--accent)' : 'var(--bg2)',
+              color: activeTab === key ? '#fff' : 'var(--text2)',
+              borderRadius: 999,
+              padding:'8px 14px',
+              fontSize:12,
+              fontWeight:700,
+              cursor:'pointer',
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
+          {activeTab === 'performance' && (
+          <>
           {/* ── Top KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
             <KpiCard label="Air Orders"            value={fmtNum(kpi.airOrders)}            color="nobl" tooltip={KPI_TOOLTIPS.airOrders} />
@@ -648,6 +702,141 @@ export default function NoblAirPerformancePage() {
               defaultSortDir="desc"
             />
           </Card>
+          </>
+          )}
+
+          {activeTab === 'forecast' && !regionScoped && revenueForecast && (
+          <>
+            <Card title="NOBL Air Revenue Forecast — Live Model" subtitle="Forecast assumptions refresh from live database/dashboard data; the sheet was only context for model structure." style={{ marginBottom: 16 }}>
+              {currentForecastRow && (
+                <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:10, marginBottom:14 }}>
+                  <KpiCard size="sm" label="Current Month Actual Revenue" value={fmt$(currentForecastRow.actual_store_revenue)} tooltip="Actual NOBL store revenue month-to-date through the latest completed ETL date." />
+                  <KpiCard size="sm" label="Current Month Actual Orders" value={fmtNum(currentForecastRow.actual_orders)} tooltip="Actual non-rebill NOBL store orders month-to-date through the latest completed ETL date." />
+                  <KpiCard size="sm" label="Current Month Projected Revenue" value={fmt$(currentForecastRow.store_revenue)} tooltip="Actual MTD store revenue multiplied by days in month / completed days." />
+                  <KpiCard size="sm" label="Current Month Projected Orders" value={fmtNum(currentForecastRow.orders)} tooltip="Actual MTD orders multiplied by days in month / completed days." />
+                </div>
+              )}
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:10 }}>
+                <KpiCard size="sm" label="Rolling 7d Activation" value={fmtPct(forecastAssumptions.rolling_7d_activation_rate)} tooltip="Formula: SUM(converted_count over latest 7 complete days) / SUM(air_orders over latest 7 complete days). Used as the monthly activation assumption." />
+                <KpiCard size="sm" label="Attach × TTP Activation" value={fmtPct(forecastAssumptions.period_activation_rate)} tooltip="Formula: Overall Attach Rate × Overall TTP Rate for the selected date range." />
+                <KpiCard size="sm" label="AOV" value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Formula: selected-period NOBL store revenue / selected-period non-rebill store orders." />
+                <KpiCard size="sm" label="Avg Converted Tier" value={fmt$(forecastAssumptions.avg_tier_price_converted_subs)} tooltip="Formula: average Appstle contract amount for converted subscribers." />
+                <KpiCard size="sm" label="Tag Net / Air Order" value={fmt$(forecastAssumptions.tag_net_sales_per_air_order)} tooltip="Formula: selected-period Tag Net Sales / Air Orders." />
+                <KpiCard size="sm" label="Blended Net / Air Order" value={fmt$(forecastAssumptions.blended_net_rev_per_air_order)} tooltip="Formula: selected-period Combined Net Revenue / Air Orders." />
+              </div>
+            </Card>
+
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(340px, 1fr))', gap:16, marginBottom:16 }}>
+              <Card title="Line Chart — Total Air Revenue" subtitle="Monthly forecast trend for total NOBL Air revenue.">
+                <ResponsiveContainer width="100%" height={260}>
+                  <LineChart data={forecastRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
+                    <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+                    <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} formatter={(v, n) => [fmt$(v), n]} />
+                    <Legend wrapperStyle={{ fontSize:12 }} />
+                    <Line type="monotone" dataKey="total_air_rev_net_est" name="Total Air Rev" stroke="#8b5cf6" strokeWidth={2.5} dot={{ r:3 }} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </Card>
+
+              <Card title="Bar Chart — NOBL Air Revenue Mix" subtitle="Stacked Tag + Sub revenue estimates by month.">
+                <ResponsiveContainer width="100%" height={300}>
+                  <ComposedChart data={forecastRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
+                    <YAxis yAxisId="rev" tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+                    <YAxis yAxisId="orders" orientation="right" tickFormatter={(v) => fmtNum(v)} tick={{ fontSize:11 }} width={58} stroke="var(--border2)" />
+                    <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} formatter={(v, n) => [String(n).includes('Activations') ? fmtNum(v) : fmt$(v), n]} />
+                    <Legend wrapperStyle={{ fontSize:12 }} />
+                    <Bar yAxisId="rev" dataKey="tag_rev_net_est" stackId="airRev" name="Tag Rev" fill="#60a5fa" />
+                    <Bar yAxisId="rev" dataKey="sub_rev_net_est" stackId="airRev" name="Sub Rev" fill="#8b5cf6" />
+                    <Line yAxisId="orders" type="monotone" dataKey="est_activations" name="Est. Activations" stroke="#22c55e" strokeWidth={2} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </Card>
+
+              <Card title="Column Chart — Store Revenue" subtitle="Store revenue forecast/actual columns with actual revenue overlay.">
+                <ResponsiveContainer width="100%" height={260}>
+                  <BarChart data={forecastRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
+                    <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+                    <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} formatter={(v, n) => [fmt$(v), n]} />
+                    <Legend wrapperStyle={{ fontSize:12 }} />
+                    <Bar dataKey="store_revenue" name="Projected/Target Revenue" fill="#14b8a6" radius={[3,3,0,0]} />
+                    <Bar dataKey="actual_store_revenue" name="Actual Revenue" fill="#22c55e" radius={[3,3,0,0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </Card>
+
+              <Card title="Store Revenue, Orders, and Air Orders" subtitle="Store revenue drives order volume; attach rate drives estimated Air orders.">
+                <ResponsiveContainer width="100%" height={300}>
+                  <ComposedChart data={forecastRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
+                    <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
+                    <YAxis yAxisId="rev" tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+                    <YAxis yAxisId="orders" orientation="right" tickFormatter={(v) => fmtNum(v)} tick={{ fontSize:11 }} width={58} stroke="var(--border2)" />
+                    <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} formatter={(v, n) => [String(n).includes('Revenue') ? fmt$(v) : fmtNum(v), n]} />
+                    <Legend wrapperStyle={{ fontSize:12 }} />
+                    <Bar yAxisId="rev" dataKey="store_revenue" name="Store Revenue" fill="#14b8a6" />
+                    <Bar yAxisId="rev" dataKey="actual_store_revenue" name="Actual Revenue" fill="#22c55e" />
+                    <Line yAxisId="orders" type="monotone" dataKey="orders" name="Orders" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                    <Line yAxisId="orders" type="monotone" dataKey="actual_orders" name="Actual Orders" stroke="#22c55e" strokeWidth={2} dot={false} />
+                    <Line yAxisId="orders" type="monotone" dataKey="est_air_orders" name="Est. Air Orders" stroke="#6366f1" strokeWidth={2} dot={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </Card>
+            </div>
+
+            <Card title="Monthly Forecast Detail" subtitle="Current month uses live MTD actuals projected by completed days; future months use target store revenue divided by live AOV." style={{ marginBottom: 16 }}>
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+                  <thead>
+                    <tr style={{ color:'var(--text3)', borderBottom:'1px solid var(--border)' }}>
+                      {['Month','Status','Actual Revenue','Actual Orders','Projected/Target Revenue','Projected/Target Orders','AOV','Activation','Est. Activations','Attach Rate','Est. Air Orders','Tag Rev','Sub Rev','Total Air Rev','Source'].map(h => (
+                        <th key={h} style={{ textAlign: h === 'Month' || h === 'Source' ? 'left' : 'right', padding:'8px 10px', fontWeight:600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {forecastTableRows.map((r, idx) => {
+                      const statusStyle = FORECAST_STATUS_STYLES[r.row_type] || FORECAST_STATUS_STYLES.no_data;
+                      return (
+                      <tr key={r.month} style={{ borderBottom:'1px solid var(--border)', color: idx === forecastRows.length ? 'var(--text)' : 'var(--text2)', fontWeight: idx === forecastRows.length ? 700 : 400 }}>
+                        <td style={{ padding:'8px 10px' }}>{r.month}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                          <span style={{ display:'inline-block', padding:'3px 8px', borderRadius:999, background:statusStyle.bg, color:statusStyle.color, fontSize:11, fontWeight:700, whiteSpace:'nowrap' }}>
+                            {r.status_label || statusStyle.label}
+                          </span>
+                        </td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: r.actual_store_revenue > 0 ? '#22c55e' : 'var(--text3)' }}>{fmt$(r.actual_store_revenue)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: r.actual_orders > 0 ? '#22c55e' : 'var(--text3)' }}>{fmtNum(r.actual_orders)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.store_revenue)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.orders)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.aov)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.activation_rate)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.est_activations)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.attach_rate)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.est_air_orders)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.tag_rev_net_est)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.sub_rev_net_est)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.total_air_rev_net_est)}</td>
+                        <td style={{ padding:'8px 10px', color:'var(--text3)' }}>{r.order_source}</td>
+                      </tr>
+                    );})}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </>
+          )}
+
+          {activeTab === 'forecast' && regionScoped && (
+            <Card title="Forecast unavailable for regional filters" subtitle="The forecast model is currently all-region only because store revenue targets and AOV are all-region assumptions.">
+              <Empty msg="Switch region to All Regions to view the NOBL Air forecast." />
+            </Card>
+          )}
         </>
       )}
     </div>

@@ -2,65 +2,8 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ── Dark theme ─────────────────────────────────────────────────── */
-:root, [data-theme="dark"] {
-  --bg:      #0f1117;
-  --bg2:     #161b27;
-  --bg3:     #1c2133;
-  --bg4:     #212840;
-  --bg5:     #27304d;
-
-  --border:  #1e2535;
-  --border2: #28334a;
-  --border3: #333f58;
-
-  --text:    #d8dfe8;
-  --text2:   #7f8ea8;
-  --text3:   #4f5e78;
-  --text4:   #364257;
-
-  --accent:       #3b5bdb;
-  --accent-hover: #3451c7;
-  --accent-dim:   rgba(59,91,219,0.12);
-  --accent-soft:  rgba(59,91,219,0.08);
-
-  --success:     #2f9e6c;
-  --success-dim: rgba(47,158,108,0.10);
-  --warn:        #cc8a00;
-  --warn-dim:    rgba(204,138,0,0.10);
-  --danger:      #c0392b;
-  --danger-dim:  rgba(192,57,43,0.10);
-
-  --sidebar-w:         220px;
-  --sidebar-collapsed: 52px;
-  --topbar-h:          52px;
-
-  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  --font-mono: 'DM Mono', 'SF Mono', 'Fira Code', monospace;
-
-  --radius:    6px;
-  --radius-lg: 8px;
-
-  --shadow:    0 4px 16px rgba(0,0,0,0.40);
-  --shadow-sm: 0 1px 4px rgba(0,0,0,0.25);
-
-  --card-bg:     #161b27;
-  --card-border: #1e2535;
-
-  --hl-yellow: rgba(180,130,0,0.14);
-  --hl-green:  rgba(47,158,108,0.14);
-  --hl-red:    rgba(192,57,43,0.14);
-  --hl-blue:   rgba(59,91,219,0.14);
-
-  /* subtle row separator — distinct from card/panel borders */
-  --row-sep:   rgba(255,255,255,0.04);
-  --col-sep:   rgba(255,255,255,0.03);
-
-  color-scheme: dark;
-}
-
-/* ── Light theme ─────────────────────────────────────────────────── */
-[data-theme="light"] {
+/* ── Default white/light theme ───────────────────────────────────── */
+:root, [data-theme="light"], [data-theme="dark"] {
   --bg:      #f5f6f8;
   --bg2:     #ffffff;
   --bg3:     #f0f2f5;
@@ -88,6 +31,16 @@
   --danger:      #a52319;
   --danger-dim:  rgba(165,35,25,0.10);
 
+  --sidebar-w:         220px;
+  --sidebar-collapsed: 52px;
+  --topbar-h:          52px;
+
+  --font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'DM Mono', 'SF Mono', 'Fira Code', monospace;
+
+  --radius:    6px;
+  --radius-lg: 8px;
+
   --shadow:    0 2px 12px rgba(0,0,0,0.08);
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
 
@@ -99,7 +52,7 @@
   --hl-red:    rgba(165,35,25,0.10);
   --hl-blue:   rgba(47,78,181,0.10);
 
-  /* subtle row separator for light mode */
+  /* subtle row separator — distinct from card/panel borders */
   --row-sep:   rgba(0,0,0,0.05);
   --col-sep:   rgba(0,0,0,0.03);
 
@@ -131,8 +84,7 @@ button { cursor: pointer; }
 a { color: var(--accent); text-decoration: none; }
 
 /* ── Chart grid ───────────────────────────────────────────────────── */
-:root, [data-theme="dark"] { --chart-grid: rgba(255,255,255,0.04); }
-[data-theme="light"]        { --chart-grid: rgba(0,0,0,0.06); }
+:root, [data-theme="light"], [data-theme="dark"] { --chart-grid: rgba(0,0,0,0.06); }
 
 [data-theme="light"] .recharts-cartesian-grid-horizontal line,
 [data-theme="light"] .recharts-cartesian-grid-vertical line { stroke: var(--chart-grid) !important; }
