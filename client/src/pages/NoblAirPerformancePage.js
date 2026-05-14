@@ -448,6 +448,15 @@ export default function NoblAirPerformancePage() {
     () => forecastRows.find(r => r.row_type === 'current_projection'),
     [forecastRows]
   );
+  const hasActualForecastData = (row) => ['actual', 'current_projection', 'total'].includes(row?.row_type);
+  const fmtActualCurrency = (row, field) => hasActualForecastData(row) ? fmt$(row?.[field]) : '—';
+  const fmtActualNumber = (row, field) => hasActualForecastData(row) ? fmtNum(row?.[field]) : '—';
+  const forecastChartRows = useMemo(
+    () => forecastRows.map(row => hasActualForecastData(row)
+      ? row
+      : { ...row, actual_store_revenue: null, actual_orders: null }),
+    [forecastRows]
+  );
   const statusData = useMemo(
     () => (subData?.status || []).map(s => ({
       name: s.status || 'unknown',
@@ -717,8 +726,8 @@ export default function NoblAirPerformancePage() {
                 </div>
               )}
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:10 }}>
-                <KpiCard size="sm" label="Rolling 7d Activation" value={fmtPct(forecastAssumptions.rolling_7d_activation_rate)} tooltip="Formula: SUM(converted_count over latest 7 complete days) / SUM(air_orders over latest 7 complete days). Used as the monthly activation assumption." />
-                <KpiCard size="sm" label="Attach × TTP Activation" value={fmtPct(forecastAssumptions.period_activation_rate)} tooltip="Formula: Overall Attach Rate × Overall TTP Rate for the selected date range." />
+                <KpiCard size="sm" label="Forecast Activation" value={fmtPct(forecastAssumptions.forecast_activation_rate)} tooltip="Main forecast assumption. Formula: Overall Attach Rate × Overall TTP Rate, matching the Performance KPI definition." />
+                <KpiCard size="sm" label="Rolling 7d Perf Activation" value={fmtPct(forecastAssumptions.rolling_7d_activation_rate)} tooltip="Reference only. Weighted average of daily Performance activation_rate over the latest 7 complete days." />
                 <KpiCard size="sm" label="AOV" value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Formula: selected-period NOBL store revenue / selected-period non-rebill store orders." />
                 <KpiCard size="sm" label="Avg Converted Tier" value={fmt$(forecastAssumptions.avg_tier_price_converted_subs)} tooltip="Formula: average Appstle contract amount for converted subscribers." />
                 <KpiCard size="sm" label="Tag Net / Air Order" value={fmt$(forecastAssumptions.tag_net_sales_per_air_order)} tooltip="Formula: selected-period Tag Net Sales / Air Orders." />
@@ -758,7 +767,7 @@ export default function NoblAirPerformancePage() {
 
               <Card title="Column Chart — Store Revenue" subtitle="Store revenue forecast/actual columns with actual revenue overlay.">
                 <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={forecastRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
+                  <BarChart data={forecastChartRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
                     <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
@@ -772,7 +781,7 @@ export default function NoblAirPerformancePage() {
 
               <Card title="Store Revenue, Orders, and Air Orders" subtitle="Store revenue drives order volume; attach rate drives estimated Air orders.">
                 <ResponsiveContainer width="100%" height={300}>
-                  <ComposedChart data={forecastRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
+                  <ComposedChart data={forecastChartRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                     <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
                     <YAxis yAxisId="rev" tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
@@ -810,8 +819,8 @@ export default function NoblAirPerformancePage() {
                             {r.status_label || statusStyle.label}
                           </span>
                         </td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: r.actual_store_revenue > 0 ? '#22c55e' : 'var(--text3)' }}>{fmt$(r.actual_store_revenue)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: r.actual_orders > 0 ? '#22c55e' : 'var(--text3)' }}>{fmtNum(r.actual_orders)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_store_revenue')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualNumber(r, 'actual_orders')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.store_revenue)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.orders)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.aov)}</td>

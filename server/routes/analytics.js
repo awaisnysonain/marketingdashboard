@@ -485,6 +485,41 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     store_revenue: Number(r.store_revenue || 0),
   }]));
 
+  const airMonthlyRes = await pgQuery(`
+    SELECT
+      TO_CHAR(date_trunc('month', date), 'YYYY-MM') AS month_key,
+      COALESCE(SUM(total_orders), 0)::int AS total_orders,
+      COALESCE(SUM(air_orders), 0)::int AS air_orders,
+      COALESCE(SUM(mature_count), 0)::int AS mature_count,
+      COALESCE(SUM(converted_count), 0)::int AS converted_count,
+      COALESCE(SUM(tag_net_sales), 0)::numeric(14,2) AS tag_net_sales,
+      COALESCE(SUM(sub_net_sales), 0)::numeric(14,2) AS sub_net_sales,
+      COALESCE(SUM(combined_net_revenue), 0)::numeric(14,2) AS combined_net_revenue
+    FROM nobl_air_daily
+    WHERE date >= ($1::text || '-01')::date
+      AND date < (($2::text || '-01')::date + INTERVAL '1 month')
+      AND date <= $3::date
+    GROUP BY 1
+  `, [firstMonth, lastMonth, end]);
+  const airByMonth = Object.fromEntries(airMonthlyRes.rows.map(r => {
+    const totalOrders = Number(r.total_orders || 0);
+    const airOrders = Number(r.air_orders || 0);
+    const matureCount = Number(r.mature_count || 0);
+    const convertedCount = Number(r.converted_count || 0);
+    const attach = totalOrders > 0 ? airOrders / totalOrders : 0;
+    const ttp = matureCount > 0 ? convertedCount / matureCount : 0;
+    return [r.month_key, {
+      total_orders: totalOrders,
+      air_orders: airOrders,
+      mature_count: matureCount,
+      converted_count: convertedCount,
+      activation_rate: attach * ttp,
+      tag_net_sales: Number(r.tag_net_sales || 0),
+      sub_net_sales: Number(r.sub_net_sales || 0),
+      combined_net_revenue: Number(r.combined_net_revenue || 0),
+    }];
+  }));
+
   const selectedStoreRes = await pgQuery(`
     SELECT
       COUNT(*) FILTER (WHERE NOT is_rebill)::int AS orders,
@@ -514,8 +549,12 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     acc.air_orders += Number(row.air_orders || 0);
     acc.converted_count += Number(row.converted_count || 0);
     acc.mature_count += Number(row.mature_count || 0);
+    if (row.activation_rate != null && Number(row.total_orders || 0) > 0) {
+      acc.activation_weighted_sum += Number(row.activation_rate) * Number(row.total_orders);
+      acc.activation_weight += Number(row.total_orders);
+    }
     return acc;
-  }, { total_orders: 0, air_orders: 0, converted_count: 0, mature_count: 0 });
+  }, { total_orders: 0, air_orders: 0, converted_count: 0, mature_count: 0, activation_weighted_sum: 0, activation_weight: 0 });
 
   const tierRes = await pgQuery(`
     WITH subscribers AS (
@@ -544,10 +583,11 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   const attachRate = rangeTotals.total_orders > 0 ? rangeTotals.air_orders / rangeTotals.total_orders : 0;
   const overallTtpRate = Number(ttpCohort?.ttp_rate || 0);
   const periodActivationRate = attachRate * overallTtpRate;
-  // Sheet-compatible live assumption: converted mature subs divided by air orders
-  // over the most recent 7 cached days. Used for estimated activations.
-  const rolling7ActivationRate = trailingTotals.air_orders > 0
-    ? trailingTotals.converted_count / trailingTotals.air_orders
+  // Main forecast activation uses the same definition as the Performance KPI.
+  const forecastActivationRate = periodActivationRate;
+  // Reference only: weighted average of the actual daily activation_rate over the latest 7 complete days.
+  const rolling7PerformanceActivationRate = trailingTotals.activation_weight > 0
+    ? trailingTotals.activation_weighted_sum / trailingTotals.activation_weight
     : periodActivationRate;
   const avgRevenuePerOrder = selectedOrders > 0 ? selectedRevenue / selectedOrders : 0;
   const tagNetPerAirOrder = rangeTotals.air_orders > 0 ? rangeTotals.tag_net_sales / rangeTotals.air_orders : 0;
@@ -557,6 +597,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
 
   const rows = forecastMonths.map(([key, label, targetRevenue]) => {
     const actual = storeByMonth[key] || { orders: 0, store_revenue: 0 };
+    const actualAir = airByMonth[key] || null;
     const actualStoreRevenue = actual.store_revenue;
     const actualOrders = actual.orders;
     let storeRevenue = actualStoreRevenue;
@@ -585,7 +626,10 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       orderSource = `Estimated (target $${(targetRevenue / 1000000).toFixed(1)}M ÷ $${Math.round(avgRevenuePerOrder).toLocaleString()}/order)`;
     }
 
-    const estActivations = orders * rolling7ActivationRate;
+    const rowActivationRate = (actualAir && actualAir.total_orders > 0 && rowType !== 'target')
+      ? actualAir.activation_rate
+      : forecastActivationRate;
+    const estActivations = orders * rowActivationRate;
     const estAirOrders = orders * attachRate;
     const tagRevNetEst = estAirOrders * tagNetPerAirOrder;
     const subRevNetEst = estActivations * avgTierPrice;
@@ -597,8 +641,8 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       month_key: key,
       row_type: rowType,
       status_label: statusLabel,
-      actual_store_revenue: Number(actualStoreRevenue.toFixed(2)),
-      actual_orders: Math.round(actualOrders),
+      actual_store_revenue: actualOrders > 0 ? Number(actualStoreRevenue.toFixed(2)) : null,
+      actual_orders: actualOrders > 0 ? Math.round(actualOrders) : null,
       target_store_revenue: targetRevenue || null,
       projection_factor: Number(projectionFactor.toFixed(4)),
       elapsed_days: elapsedDays,
@@ -606,7 +650,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       store_revenue: Number(storeRevenue.toFixed(2)),
       orders: Math.round(orders),
       aov: Number(rowAov.toFixed(2)),
-      activation_rate: Number(rolling7ActivationRate.toFixed(4)),
+      activation_rate: Number(rowActivationRate.toFixed(4)),
       est_activations: Math.round(estActivations),
       attach_rate: Number(attachRate.toFixed(4)),
       est_air_orders: Math.round(estAirOrders),
@@ -618,8 +662,8 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   });
 
   const fullYear = rows.reduce((acc, row) => {
-    acc.actual_store_revenue += row.actual_store_revenue || 0;
-    acc.actual_orders += row.actual_orders || 0;
+    acc.actual_store_revenue += Number(row.actual_store_revenue || 0);
+    acc.actual_orders += Number(row.actual_orders || 0);
     acc.store_revenue += row.store_revenue || 0;
     acc.orders += row.orders || 0;
     acc.est_activations += row.est_activations || 0;
@@ -633,7 +677,8 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   return {
     title: 'NOBL Air Revenue Forecast 2026',
     assumptions: {
-      rolling_7d_activation_rate: Number(rolling7ActivationRate.toFixed(4)),
+      forecast_activation_rate: Number(forecastActivationRate.toFixed(4)),
+      rolling_7d_activation_rate: Number(rolling7PerformanceActivationRate.toFixed(4)),
       period_activation_rate: Number(periodActivationRate.toFixed(4)),
       overall_attach_rate: Number(attachRate.toFixed(4)),
       overall_ttp_rate: Number(overallTtpRate.toFixed(4)),
@@ -653,7 +698,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       store_revenue: Number(fullYear.store_revenue.toFixed(2)),
       orders: Math.round(fullYear.orders),
       aov: fullYear.orders > 0 ? Number((fullYear.store_revenue / fullYear.orders).toFixed(2)) : 0,
-      activation_rate: Number(rolling7ActivationRate.toFixed(4)),
+      activation_rate: Number(forecastActivationRate.toFixed(4)),
       est_activations: Math.round(fullYear.est_activations),
       attach_rate: Number(attachRate.toFixed(4)),
       est_air_orders: Math.round(fullYear.est_air_orders),
