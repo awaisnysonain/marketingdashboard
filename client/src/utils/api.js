@@ -61,9 +61,7 @@ export const removeHighlight = body => fetch(`${B}/api/highlights`,{method:'DELE
 export function fmt$(n){
   const v=parseFloat(n);
   if(isNaN(v)) return '—';
-  if(Math.abs(v)>=1e6) return `$${(v/1e6).toFixed(2)}M`;
-  if(Math.abs(v)>=1e3) return `$${(v/1e3).toFixed(1)}K`;
-  return `$${v.toFixed(2)}`;
+  return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 // Handles both decimal fractions (0.326 → 32.6%) and already-percent values (32.6 → 32.6%)
