@@ -522,6 +522,41 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     }];
   }));
 
+  // Performance KPI uses TTP as of the selected end date, not just subscribers
+  // maturing inside the selected range. Mirror that here for each actual month so
+  // forecast actual rows match Performance when the date range is the same month.
+  const ttpAsOfRes = await pgQuery(`
+    WITH months(month_key, as_of_date) AS (
+      VALUES
+        ('2026-03', LEAST('2026-03-31'::date, $1::date)),
+        ('2026-04', LEAST('2026-04-30'::date, $1::date)),
+        ('2026-05', LEAST('2026-05-31'::date, $1::date)),
+        ('2026-06', LEAST('2026-06-30'::date, $1::date)),
+        ('2026-07', LEAST('2026-07-31'::date, $1::date)),
+        ('2026-08', LEAST('2026-08-31'::date, $1::date)),
+        ('2026-09', LEAST('2026-09-30'::date, $1::date)),
+        ('2026-10', LEAST('2026-10-31'::date, $1::date)),
+        ('2026-11', LEAST('2026-11-30'::date, $1::date)),
+        ('2026-12', LEAST('2026-12-31'::date, $1::date))
+    )
+    SELECT
+      m.month_key,
+      COALESCE(SUM(d.mature_count), 0)::int AS mature_count,
+      COALESCE(SUM(d.converted_count), 0)::int AS converted_count
+    FROM months m
+    LEFT JOIN nobl_air_daily d ON d.date <= m.as_of_date
+    GROUP BY m.month_key
+  `, [forecastAsOf]);
+  const ttpAsOfByMonth = Object.fromEntries(ttpAsOfRes.rows.map(r => {
+    const matureCount = Number(r.mature_count || 0);
+    const convertedCount = Number(r.converted_count || 0);
+    return [r.month_key, {
+      mature_count: matureCount,
+      converted_count: convertedCount,
+      ttp_rate: matureCount > 0 ? convertedCount / matureCount : 0,
+    }];
+  }));
+
   const selectedStoreRes = await pgQuery(`
     SELECT
       COALESCE(SUM(total_orders), 0)::int AS orders,
@@ -646,9 +681,10 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     const rowAttachRate = (actualAir && actualAir.total_orders > 0 && rowType !== 'target')
       ? actualAir.air_orders / actualAir.total_orders
       : attachRate;
-    const rowActivationRate = (actualAir && actualAir.total_orders > 0 && rowType !== 'target')
-      ? actualAir.activation_rate
-      : forecastActivationRate;
+    const rowTtpRate = rowType !== 'target'
+      ? Number(ttpAsOfByMonth[key]?.ttp_rate || overallTtpRate || 0)
+      : overallTtpRate;
+    const rowActivationRate = rowAttachRate * rowTtpRate;
     const estActivations = eligibleOrders * rowActivationRate;
     const estAirOrders = eligibleOrders * rowAttachRate;
     let tagRevNetEst;
@@ -680,6 +716,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       actual_eligible_revenue: actualOrders > 0 ? Number(actualEligibleRevenue.toFixed(2)) : null,
       actual_rebill_revenue: actualOrders > 0 ? Number(actualRebillRevenue.toFixed(2)) : null,
       actual_rebill_orders: actualOrders > 0 ? Math.round(actualRebillOrders) : null,
+      actual_air_rev_net: actualOrders > 0 ? Number((actualAir?.combined_net_revenue || 0).toFixed(2)) : null,
       target_store_revenue: targetRevenue || null,
       projection_factor: Number(projectionFactor.toFixed(4)),
       elapsed_days: elapsedDays,
@@ -689,6 +726,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       eligible_orders: Math.round(eligibleOrders),
       eligible_revenue: Number(eligibleRevenue.toFixed(2)),
       aov: Number(rowAov.toFixed(2)),
+      ttp_rate: Number(rowTtpRate.toFixed(4)),
       activation_rate: Number(rowActivationRate.toFixed(4)),
       est_activations: Math.round(estActivations),
       attach_rate: Number(rowAttachRate.toFixed(4)),
@@ -707,6 +745,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     acc.actual_eligible_revenue += Number(row.actual_eligible_revenue || 0);
     acc.actual_rebill_orders += Number(row.actual_rebill_orders || 0);
     acc.actual_rebill_revenue += Number(row.actual_rebill_revenue || 0);
+    acc.actual_air_rev_net += Number(row.actual_air_rev_net || 0);
     acc.store_revenue += row.store_revenue || 0;
     acc.orders += row.orders || 0;
     acc.eligible_orders += row.eligible_orders || 0;
@@ -717,7 +756,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     acc.sub_rev_net_est += row.sub_rev_net_est || 0;
     acc.total_air_rev_net_est += row.total_air_rev_net_est || 0;
     return acc;
-  }, { actual_store_revenue: 0, actual_orders: 0, actual_eligible_orders: 0, actual_eligible_revenue: 0, actual_rebill_orders: 0, actual_rebill_revenue: 0, store_revenue: 0, orders: 0, eligible_orders: 0, eligible_revenue: 0, est_activations: 0, est_air_orders: 0, tag_rev_net_est: 0, sub_rev_net_est: 0, total_air_rev_net_est: 0 });
+  }, { actual_store_revenue: 0, actual_orders: 0, actual_eligible_orders: 0, actual_eligible_revenue: 0, actual_rebill_orders: 0, actual_rebill_revenue: 0, actual_air_rev_net: 0, store_revenue: 0, orders: 0, eligible_orders: 0, eligible_revenue: 0, est_activations: 0, est_air_orders: 0, tag_rev_net_est: 0, sub_rev_net_est: 0, total_air_rev_net_est: 0 });
 
   return {
     title: 'NOBL Air Revenue Forecast 2026',
@@ -745,11 +784,13 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       actual_eligible_revenue: Number(fullYear.actual_eligible_revenue.toFixed(2)),
       actual_rebill_orders: Math.round(fullYear.actual_rebill_orders),
       actual_rebill_revenue: Number(fullYear.actual_rebill_revenue.toFixed(2)),
+      actual_air_rev_net: Number(fullYear.actual_air_rev_net.toFixed(2)),
       store_revenue: Number(fullYear.store_revenue.toFixed(2)),
       orders: Math.round(fullYear.orders),
       eligible_orders: Math.round(fullYear.eligible_orders),
       eligible_revenue: Number(fullYear.eligible_revenue.toFixed(2)),
       aov: fullYear.orders > 0 ? Number((fullYear.store_revenue / fullYear.orders).toFixed(2)) : 0,
+      ttp_rate: Number(overallTtpRate.toFixed(4)),
       activation_rate: Number(forecastActivationRate.toFixed(4)),
       est_activations: Math.round(fullYear.est_activations),
       attach_rate: Number(attachRate.toFixed(4)),

@@ -55,6 +55,26 @@ const FORECAST_STATUS_STYLES = {
   total: { label: 'Full Year', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
 };
 
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+function forecastMonthLabel(row) {
+  if (!row?.month_key) return row?.month || '—';
+  const [year, mo] = String(row.month_key).split('-');
+  const month = MONTH_LABELS[(parseInt(mo, 10) || 1) - 1] || row.month || mo;
+  return `${month} ${year}`;
+}
+
+function forecastSourceLabel(row) {
+  if (!row) return '—';
+  if (row.row_type === 'actual') return `Actual · ${fmtNum(row.actual_orders)} orders incl. rebills`;
+  if (row.row_type === 'current_projection') {
+    return `MTD actuals · projected ${row.days_in_month || '—'}/${row.elapsed_days || '—'} days`;
+  }
+  if (row.row_type === 'target') return `Target ${fmt$(row.target_store_revenue)} ÷ ${fmt$(row.aov)}/order`;
+  if (row.row_type === 'total') return 'Actual + projected + target';
+  return row.order_source || '—';
+}
+
 const KPI_TOOLTIPS = {
   airOrders: 'Air Orders\nData: SUM air_orders for the selected date range.\nFormula: count of NOBL orders with NOBLAIR + luggage.',
   attachRate: 'Overall Attach Rate\nData: selected date range.\nFormula: SUM(air_orders) / SUM(total_orders). Total orders exclude rebills.',
@@ -719,10 +739,12 @@ export default function NoblAirPerformancePage() {
             <Card title="NOBL Air Revenue Forecast — Live Model" subtitle="Forecast assumptions refresh from live database/dashboard data; the sheet was only context for model structure." style={{ marginBottom: 16 }}>
               {currentForecastRow && (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:10, marginBottom:14 }}>
-                  <KpiCard size="sm" label="Current Month Actual Revenue" value={fmt$(currentForecastRow.actual_store_revenue)} tooltip="Actual NOBL order revenue month-to-date through the latest completed ETL date, including rebills. Formula: Gross Sales - Discounts + Taxes + Shipping." />
+                  <KpiCard size="sm" label="Current Month Actual Store Rev" value={fmt$(currentForecastRow.actual_store_revenue)} tooltip="Actual NOBL order revenue month-to-date through the latest completed ETL date, including rebills. Formula: Gross Sales - Discounts + Taxes + Shipping." />
                   <KpiCard size="sm" label="Current Month Actual Orders" value={fmtNum(currentForecastRow.actual_orders)} tooltip="Actual NOBL store orders month-to-date through the latest completed ETL date, including rebills." />
-                  <KpiCard size="sm" label="Current Month Projected Revenue" value={fmt$(currentForecastRow.store_revenue)} tooltip="Actual MTD store revenue multiplied by days in month / completed days." />
+                  <KpiCard size="sm" label="Current Month Actual Air Rev" value={fmt$(currentForecastRow.actual_air_rev_net)} tooltip="Actual NOBL Air combined net revenue MTD. This matches Performance Combined Net Revenue when Performance is set to the same MTD date range." />
+                  <KpiCard size="sm" label="Current Month Projected Store Rev" value={fmt$(currentForecastRow.store_revenue)} tooltip="Actual MTD store revenue multiplied by days in month / completed days." />
                   <KpiCard size="sm" label="Current Month Projected Orders" value={fmtNum(currentForecastRow.orders)} tooltip="Actual MTD orders multiplied by days in month / completed days." />
+                  <KpiCard size="sm" label="Current Month Projected Air Rev" value={fmt$(currentForecastRow.total_air_rev_net_est)} tooltip="Actual MTD NOBL Air combined net revenue multiplied by days in month / completed days." />
                   <KpiCard size="sm" label="Current Month Eligible Orders" value={fmtNum(currentForecastRow.eligible_orders)} tooltip="Projected non-rebill store orders. Attach rate applies to this eligible order base, not to rebill orders." />
                 </div>
               )}
@@ -800,12 +822,12 @@ export default function NoblAirPerformancePage() {
               </Card>
             </div>
 
-            <Card title="Monthly Forecast Detail" subtitle="Current month uses live MTD actuals projected by completed days; future months use target store revenue divided by live AOV." style={{ marginBottom: 16 }}>
+            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab when the Performance date range is the same calendar period. Current month shows MTD actuals plus full-month projections; future rows are targets." style={{ marginBottom: 16 }}>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
                     <tr style={{ color:'var(--text3)', borderBottom:'1px solid var(--border)' }}>
-                      {['Month','Status','Actual Revenue','Actual Orders','Projected/Target Revenue','Projected/Target Orders','Air-Eligible Orders','AOV','Activation','Est. Activations','Attach Rate','Est. Air Orders','Tag Rev','Sub Rev','Total Air Rev','Source'].map(h => (
+                      {['Month','Status','Actual Store Rev','Actual Store Orders','Actual Air Rev','Projected/Target Store Rev','Projected/Target Store Orders','Air-Eligible Orders','AOV','Attach Rate','TTP Rate','Activation','Est. Activations','Air Orders','Tag Rev','Sub Rev','Forecast / Actual Air Rev','Source'].map(h => (
                         <th key={h} style={{ textAlign: h === 'Month' || h === 'Source' ? 'left' : 'right', padding:'8px 10px', fontWeight:600 }}>{h}</th>
                       ))}
                     </tr>
@@ -815,7 +837,7 @@ export default function NoblAirPerformancePage() {
                       const statusStyle = FORECAST_STATUS_STYLES[r.row_type] || FORECAST_STATUS_STYLES.no_data;
                       return (
                       <tr key={r.month} style={{ borderBottom:'1px solid var(--border)', color: idx === forecastRows.length ? 'var(--text)' : 'var(--text2)', fontWeight: idx === forecastRows.length ? 700 : 400 }}>
-                        <td style={{ padding:'8px 10px' }}>{r.month}</td>
+                        <td style={{ padding:'8px 10px', whiteSpace:'nowrap' }}>{forecastMonthLabel(r)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right' }}>
                           <span style={{ display:'inline-block', padding:'3px 8px', borderRadius:999, background:statusStyle.bg, color:statusStyle.color, fontSize:11, fontWeight:700, whiteSpace:'nowrap' }}>
                             {r.status_label || statusStyle.label}
@@ -823,18 +845,20 @@ export default function NoblAirPerformancePage() {
                         </td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_store_revenue')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualNumber(r, 'actual_orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_air_rev_net')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.store_revenue)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.orders)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.eligible_orders)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.aov)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.attach_rate)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.ttp_rate)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.activation_rate)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.est_activations)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.attach_rate)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.est_air_orders)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.tag_rev_net_est)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.sub_rev_net_est)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.total_air_rev_net_est)}</td>
-                        <td style={{ padding:'8px 10px', color:'var(--text3)' }}>{r.order_source}</td>
+                        <td style={{ padding:'8px 10px', color:'var(--text3)', whiteSpace:'nowrap' }} title={r.order_source || undefined}>{forecastSourceLabel(r)}</td>
                       </tr>
                     );})}
                   </tbody>
