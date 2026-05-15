@@ -52,7 +52,9 @@ const FORECAST_STATUS_STYLES = {
   current_projection: { label: 'MTD + Projection', bg: 'rgba(245,158,11,.16)', color: '#f59e0b' },
   target: { label: 'Target', bg: 'rgba(99,102,241,.16)', color: '#818cf8' },
   no_data: { label: 'No Data', bg: 'rgba(239,68,68,.14)', color: '#ef4444' },
-  total: { label: 'Full Year', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
+  ytd_actual: { label: 'YTD Actual', bg: 'rgba(34,197,94,.14)', color: '#22c55e' },
+  full_year_forecast: { label: 'Full Year Forecast', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
+  total: { label: 'Total', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
 };
 
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -71,7 +73,9 @@ function forecastSourceLabel(row) {
     return `MTD actuals · projected ${row.days_in_month || '—'}/${row.elapsed_days || '—'} days`;
   }
   if (row.row_type === 'target') return `Target ${fmt$(row.target_store_revenue)} ÷ ${fmt$(row.aov)}/order`;
-  if (row.row_type === 'total') return 'Actual + projected + target';
+  if (row.row_type === 'ytd_actual') return 'Matches Performance for launch-to-date actuals';
+  if (row.row_type === 'full_year_forecast') return 'Full-year projection/targets only';
+  if (row.row_type === 'total') return 'Total';
   return row.order_source || '—';
 }
 
@@ -459,19 +463,21 @@ export default function NoblAirPerformancePage() {
   const revenueForecast = data.revenueForecast;
   const forecastAssumptions = revenueForecast?.assumptions || {};
   const forecastRows = revenueForecast?.rows || [];
+  const forecastYtdActual = revenueForecast?.ytd_actual || null;
   const forecastFullYear = revenueForecast?.full_year || null;
   const forecastTableRows = useMemo(
-    () => [...forecastRows, forecastFullYear].filter(Boolean),
-    [forecastRows, forecastFullYear]
+    () => [...forecastRows, forecastYtdActual, forecastFullYear].filter(Boolean),
+    [forecastRows, forecastYtdActual, forecastFullYear]
   );
   const currentForecastRow = useMemo(
     () => forecastRows.find(r => r.row_type === 'current_projection'),
     [forecastRows]
   );
-  const hasActualForecastData = (row) => ['actual', 'current_projection', 'total'].includes(row?.row_type);
+  const hasActualForecastData = (row) => ['actual', 'current_projection', 'ytd_actual'].includes(row?.row_type);
   const fmtActualCurrency = (row, field) => hasActualForecastData(row) ? fmt$(row?.[field]) : '—';
   const fmtActualNumber = (row, field) => hasActualForecastData(row) ? fmtNum(row?.[field]) : '—';
   const fmtActualPct = (row, field) => hasActualForecastData(row) ? fmtPct(row?.[field]) : '—';
+  const fmtMaybeNumber = (value) => value === null || value === undefined ? '—' : fmtNum(value);
   const forecastChartRows = useMemo(
     () => forecastRows.map(row => hasActualForecastData(row)
       ? row
@@ -823,7 +829,7 @@ export default function NoblAirPerformancePage() {
               </Card>
             </div>
 
-            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab when the Performance date range is the same calendar period. Current month shows MTD actuals plus full-month projections; future rows are targets." style={{ marginBottom: 16 }}>
+            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab for the same date period. YTD Actual is separated from Full Year Forecast so actuals and projections are not mixed in one total row." style={{ marginBottom: 16 }}>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
@@ -836,8 +842,9 @@ export default function NoblAirPerformancePage() {
                   <tbody>
                     {forecastTableRows.map((r, idx) => {
                       const statusStyle = FORECAST_STATUS_STYLES[r.row_type] || FORECAST_STATUS_STYLES.no_data;
+                      const isSummary = ['ytd_actual', 'full_year_forecast', 'total'].includes(r.row_type);
                       return (
-                      <tr key={r.month} style={{ borderBottom:'1px solid var(--border)', color: idx === forecastRows.length ? 'var(--text)' : 'var(--text2)', fontWeight: idx === forecastRows.length ? 700 : 400 }}>
+                      <tr key={r.month} style={{ borderBottom:'1px solid var(--border)', color: isSummary ? 'var(--text)' : 'var(--text2)', fontWeight: isSummary ? 700 : 400 }}>
                         <td style={{ padding:'8px 10px', whiteSpace:'nowrap' }}>{forecastMonthLabel(r)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right' }}>
                           <span style={{ display:'inline-block', padding:'3px 8px', borderRadius:999, background:statusStyle.bg, color:statusStyle.color, fontSize:11, fontWeight:700, whiteSpace:'nowrap' }}>
@@ -856,10 +863,10 @@ export default function NoblAirPerformancePage() {
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_rebill_rev_net')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_air_rev_net')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.store_revenue)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.orders)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtMaybeNumber(r.orders)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.aov)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.est_air_orders)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtNum(r.est_activations)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtMaybeNumber(r.est_air_orders)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtMaybeNumber(r.est_activations)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.attach_rate)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.activation_rate)}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.total_air_rev_net_est)}</td>
