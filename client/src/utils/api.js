@@ -58,10 +58,42 @@ export const deleteAnnotation = id => fetch(`${B}/api/annotations/${id}`,{method
 export const setHighlight = body => fetch(`${B}/api/highlights`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 export const removeHighlight = body => fetch(`${B}/api/highlights`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 
+const COMPACT_UNITS = [
+  { value: 1e12, suffix: 'T' },
+  { value: 1e9, suffix: 'B' },
+  { value: 1e6, suffix: 'M' },
+  { value: 1e3, suffix: 'K' },
+];
+
+function stripTrailingZeros(s) {
+  return String(s).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+}
+
+function formatCompactValue(value, { prefix = '', minForCompact = 1000, compactDigits = 1, smallDigits = 0 } = {}) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return '—';
+  const sign = v < 0 ? '-' : '';
+  const abs = Math.abs(v);
+  const unit = COMPACT_UNITS.find(u => abs >= u.value && abs >= minForCompact);
+  if (unit) {
+    const scaled = abs / unit.value;
+    const maxDigits = typeof compactDigits === 'function' ? compactDigits(scaled, unit.suffix) : compactDigits;
+    return `${sign}${prefix}${stripTrailingZeros(scaled.toFixed(maxDigits))}${unit.suffix}`;
+  }
+  return `${sign}${prefix}${abs.toLocaleString(undefined, {
+    minimumFractionDigits: smallDigits,
+    maximumFractionDigits: smallDigits,
+  })}`;
+}
+
 export function fmt$(n){
   const v=parseFloat(n);
   if(isNaN(v)) return '—';
-  return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  return formatCompactValue(v, {
+    prefix: '$',
+    compactDigits: (scaled) => scaled >= 100 ? 1 : 2,
+    smallDigits: 2,
+  });
 }
 
 // Handles both decimal fractions (0.326 → 32.6%) and already-percent values (32.6 → 32.6%)
@@ -74,6 +106,11 @@ export function fmtPct(n){
 }
 
 export function fmtNum(n){
+  const v=Math.round(parseFloat(n)||0);
+  return formatCompactValue(v, { compactDigits: 1, smallDigits: 0 });
+}
+
+export function fmtFullNum(n){
   const v=Math.round(parseFloat(n)||0);
   return v.toLocaleString();
 }
