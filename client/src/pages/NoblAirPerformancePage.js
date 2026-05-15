@@ -52,9 +52,7 @@ const FORECAST_STATUS_STYLES = {
   current_projection: { label: 'MTD + Projection', bg: 'rgba(245,158,11,.16)', color: '#f59e0b' },
   target: { label: 'Target', bg: 'rgba(99,102,241,.16)', color: '#818cf8' },
   no_data: { label: 'No Data', bg: 'rgba(239,68,68,.14)', color: '#ef4444' },
-  ytd_actual: { label: 'YTD Actual', bg: 'rgba(34,197,94,.14)', color: '#22c55e' },
-  full_year_forecast: { label: 'Full Year Forecast', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
-  total: { label: 'Total', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
+  total: { label: 'Full Year Total', bg: 'rgba(20,184,166,.16)', color: '#14b8a6' },
 };
 
 const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -73,22 +71,20 @@ function forecastSourceLabel(row) {
     return `MTD actuals · projected ${row.days_in_month || '—'}/${row.elapsed_days || '—'} days`;
   }
   if (row.row_type === 'target') return `Target ${fmt$(row.target_store_revenue)} ÷ ${fmt$(row.aov)}/order`;
-  if (row.row_type === 'ytd_actual') return 'Matches Performance for launch-to-date actuals';
-  if (row.row_type === 'full_year_forecast') return 'Full-year projection/targets only';
-  if (row.row_type === 'total') return 'Total';
+  if (row.row_type === 'total') return 'Actuals through latest ETL; forecast columns include projected/target full year';
   return row.order_source || '—';
 }
 
 const KPI_TOOLTIPS = {
-  airOrders: 'Air Orders\nData: SUM air_orders for the selected date range.\nFormula: count of NOBL orders with NOBLAIR + luggage.',
-  attachRate: 'Overall Attach Rate\nData: selected date range.\nFormula: SUM(air_orders) / SUM(total_orders). Total orders exclude rebills.',
-  ttpRate: 'Overall TTP Rate\nData: all mature subscribers as of the selected end date.\nFormula: converted mature subscribers / mature subscribers. Mature = created at least 14 days before end date. Converted = Appstle paid billing after creation OR Shopify rebill after creation.',
-  activationRate: 'Overall Activation\nFormula: Overall Attach Rate x Overall TTP Rate for the selected range.\nDaily rows use attach rate from 14 days prior x that day\'s TTP cohort.',
+  airOrders: 'Air Orders\nData: SUM air_orders for the selected Performance date range.\nFormula: count of NOBL orders with NOBLAIR + luggage. This matches Forecast Actual Air Orders for the same period.',
+  attachRate: 'Overall Attach Rate\nData: selected Performance date range.\nFormula: SUM(Air Orders) / SUM(Air-Eligible Orders). Air-Eligible Orders are non-rebill NOBL orders. This is the same formula used by Forecast Actual Attach for the same period.',
+  ttpRate: 'Overall TTP Rate\nData: all mature subscribers as of the selected Performance end date.\nFormula: converted mature subscribers / mature subscribers. Mature = created at least 14 days before end date. Converted = Appstle paid billing after creation OR Shopify rebill after creation. This matches Forecast Actual TTP for the same period end date.',
+  activationRate: 'Overall Activation\nFormula: Overall Attach Rate x Overall TTP Rate for the selected Performance date range. Forecast Actual Activation uses this same formula for the same period.\nDaily rows use attach rate from 14 days prior x that day\'s TTP cohort.',
   combinedNetRevenue: 'Combined Net Revenue\nData: selected date range from NOBL Air daily aggregate.\nFormula: tag_gross + sub_gross - tag_discounts - sub_discounts - tag_refunds - sub_refunds + Appstle rebill revenue.',
   rebillRevenue: 'Rebill Revenue\nData: selected date range.\nSource: Appstle lastSuccessfulOrder.orderAmount bucketed by billing date.',
   activeSubscribers: 'Active Subscribers\nData: all NOBL Air subscribers.\nFormula: count where Appstle status = active.',
   activeArr: 'Active ARR (est.)\nData: all active NOBL Air subscribers.\nFormula: SUM(contract_amount) for active subscriptions. Label is kept as ARR estimate in the dashboard.',
-  totalOrders: 'Total Orders\nData: selected date range.\nFormula: count of NOBL Shopify orders where is_rebill = false.',
+  eligibleOrders: 'Air-Eligible Orders\nData: selected Performance date range.\nFormula: count of NOBL Shopify orders where is_rebill = false. This is the denominator for Overall Attach Rate and matches Forecast Actual Eligible Orders for the same period.',
   paidAirOrders: 'Paid Air Orders\nData: selected date range.\nFormula: count of orders with NOBLAIR + luggage + paid NOBLAIR line.',
   zeroAirOrders: '$0 Air Orders\nData: selected date range.\nFormula: count of orders with NOBLAIR + luggage + zero-price NOBLAIR line.',
   matureSubs: 'Mature Subs\nData: all subscribers mature as of selected end date.\nFormula: count of NOBL Air subscribers where UTC created_at date <= end date - 14 days.',
@@ -282,7 +278,7 @@ function RegionMultiSelect({ value, onChange }) {
 
 /* ────────────── headers (full table) ────────────── */
 const HEADERS = [
-  'Date', 'Total Orders', 'Air Orders', 'Attach Rate', 'TTP Rate', 'Activation Rate',
+  'Date', 'Air-Eligible Orders', 'Air Orders', 'Attach Rate', 'TTP Rate', 'Activation Rate',
   '$0 Air', 'Paid Air', 'Rebill', 'Same-Day Cancel',
   'Tag Net Sales', 'Sub Net Sales', 'Rebill Revenue', 'New Sub Revenue', 'Combined Net Revenue',
   'New $79', 'New $99', 'New $119', 'New $129', 'New $139', 'New $149',
@@ -298,7 +294,7 @@ const AIR_ATTR_HEADERS = [
 function toTableRow(r) {
   return {
     'Date': r.date,
-    'Total Orders': r.total_orders,
+    'Air-Eligible Orders': r.total_orders,
     'Air Orders': r.air_orders,
     'Attach Rate': r.attach_rate,
     'TTP Rate': r.ttp_rate,
@@ -432,7 +428,7 @@ export default function NoblAirPerformancePage() {
     const activation = (attach != null && ttp != null) ? attach * ttp : null;
     const ttpCohort = data.ttpCohort || {};
     return {
-      totalOrders: t.total_orders || 0,
+      eligibleOrders: t.total_orders || 0,
       airOrders: t.air_orders || 0,
       attachRate: attach,
       ttpRate: ttp,                 // ← from nobl_air_subscribers cohort
@@ -463,17 +459,16 @@ export default function NoblAirPerformancePage() {
   const revenueForecast = data.revenueForecast;
   const forecastAssumptions = revenueForecast?.assumptions || {};
   const forecastRows = revenueForecast?.rows || [];
-  const forecastYtdActual = revenueForecast?.ytd_actual || null;
   const forecastFullYear = revenueForecast?.full_year || null;
   const forecastTableRows = useMemo(
-    () => [...forecastRows, forecastYtdActual, forecastFullYear].filter(Boolean),
-    [forecastRows, forecastYtdActual, forecastFullYear]
+    () => [...forecastRows, forecastFullYear].filter(Boolean),
+    [forecastRows, forecastFullYear]
   );
   const currentForecastRow = useMemo(
     () => forecastRows.find(r => r.row_type === 'current_projection'),
     [forecastRows]
   );
-  const hasActualForecastData = (row) => ['actual', 'current_projection', 'ytd_actual'].includes(row?.row_type);
+  const hasActualForecastData = (row) => ['actual', 'current_projection', 'total'].includes(row?.row_type);
   const fmtActualCurrency = (row, field) => hasActualForecastData(row) ? fmt$(row?.[field]) : '—';
   const fmtActualNumber = (row, field) => hasActualForecastData(row) ? fmtNum(row?.[field]) : '—';
   const fmtActualPct = (row, field) => hasActualForecastData(row) ? fmtPct(row?.[field]) : '—';
@@ -559,7 +554,7 @@ export default function NoblAirPerformancePage() {
 
           {/* ── Secondary KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Total Orders"      value={fmtNum(kpi.totalOrders)}      color="text" tooltip={KPI_TOOLTIPS.totalOrders} />
+            <KpiCard label="Air-Eligible Orders" value={fmtNum(kpi.eligibleOrders)} color="text" tooltip={KPI_TOOLTIPS.eligibleOrders} />
             <KpiCard label="Paid Air Orders"   value={fmtNum(kpi.paidAirOrders)}    color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
             <KpiCard label="$0 Air Orders"     value={fmtNum(kpi.zeroAirOrders)}    color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
             <KpiCard label="Mature Subs"       value={fmtNum(kpi.matureSubs)}       color="purple" tooltip={KPI_TOOLTIPS.matureSubs} />
@@ -829,7 +824,7 @@ export default function NoblAirPerformancePage() {
               </Card>
             </div>
 
-            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab for the same date period. YTD Actual is separated from Full Year Forecast so actuals and projections are not mixed in one total row." style={{ marginBottom: 16 }}>
+            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab for the same date period. The single Full Year Total row shows actuals through latest ETL and full-year forecast/projection columns separately." style={{ marginBottom: 16 }}>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
@@ -842,7 +837,7 @@ export default function NoblAirPerformancePage() {
                   <tbody>
                     {forecastTableRows.map((r, idx) => {
                       const statusStyle = FORECAST_STATUS_STYLES[r.row_type] || FORECAST_STATUS_STYLES.no_data;
-                      const isSummary = ['ytd_actual', 'full_year_forecast', 'total'].includes(r.row_type);
+                      const isSummary = r.row_type === 'total';
                       return (
                       <tr key={r.month} style={{ borderBottom:'1px solid var(--border)', color: isSummary ? 'var(--text)' : 'var(--text2)', fontWeight: isSummary ? 700 : 400 }}>
                         <td style={{ padding:'8px 10px', whiteSpace:'nowrap' }}>{forecastMonthLabel(r)}</td>
