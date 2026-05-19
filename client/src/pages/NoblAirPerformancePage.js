@@ -469,14 +469,27 @@ export default function NoblAirPerformancePage() {
     [forecastRows]
   );
   const hasActualForecastData = (row) => ['actual', 'current_projection', 'total'].includes(row?.row_type);
+  const hasProjectedForecastData = (row) => ['current_projection', 'target', 'total'].includes(row?.row_type);
   const fmtActualCurrency = (row, field) => hasActualForecastData(row) ? fmt$(row?.[field]) : '—';
   const fmtActualNumber = (row, field) => hasActualForecastData(row) ? fmtNum(row?.[field]) : '—';
   const fmtActualPct = (row, field) => hasActualForecastData(row) ? fmtPct(row?.[field]) : '—';
-  const fmtMaybeNumber = (value) => value === null || value === undefined ? '—' : fmtNum(value);
+  const fmtProjectedCurrency = (row, field) => hasProjectedForecastData(row) ? fmt$(row?.[field]) : '—';
+  const fmtProjectedNumber = (row, field) => hasProjectedForecastData(row) ? fmtNum(row?.[field]) : '—';
+  const fmtProjectedPct = (row, field) => hasProjectedForecastData(row) ? fmtPct(row?.[field]) : '—';
   const forecastChartRows = useMemo(
     () => forecastRows.map(row => hasActualForecastData(row)
-      ? row
-      : { ...row, actual_store_revenue: null, actual_orders: null }),
+      ? {
+        ...row,
+        projected_store_revenue_chart: row.row_type === 'actual' ? null : row.store_revenue,
+        projected_orders_chart: row.row_type === 'actual' ? null : row.orders,
+      }
+      : {
+        ...row,
+        actual_store_revenue: null,
+        actual_orders: null,
+        projected_store_revenue_chart: row.store_revenue,
+        projected_orders_chart: row.orders,
+      }),
     [forecastRows]
   );
   const statusData = useMemo(
@@ -799,7 +812,7 @@ export default function NoblAirPerformancePage() {
                     <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
                     <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} formatter={(v, n) => [fmt$(v), n]} />
                     <Legend wrapperStyle={{ fontSize:12 }} />
-                    <Bar dataKey="store_revenue" name="Projected/Target Revenue" fill="#14b8a6" radius={[3,3,0,0]} />
+                    <Bar dataKey="projected_store_revenue_chart" name="Projected/Target Revenue" fill="#14b8a6" radius={[3,3,0,0]} />
                     <Bar dataKey="actual_store_revenue" name="Actual Revenue" fill="#22c55e" radius={[3,3,0,0]} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -814,9 +827,9 @@ export default function NoblAirPerformancePage() {
                     <YAxis yAxisId="orders" orientation="right" tickFormatter={(v) => fmtNum(v)} tick={{ fontSize:11 }} width={58} stroke="var(--border2)" />
                     <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} formatter={(v, n) => [String(n).includes('Revenue') ? fmt$(v) : fmtNum(v), n]} />
                     <Legend wrapperStyle={{ fontSize:12 }} />
-                    <Bar yAxisId="rev" dataKey="store_revenue" name="Store Revenue" fill="#14b8a6" />
+                    <Bar yAxisId="rev" dataKey="projected_store_revenue_chart" name="Projected/Target Store Revenue" fill="#14b8a6" />
                     <Bar yAxisId="rev" dataKey="actual_store_revenue" name="Actual Revenue" fill="#22c55e" />
-                    <Line yAxisId="orders" type="monotone" dataKey="orders" name="Orders" stroke="#f59e0b" strokeWidth={2} dot={false} />
+                    <Line yAxisId="orders" type="monotone" dataKey="projected_orders_chart" name="Projected/Target Orders" stroke="#f59e0b" strokeWidth={2} dot={false} />
                     <Line yAxisId="orders" type="monotone" dataKey="actual_orders" name="Actual Orders" stroke="#22c55e" strokeWidth={2} dot={false} />
                     <Line yAxisId="orders" type="monotone" dataKey="est_air_orders" name="Est. Air Orders" stroke="#6366f1" strokeWidth={2} dot={false} />
                   </ComposedChart>
@@ -824,7 +837,7 @@ export default function NoblAirPerformancePage() {
               </Card>
             </div>
 
-            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab for the same date period. The single Full Year Total row shows actuals through latest ETL and full-year forecast/projection columns separately." style={{ marginBottom: 16 }}>
+            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab for the same date period. Completed actual months leave projection columns blank; current month and future targets show forecast/projection values. The Full Year Total row shows actuals through latest ETL and full-year forecast/projection columns separately." style={{ marginBottom: 16 }}>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
@@ -857,14 +870,14 @@ export default function NoblAirPerformancePage() {
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_sub_rev_net')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_rebill_rev_net')}</td>
                         <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_air_rev_net')}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.store_revenue)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtMaybeNumber(r.orders)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.aov)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtMaybeNumber(r.est_air_orders)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtMaybeNumber(r.est_activations)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.attach_rate)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtPct(r.activation_rate)}</td>
-                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmt$(r.total_air_rev_net_est)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedCurrency(r, 'store_revenue')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedNumber(r, 'orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{hasProjectedForecastData(r) ? fmt$(r.aov) : '—'}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedNumber(r, 'est_air_orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedNumber(r, 'est_activations')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedPct(r, 'attach_rate')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedPct(r, 'activation_rate')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedCurrency(r, 'total_air_rev_net_est')}</td>
                         <td style={{ padding:'8px 10px', color:'var(--text3)', whiteSpace:'nowrap' }} title={r.order_source || undefined}>{forecastSourceLabel(r)}</td>
                       </tr>
                     );})}
