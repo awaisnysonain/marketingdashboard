@@ -20,6 +20,7 @@ import StoreNoblPage     from './pages/StoreNoblPage';
 import StoreFLOPage      from './pages/StoreFLOPage';
 import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
 import MetaAdsPage       from './pages/MetaAdsPage';
+import ForecastEnginePage from './pages/ForecastEnginePage';
 
 function normalizeTheme(t) {
   return 'light';
@@ -50,6 +51,7 @@ const TAB_TO_PATH = {
   'Meta Ads':             '/meta-ads',
   'Subscriptions':        '/subscriptions',
   'Live Data':            '/live',
+  'Forecast Engine':      '/forecast-engine',
   'NOBL Air Performance': '/nobl-air-performance',
   'Store:NOBL':           '/store/nobl',
   'Store:FLO':            '/store/flo',
@@ -63,6 +65,7 @@ function pathToActiveTab(pathname, dynamicTabs) {
   if (pathname.startsWith('/meta-ads')) return 'Meta Ads';
   if (pathname.startsWith('/subscriptions')) return 'Subscriptions';
   if (pathname.startsWith('/live')) return 'Live Data';
+  if (pathname.startsWith('/forecast-engine')) return 'Forecast Engine';
   if (pathname.startsWith('/nobl-air-performance')) return 'NOBL Air Performance';
   if (pathname.startsWith('/store/nobl')) return 'Store:NOBL';
   if (pathname.startsWith('/store/flo')) return 'Store:FLO';
@@ -171,6 +174,7 @@ function AppRoot() {
         <Route path="/meta-ads"             element={<PageHost Comp={MetaAdsPage} />} />
         <Route path="/subscriptions"        element={<PageHost Comp={SubsPage} />} />
         <Route path="/live"                 element={<PageHost Comp={LivePage} />} />
+        <Route path="/forecast-engine"      element={<PageHost Comp={ForecastEnginePage} />} />
         <Route path="/nobl-air-performance" element={<PageHost Comp={NoblAirPerformancePage} />} />
         <Route path="/store/nobl"           element={<PageHost Comp={StoreNoblPage} />} />
         <Route path="/store/flo"            element={<PageHost Comp={StoreFLOPage} />} />

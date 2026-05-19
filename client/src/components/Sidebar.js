@@ -10,6 +10,7 @@ export const CORE_TABS = [
 ];
 
 const FIXED_DASHBOARD_TABS = [
+  { id: 'Forecast Engine', icon: Icons.TrendingUp, label: 'Forecast Engine' },
   { id: 'NOBL Air Performance', icon: Icons.Activity, label: 'NOBL Air Performance' },
 ];
 

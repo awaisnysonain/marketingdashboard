@@ -456,6 +456,313 @@ function monthEndFromKey(key) {
   return `${key}-${String(daysInMonthFromKey(key)).padStart(2, '0')}`;
 }
 
+const FORECAST_BRANDS = {
+  NOBL: {
+    label: 'NOBL Travel',
+    summaryTable: 'nobl_brand_tw_summary_daily',
+    geoTable: 'nobl_brand_tw_geo_daily',
+    plan: {
+      '2026-03': 19117775,
+      '2026-04': 15311615,
+      '2026-05': 14589630,
+      '2026-06': 42000000,
+      '2026-07': 60000000,
+      '2026-08': 58000000,
+      '2026-09': 45200000,
+      '2026-10': 32300000,
+      '2026-11': 142400000,
+      '2026-12': 113900000,
+    },
+    merTargets: {
+      '2026-05': 3.30,
+      '2026-06': 3.25,
+      '2026-07': 3.20,
+      '2026-08': 3.30,
+      '2026-09': 3.20,
+      '2026-10': 3.10,
+      '2026-11': 2.85,
+      '2026-12': 3.00,
+    },
+    regionMerRatios: { USA: 1, US: 1, Canada: 0.729, CA: 0.729, Australia: 0.691, AUS: 0.691, UK: 0.729, EU: 0.0031 },
+  },
+  FLO: {
+    label: 'Pilates FLO',
+    summaryTable: 'flo_brand_tw_summary_daily',
+    geoTable: 'flo_brand_tw_geo_daily',
+    plan: {},
+    merTargets: {},
+    regionMerRatios: {},
+  },
+};
+
+const FORECAST_MONTHS_2026 = Array.from({ length: 12 }, (_, i) => `2026-${String(i + 1).padStart(2, '0')}`);
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const DAY_WEIGHTS = { 0: 1.25, 1: 0.85, 2: 0.85, 3: 0.85, 4: 0.85, 5: 0.95, 6: 1.35 };
+const MONTH_SEASONALITY = {
+  '01': 0.78, '02': 0.82, '03': 0.90, '04': 0.90,
+  '05': 1.08, '06': 1.15, '07': 1.35, '08': 1.32,
+  '09': 1.02, '10': 0.82, '11': 2.15, '12': 2.05,
+};
+const SALE_WINDOWS = [
+  { start: '2026-05-22', end: '2026-05-31', tier: 'strong', name: 'Memorial Day' },
+  { start: '2026-06-10', end: '2026-06-16', tier: 'medium', name: "Father's Day / UK Launch" },
+  { start: '2026-06-27', end: '2026-07-06', tier: 'strong', name: 'July 4th' },
+  { start: '2026-08-25', end: '2026-09-07', tier: 'medium', name: 'Labor Day' },
+  { start: '2026-11-20', end: '2026-11-30', tier: 'strong', name: 'Black Friday / Cyber Monday' },
+  { start: '2026-12-10', end: '2026-12-31', tier: 'strong', name: 'Holiday / Year-End' },
+];
+const SALE_LIFTS = { gap: 1.00, weak: 1.05, medium: 1.22, strong: 1.50 };
+const DROP_WINDOWS = [
+  ['2026-05-30','new_product_drop'], ['2026-06-13','variation_drop'], ['2026-06-27','new_color_drop'],
+  ['2026-07-11','capsule_drop'], ['2026-07-25','new_product_collection'], ['2026-08-08','variation_drop'],
+  ['2026-08-22','color_collection_drop'], ['2026-09-05','new_color_drop'], ['2026-09-19','capsule_drop'],
+  ['2026-10-03','variation_drop'], ['2026-10-17','new_product_drop'], ['2026-10-31','color_collection_drop'],
+  ['2026-11-14','new_product_collection'], ['2026-11-28','variation_drop'], ['2026-12-12','capsule_drop'],
+].map(([start, type]) => ({ start, end: addDaysISO(start, 5), type }));
+const DROP_LIFTS = {
+  new_product_drop: { weak: 1.30, medium: 1.225, strong: 1.15, gap: 1.30 },
+  new_product_collection: { weak: 1.35, medium: 1.2625, strong: 1.175, gap: 1.35 },
+  new_color_drop: { weak: 1.20, medium: 1.15, strong: 1.10, gap: 1.20 },
+  variation_drop: { weak: 1.18, medium: 1.135, strong: 1.09, gap: 1.18 },
+  color_collection_drop: { weak: 1.12, medium: 1.09, strong: 1.06, gap: 1.12 },
+  capsule_drop: { weak: 1.10, medium: 1.075, strong: 1.05, gap: 1.10 },
+};
+
+function addDaysISO(dateString, days) {
+  const d = new Date(`${dateString}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function eachDateISO(start, end) {
+  const out = [];
+  for (let d = new Date(`${start}T00:00:00Z`); d.toISOString().slice(0, 10) <= end; d.setUTCDate(d.getUTCDate() + 1)) {
+    out.push(d.toISOString().slice(0, 10));
+  }
+  return out;
+}
+
+function monthLabel(key) {
+  const idx = Math.max(0, Math.min(11, Number(key.slice(5, 7)) - 1));
+  return `${MONTH_LABELS[idx]} ${key.slice(0, 4)}`;
+}
+
+function saleForDate(date) {
+  return SALE_WINDOWS.find(s => date >= s.start && date <= s.end) || null;
+}
+
+function dropForDate(date) {
+  return DROP_WINDOWS.find(d => date >= d.start && date <= d.end) || null;
+}
+
+function forecastDayFactors(date) {
+  const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+  const sale = saleForDate(date);
+  const drop = dropForDate(date);
+  const saleTier = sale?.tier || 'gap';
+  const dayWeight = DAY_WEIGHTS[dow] || 1;
+  const seasonality = MONTH_SEASONALITY[date.slice(5, 7)] || 1;
+  const saleLift = SALE_LIFTS[saleTier] || 1;
+  const dropLift = drop ? (DROP_LIFTS[drop.type]?.[saleTier] || 1) : 1;
+  return {
+    day_weight: dayWeight,
+    seasonality,
+    sale_tier: saleTier,
+    sale_name: sale?.name || 'Gap / Evergreen',
+    sale_lift: saleLift,
+    drop_type: drop?.type || null,
+    drop_lift: dropLift,
+    weight: dayWeight * seasonality * saleLift * dropLift,
+  };
+}
+
+function forecastStatus(variancePct) {
+  if (variancePct == null) return 'model';
+  const abs = Math.abs(variancePct);
+  if (abs <= 0.05) return 'green';
+  if (abs <= 0.15) return 'amber';
+  return 'red';
+}
+
+function confidenceForMonth(key, value) {
+  const mo = key.slice(5, 7);
+  const spread = mo === '11' || mo === '12' ? 0.15 : mo === '10' ? 0.18 : 0.08;
+  return { p25: value * (1 - spread), p50: value, p75: value * (1 + spread) };
+}
+
+async function loadForecastBrand(brandKey, asOfInput) {
+  const cfg = FORECAST_BRANDS[brandKey];
+  if (!cfg) throw new Error(`Unknown forecast brand: ${brandKey}`);
+  const maxRes = await pgQuery(`SELECT MAX(date)::text AS max_date FROM ${cfg.summaryTable}`, []);
+  const latestDate = maxRes.rows[0]?.max_date ? String(maxRes.rows[0].max_date).slice(0, 10) : new Date().toISOString().slice(0, 10);
+  const asOf = asOfInput && asOfInput < latestDate ? asOfInput : latestDate;
+  const yearStart = '2026-01-01';
+  const actualRes = await pgQuery(`
+    SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+           COALESCE(order_revenue, total_revenue, 0)::numeric(14,2) AS revenue,
+           COALESCE(total_spend, 0)::numeric(14,2) AS spend,
+           COALESCE(total_orders, 0)::int AS orders,
+           COALESCE(new_customer_orders, 0)::int AS new_customer_orders,
+           COALESCE(returning_customer_orders, 0)::int AS returning_customer_orders
+    FROM ${cfg.summaryTable}
+    WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+    ORDER BY date ASC
+  `, [yearStart, asOf]);
+  const geoRes = await pgQuery(`
+    SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+           region,
+           COALESCE(revenue_actual, 0)::numeric(14,2) AS revenue,
+           COALESCE(spend_actual, 0)::numeric(14,2) AS spend
+    FROM ${cfg.geoTable}
+    WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+      AND region != 'TOTAL'
+    ORDER BY date ASC
+  `, [yearStart, asOf]).catch(() => ({ rows: [] }));
+  const actuals = fmtRows(actualRes.rows);
+  const actualByDate = Object.fromEntries(actuals.map(r => [r.date, r]));
+  const currentMonth = monthKey(asOf);
+  const currentMonthStart = `${currentMonth}-01`;
+  const currentMonthEnd = monthEndFromKey(currentMonth);
+  const currentActualDates = eachDateISO(currentMonthStart, asOf).filter(d => actualByDate[d]);
+  const actualWeightSum = currentActualDates.reduce((sum, d) => sum + forecastDayFactors(d).weight, 0) || currentActualDates.length || 1;
+  const actualRevenueMTD = currentActualDates.reduce((sum, d) => sum + toNum(actualByDate[d]?.revenue), 0);
+  const normalizedDailyBase = actualRevenueMTD / actualWeightSum;
+  const trailingActual = actuals.slice(-7);
+  const trailingMer = trailingActual.reduce((s, r) => s + toNum(r.revenue), 0) / Math.max(1, trailingActual.reduce((s, r) => s + toNum(r.spend), 0));
+  const fallbackMer = Number.isFinite(trailingMer) && trailingMer > 0 ? trailingMer : 3;
+  const monthlyRows = FORECAST_MONTHS_2026.map(key => {
+    const start = `${key}-01`;
+    const end = monthEndFromKey(key);
+    const monthDates = eachDateISO(start, end);
+    const actualDates = monthDates.filter(d => d <= asOf && actualByDate[d]);
+    const futureDates = monthDates.filter(d => d > asOf);
+    const actualRevenue = actualDates.reduce((s, d) => s + toNum(actualByDate[d]?.revenue), 0);
+    const actualSpend = actualDates.reduce((s, d) => s + toNum(actualByDate[d]?.spend), 0);
+    const actualOrders = actualDates.reduce((s, d) => s + toNum(actualByDate[d]?.orders), 0);
+    const planRevenue = cfg.plan[key] || null;
+    const targetMer = cfg.merTargets[key] || fallbackMer;
+    const isPast = key < currentMonth;
+    const isCurrent = key === currentMonth;
+    let projectedRevenue = actualRevenue;
+    let projectedSpend = actualSpend;
+    let projectedOrders = actualOrders;
+    let reason = 'Completed month uses actuals.';
+    if (isCurrent) {
+      const remainingRevenue = futureDates.reduce((s, d) => s + normalizedDailyBase * forecastDayFactors(d).weight, 0);
+      projectedRevenue = actualRevenue + remainingRevenue;
+      projectedSpend = actualSpend + (targetMer > 0 ? remainingRevenue / targetMer : 0);
+      const aov = actualOrders > 0 ? actualRevenue / actualOrders : 0;
+      projectedOrders = actualOrders + (aov > 0 ? remainingRevenue / aov : 0);
+      const upcomingEvents = futureDates.map(d => ({ d, f: forecastDayFactors(d) })).filter(x => x.f.sale_tier !== 'gap' || x.f.drop_type).slice(0, 2);
+      reason = upcomingEvents.length
+        ? `Actual MTD + weighted remaining days. Upcoming: ${upcomingEvents.map(x => `${x.d} ${x.f.sale_name}${x.f.drop_type ? ` + ${x.f.drop_type}` : ''}`).join('; ')}.`
+        : 'Actual MTD + weighted remaining days using day-of-week and seasonality.';
+    } else if (!isPast) {
+      const modelRevenue = monthDates.reduce((s, d) => s + normalizedDailyBase * forecastDayFactors(d).weight, 0);
+      projectedRevenue = planRevenue || modelRevenue;
+      projectedSpend = targetMer > 0 ? projectedRevenue / targetMer : 0;
+      const currentAov = actualOrders > 0 ? actualRevenue / actualOrders : (actuals.reduce((s, r) => s + toNum(r.revenue), 0) / Math.max(1, actuals.reduce((s, r) => s + toNum(r.orders), 0)));
+      projectedOrders = currentAov > 0 ? projectedRevenue / currentAov : 0;
+      const monthEvents = monthDates.map(d => forecastDayFactors(d)).filter(f => f.sale_tier !== 'gap' || f.drop_type);
+      reason = planRevenue
+        ? `Target-backed forecast with calendar guardrails (${monthEvents.length} sale/drop days).`
+        : `Model forecast from weighted day-of-week, seasonality, sale, and drop calendar (${monthEvents.length} event days).`;
+    }
+    const actualMer = actualSpend > 0 ? actualRevenue / actualSpend : null;
+    const projectedMer = projectedSpend > 0 ? projectedRevenue / projectedSpend : null;
+    const variance = planRevenue ? projectedRevenue - planRevenue : null;
+    const variancePct = planRevenue ? variance / planRevenue : null;
+    const ci = confidenceForMonth(key, projectedRevenue);
+    return {
+      month: monthLabel(key),
+      month_key: key,
+      row_type: isPast ? 'actual' : isCurrent ? 'current_projection' : 'future_projection',
+      plan_revenue: planRevenue,
+      actual_revenue: actualRevenue || null,
+      actual_spend: actualSpend || null,
+      actual_orders: Math.round(actualOrders || 0),
+      actual_mer: actualMer,
+      projected_revenue: projectedRevenue,
+      projected_spend: projectedSpend,
+      projected_orders: Math.round(projectedOrders || 0),
+      projected_mer: projectedMer,
+      mer_target: targetMer,
+      variance,
+      variance_pct: variancePct,
+      status: forecastStatus(variancePct),
+      p25: ci.p25,
+      p50: ci.p50,
+      p75: ci.p75,
+      reason,
+    };
+  });
+  const current = monthlyRows.find(r => r.month_key === currentMonth) || monthlyRows[0];
+  const fullYear = monthlyRows.reduce((acc, r) => {
+    acc.plan_revenue += toNum(r.plan_revenue);
+    acc.actual_revenue += toNum(r.actual_revenue);
+    acc.actual_spend += toNum(r.actual_spend);
+    acc.projected_revenue += toNum(r.projected_revenue);
+    acc.projected_spend += toNum(r.projected_spend);
+    return acc;
+  }, { plan_revenue: 0, actual_revenue: 0, actual_spend: 0, projected_revenue: 0, projected_spend: 0 });
+  fullYear.actual_mer = fullYear.actual_spend > 0 ? fullYear.actual_revenue / fullYear.actual_spend : null;
+  fullYear.projected_mer = fullYear.projected_spend > 0 ? fullYear.projected_revenue / fullYear.projected_spend : null;
+  fullYear.variance = fullYear.plan_revenue > 0 ? fullYear.projected_revenue - fullYear.plan_revenue : null;
+  fullYear.variance_pct = fullYear.plan_revenue > 0 ? fullYear.variance / fullYear.plan_revenue : null;
+  fullYear.status = forecastStatus(fullYear.variance_pct);
+  const currentStatus = forecastStatus(current?.variance_pct);
+  const narrative = `${cfg.label}: ${current?.month || 'current month'} is ${currentStatus === 'green' ? 'on track' : currentStatus === 'amber' ? 'watching variance' : currentStatus === 'red' ? 'off track' : 'model-only'} at ${current?.variance_pct == null ? 'no plan variance' : `${(current.variance_pct * 100).toFixed(1)}% vs plan`}. Full-year projection is ${fullYear.plan_revenue ? `${(fullYear.variance_pct * 100).toFixed(1)}% vs plan` : 'model-driven because no annual plan is configured'}. Forecast uses day-of-week, sale/drop calendar, seasonality, and MER targets rather than a flat rolling average.`;
+  const dailyProjection = eachDateISO(asOf, currentMonthEnd).map(date => {
+    const actual = actualByDate[date];
+    const factors = forecastDayFactors(date);
+    const projectedRevenue = actual ? toNum(actual.revenue) : normalizedDailyBase * factors.weight;
+    const merTarget = cfg.merTargets[monthKey(date)] || fallbackMer;
+    return {
+      date,
+      is_actual: Boolean(actual),
+      actual_revenue: actual ? toNum(actual.revenue) : null,
+      projected_revenue: projectedRevenue,
+      projected_spend: actual ? toNum(actual.spend) : (merTarget > 0 ? projectedRevenue / merTarget : null),
+      mer_target: merTarget,
+      ...factors,
+    };
+  });
+  const regionMap = {};
+  for (const r of fmtRows(geoRes.rows || [])) {
+    if (!regionMap[r.region]) regionMap[r.region] = { region: r.region, actual_revenue: 0, actual_spend: 0 };
+    regionMap[r.region].actual_revenue += toNum(r.revenue);
+    regionMap[r.region].actual_spend += toNum(r.spend);
+  }
+  const regions = Object.values(regionMap).map(r => ({
+    ...r,
+    actual_mer: r.actual_spend > 0 ? r.actual_revenue / r.actual_spend : null,
+    mer_ratio_vs_usa: cfg.regionMerRatios[r.region] || null,
+  })).sort((a, b) => b.actual_revenue - a.actual_revenue);
+  const redlines = [];
+  if (brandKey === 'NOBL' && fullYear.projected_revenue < 404000000) redlines.push({ code: 'RL-9', severity: 'review', message: 'Full-year projection is below P25 ($404M); human review gate required before downstream use.' });
+  return {
+    brand: brandKey,
+    label: cfg.label,
+    as_of: asOf,
+    latest_actual_date: latestDate,
+    current_month: current,
+    full_year: fullYear,
+    monthly: monthlyRows,
+    daily_projection: dailyProjection,
+    regions,
+    narrative,
+    redlines,
+    assumptions: {
+      day_weights: DAY_WEIGHTS,
+      sale_lifts: SALE_LIFTS,
+      drop_lifts: DROP_LIFTS,
+      mer_targets: cfg.merTargets,
+      plan_months: cfg.plan,
+      redline_p25_floor: brandKey === 'NOBL' ? 404000000 : null,
+    },
+  };
+}
+
 async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   const forecastAsOf = end;
   const forecastMonths = [
@@ -810,6 +1117,45 @@ async function capNoblAirEndDate(end) {
   const latest = r.rows[0]?.latest_complete_date;
   return latest && latest < end ? latest : end;
 }
+
+// GET /forecast-engine — calendar-aware revenue forecast for NOBL + FLO.
+router.get('/forecast-engine', async (req, res) => {
+  try {
+    const brandParam = String(req.query.brand || 'ALL').toUpperCase();
+    const asOf = req.query.asOf ? String(req.query.asOf).slice(0, 10) : null;
+    const brands = brandParam === 'ALL'
+      ? ['NOBL', 'FLO']
+      : brandParam.split(',').map(s => s.trim()).filter(b => FORECAST_BRANDS[b]);
+    if (brands.length === 0) brands.push('NOBL');
+    const results = await Promise.all(brands.map(b => loadForecastBrand(b, asOf)));
+    const combined = results.reduce((acc, b) => {
+      acc.actual_revenue += toNum(b.full_year.actual_revenue);
+      acc.projected_revenue += toNum(b.full_year.projected_revenue);
+      acc.plan_revenue += toNum(b.full_year.plan_revenue);
+      acc.actual_spend += toNum(b.full_year.actual_spend);
+      acc.projected_spend += toNum(b.full_year.projected_spend);
+      return acc;
+    }, { actual_revenue: 0, projected_revenue: 0, plan_revenue: 0, actual_spend: 0, projected_spend: 0 });
+    combined.actual_mer = combined.actual_spend > 0 ? combined.actual_revenue / combined.actual_spend : null;
+    combined.projected_mer = combined.projected_spend > 0 ? combined.projected_revenue / combined.projected_spend : null;
+    combined.variance = combined.plan_revenue > 0 ? combined.projected_revenue - combined.plan_revenue : null;
+    combined.variance_pct = combined.plan_revenue > 0 ? combined.variance / combined.plan_revenue : null;
+    combined.status = forecastStatus(combined.variance_pct);
+    res.json({
+      as_of: results.map(r => r.as_of).sort()[0] || asOf,
+      brands: results,
+      combined,
+      methodology: {
+        purpose: 'Daily actuals plus calendar-aware forward projection for current month and full year.',
+        factors: ['day-of-week weights', 'sale calendar and strength tier', 'monthly seasonality', 'MER targets', 'manufactured drop windows', 'regional pacing'],
+        redlines: ['no flat rolling average', 'drop windows remain discrete', 'BFCM is model anchored', 'full-year below P25 triggers review'],
+      },
+    });
+  } catch (e) {
+    console.error('[Analytics /forecast-engine]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
 
 async function clampNoblAirStartDate(start) {
   const r = await pgQuery(
