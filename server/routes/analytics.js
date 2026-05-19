@@ -606,14 +606,19 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   const attachRate = rangeTotals.total_orders > 0 ? rangeTotals.air_orders / rangeTotals.total_orders : 0;
   const overallTtpRate = Number(ttpCohort?.ttp_rate || 0);
   const periodActivationRate = attachRate * overallTtpRate;
-  // Main forecast activation uses the same definition as the Performance KPI.
-  const forecastActivationRate = periodActivationRate;
+  // Sheet-style forecast activation: trailing converted daily cohorts / trailing air orders.
+  // Actual columns still use Performance activation = attach × TTP.
+  const forecastActivationRate = trailingTotals.air_orders > 0
+    ? trailingTotals.converted_count / trailingTotals.air_orders
+    : periodActivationRate;
   const eligibleOrderRate = selectedOrders > 0 ? selectedEligibleOrders / selectedOrders : 0;
-  // Reference only: weighted average of the actual daily activation_rate over the latest 7 complete days.
+  // Reference only: weighted average of the actual daily Performance activation_rate over the latest 7 complete days.
   const rolling7PerformanceActivationRate = trailingTotals.activation_weight > 0
     ? trailingTotals.activation_weighted_sum / trailingTotals.activation_weight
     : periodActivationRate;
-  const avgRevenuePerOrder = selectedOrders > 0 ? selectedRevenue / selectedOrders : 0;
+  const avgRevenuePerOrder = selectedEligibleOrders > 0
+    ? selectedRevenue / selectedEligibleOrders
+    : (selectedOrders > 0 ? selectedRevenue / selectedOrders : 0);
   const tagNetPerAirOrder = rangeTotals.air_orders > 0 ? rangeTotals.tag_net_sales / rangeTotals.air_orders : 0;
   const subNetPerActivation = rangeTotals.converted_count > 0 ? rangeTotals.sub_net_sales / rangeTotals.converted_count : 0;
   const blendedNetRevPerAirOrder = rangeTotals.air_orders > 0 ? rangeTotals.combined_net_revenue / rangeTotals.air_orders : 0;
@@ -627,12 +632,12 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     const actualRebillOrders = Math.max(0, actualOrders - actualEligibleOrders);
     const actualRebillRevenue = Math.max(0, actualStoreRevenue - actualEligibleRevenue);
     let storeRevenue = actualStoreRevenue;
-    let orders = actualOrders;
+    let orders = actualEligibleOrders;
     let eligibleOrders = actualEligibleOrders;
     let eligibleRevenue = actualEligibleRevenue;
     let rowType = actualOrders > 0 ? 'actual' : 'no_data';
     let statusLabel = actualOrders > 0 ? 'Actual' : 'No Data';
-    let orderSource = actualOrders > 0 ? `Actual (${actualOrders.toLocaleString()} orders incl. rebills)` : 'No actual data yet';
+    let orderSource = actualOrders > 0 ? `Actual (${actualEligibleOrders.toLocaleString()} eligible orders; ${actualOrders.toLocaleString()} incl. rebills)` : 'No actual data yet';
     let elapsedDays = null;
     let days = null;
     let projectionFactor = 1;
@@ -642,50 +647,33 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
       days = daysInMonthFromKey(key);
       projectionFactor = days / elapsedDays;
       storeRevenue = actualStoreRevenue * projectionFactor;
-      orders = actualOrders * projectionFactor;
+      orders = actualEligibleOrders * projectionFactor;
       eligibleOrders = actualEligibleOrders * projectionFactor;
       eligibleRevenue = actualEligibleRevenue * projectionFactor;
       rowType = 'current_projection';
       statusLabel = 'MTD + Projection';
-      orderSource = `MTD actual (${actualOrders.toLocaleString()} orders incl. rebills) × ${days}/${elapsedDays} days`;
+      orderSource = `MTD eligible orders (${actualEligibleOrders.toLocaleString()}) × ${days}/${elapsedDays} days`;
     } else if (targetRevenue) {
       storeRevenue = targetRevenue;
       orders = avgRevenuePerOrder > 0 ? targetRevenue / avgRevenuePerOrder : 0;
-      eligibleOrders = orders * eligibleOrderRate;
-      eligibleRevenue = targetRevenue * eligibleOrderRate;
+      eligibleOrders = orders;
+      eligibleRevenue = targetRevenue;
       rowType = 'target';
       statusLabel = 'Target';
       orderSource = `Estimated (target $${(targetRevenue / 1000000).toFixed(1)}M ÷ $${Math.round(avgRevenuePerOrder).toLocaleString()}/order)`;
     }
 
-    const rowAttachRate = (actualAir && actualAir.total_orders > 0 && rowType !== 'target')
-      ? actualAir.air_orders / actualAir.total_orders
-      : attachRate;
-    const rowTtpRate = rowType !== 'target'
-      ? Number(ttpAsOfByMonth[key]?.ttp_rate || overallTtpRate || 0)
-      : overallTtpRate;
-    const rowActivationRate = rowAttachRate * rowTtpRate;
+    const rowAttachRate = attachRate;
+    const rowTtpRate = overallTtpRate;
+    const rowActivationRate = forecastActivationRate;
     const actualTtpRate = actualOrders > 0 ? Number(ttpAsOfByMonth[key]?.ttp_rate || overallTtpRate || 0) : null;
     const actualAttachRate = actualAir?.total_orders > 0 ? actualAir.air_orders / actualAir.total_orders : null;
     const actualActivationRate = actualAttachRate != null && actualTtpRate != null ? actualAttachRate * actualTtpRate : null;
     const estActivations = eligibleOrders * rowActivationRate;
     const estAirOrders = eligibleOrders * rowAttachRate;
-    let tagRevNetEst;
-    let subRevNetEst;
-    let totalAirRevNetEst;
-    if (rowType === 'actual') {
-      tagRevNetEst = actualAir?.tag_net_sales || 0;
-      totalAirRevNetEst = actualAir?.combined_net_revenue || 0;
-      subRevNetEst = Math.max(0, totalAirRevNetEst - tagRevNetEst);
-    } else if (rowType === 'current_projection') {
-      tagRevNetEst = (actualAir?.tag_net_sales || 0) * projectionFactor;
-      totalAirRevNetEst = (actualAir?.combined_net_revenue || 0) * projectionFactor;
-      subRevNetEst = Math.max(0, totalAirRevNetEst - tagRevNetEst);
-    } else {
-      tagRevNetEst = estAirOrders * tagNetPerAirOrder;
-      subRevNetEst = estActivations * avgTierPrice;
-      totalAirRevNetEst = tagRevNetEst + subRevNetEst;
-    }
+    const tagRevNetEst = estAirOrders * tagNetPerAirOrder;
+    const subRevNetEst = estActivations * avgTierPrice;
+    const totalAirRevNetEst = tagRevNetEst + subRevNetEst;
     const rowAov = orders > 0 ? storeRevenue / orders : 0;
 
     return {
@@ -795,7 +783,8 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     title: 'NOBL Air Revenue Forecast 2026',
     assumptions: {
       forecast_activation_rate: Number(forecastActivationRate.toFixed(4)),
-      rolling_7d_activation_rate: Number(rolling7PerformanceActivationRate.toFixed(4)),
+      rolling_7d_activation_rate: Number(forecastActivationRate.toFixed(4)),
+      rolling_7d_performance_activation_rate: Number(rolling7PerformanceActivationRate.toFixed(4)),
       period_activation_rate: Number(periodActivationRate.toFixed(4)),
       overall_attach_rate: Number(attachRate.toFixed(4)),
       overall_ttp_rate: Number(overallTtpRate.toFixed(4)),

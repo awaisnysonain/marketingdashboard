@@ -469,7 +469,7 @@ export default function NoblAirPerformancePage() {
     [forecastRows]
   );
   const hasActualForecastData = (row) => ['actual', 'current_projection', 'total'].includes(row?.row_type);
-  const hasProjectedForecastData = (row) => ['current_projection', 'target', 'total'].includes(row?.row_type);
+  const hasProjectedForecastData = (row) => ['actual', 'current_projection', 'target', 'total'].includes(row?.row_type);
   const fmtActualCurrency = (row, field) => hasActualForecastData(row) ? fmt$(row?.[field]) : '—';
   const fmtActualNumber = (row, field) => hasActualForecastData(row) ? fmtNum(row?.[field]) : '—';
   const fmtActualPct = (row, field) => hasActualForecastData(row) ? fmtPct(row?.[field]) : '—';
@@ -480,8 +480,8 @@ export default function NoblAirPerformancePage() {
     () => forecastRows.map(row => hasActualForecastData(row)
       ? {
         ...row,
-        projected_store_revenue_chart: row.row_type === 'actual' ? null : row.store_revenue,
-        projected_orders_chart: row.row_type === 'actual' ? null : row.orders,
+        projected_store_revenue_chart: row.store_revenue,
+        projected_orders_chart: row.orders,
       }
       : {
         ...row,
@@ -758,15 +758,15 @@ export default function NoblAirPerformancePage() {
                   <KpiCard size="sm" label="Current Month Actual Orders" value={fmtNum(currentForecastRow.actual_orders)} tooltip="Actual NOBL store orders month-to-date through the latest completed ETL date, including rebills." />
                   <KpiCard size="sm" label="Current Month Actual Air Rev" value={fmt$(currentForecastRow.actual_air_rev_net)} tooltip="Actual NOBL Air combined net revenue MTD. This matches Performance Combined Net Revenue when Performance is set to the same MTD date range." />
                   <KpiCard size="sm" label="Current Month Projected Store Rev" value={fmt$(currentForecastRow.store_revenue)} tooltip="Actual MTD store revenue multiplied by days in month / completed days." />
-                  <KpiCard size="sm" label="Current Month Projected Orders" value={fmtNum(currentForecastRow.orders)} tooltip="Actual MTD orders multiplied by days in month / completed days." />
-                  <KpiCard size="sm" label="Current Month Projected Air Rev" value={fmt$(currentForecastRow.total_air_rev_net_est)} tooltip="Actual MTD NOBL Air combined net revenue multiplied by days in month / completed days." />
+                  <KpiCard size="sm" label="Current Month Projected Eligible Orders" value={fmtNum(currentForecastRow.orders)} tooltip="Actual MTD Air-eligible orders multiplied by days in month / completed days." />
+                  <KpiCard size="sm" label="Current Month Forecast Air Rev" value={fmt$(currentForecastRow.total_air_rev_net_est)} tooltip="Sheet-style model: forecast air orders × Tag Net/Air Order + forecast activations × Avg Converted Tier." />
                   <KpiCard size="sm" label="Current Month Eligible Orders" value={fmtNum(currentForecastRow.eligible_orders)} tooltip="Projected non-rebill store orders. Attach rate applies to this eligible order base, not to rebill orders." />
                 </div>
               )}
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:10 }}>
-                <KpiCard size="sm" label="Forecast Activation" value={fmtPct(forecastAssumptions.forecast_activation_rate)} tooltip="Main forecast assumption. Formula: Overall Attach Rate × Overall TTP Rate, matching the Performance KPI definition." />
-                <KpiCard size="sm" label="Rolling 7d Perf Activation" value={fmtPct(forecastAssumptions.rolling_7d_activation_rate)} tooltip="Reference only. Weighted average of daily Performance activation_rate over the latest 7 complete days." />
-                <KpiCard size="sm" label="AOV" value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Formula: selected-period order revenue / selected-period store orders, including rebills. Order revenue = Gross Sales - Discounts + Taxes + Shipping." />
+                <KpiCard size="sm" label="Forecast Activation" value={fmtPct(forecastAssumptions.forecast_activation_rate)} tooltip="Sheet-style forecast assumption. Formula: trailing 7-day converted cohorts / trailing 7-day Air orders. This drives forecast activations." />
+                <KpiCard size="sm" label="Performance Activation" value={fmtPct(forecastAssumptions.period_activation_rate)} tooltip="Reference only. Performance formula: Overall Attach Rate × Overall TTP Rate. Actual columns use this logic for matching Performance." />
+                <KpiCard size="sm" label="AOV" value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Formula: selected-period order revenue / selected-period Air-eligible orders. Used to convert target store revenue into projected eligible orders." />
                 <KpiCard size="sm" label="Eligible Order Rate" value={fmtPct(forecastAssumptions.eligible_order_rate)} tooltip="Formula: non-rebill store orders / all store orders. Used to convert total target orders into Air-eligible orders." />
                 <KpiCard size="sm" label="Avg Converted Tier" value={fmt$(forecastAssumptions.avg_tier_price_converted_subs)} tooltip="Formula: average Appstle contract amount for converted subscribers." />
                 <KpiCard size="sm" label="Tag Net / Air Order" value={fmt$(forecastAssumptions.tag_net_sales_per_air_order)} tooltip="Formula: selected-period Tag Net Sales / Air Orders." />
@@ -837,12 +837,12 @@ export default function NoblAirPerformancePage() {
               </Card>
             </div>
 
-            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab for the same date period. Completed actual months leave projection columns blank; current month and future targets show forecast/projection values. The Full Year Total row shows actuals through latest ETL and full-year forecast/projection columns separately." style={{ marginBottom: 16 }}>
+            <Card title="Monthly Forecast Detail" subtitle="Actual columns match the Performance tab for the same date period. Forecast columns follow the provided sheet model: eligible orders × forecast activation/attach assumptions. The Full Year Total row shows actuals through latest ETL and full-year forecast columns separately." style={{ marginBottom: 16 }}>
               <div style={{ overflowX:'auto' }}>
                 <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
                   <thead>
                     <tr style={{ color:'var(--text3)', borderBottom:'1px solid var(--border)' }}>
-                      {['Month','Status','Actual Store Rev','Actual Store Orders','Actual Eligible Orders','Actual Air Orders','Actual Attach','Actual TTP','Actual Activation','Actual Tag Rev','Actual Sub Rev','Actual Rebill Rev','Actual Air Rev','Projected/Target Store Rev','Projected/Target Store Orders','AOV','Forecast Air Orders','Forecast Activations','Forecast Attach','Forecast Activation','Forecast Air Rev','Source'].map(h => (
+                      {['Month','Status','Actual Store Rev','Actual Store Orders','Actual Eligible Orders','Actual Air Orders','Actual Attach','Actual TTP','Actual Activation','Actual Tag Rev','Actual Sub Rev','Actual Rebill Rev','Actual Air Rev','Projected/Target Store Rev','Projected/Target Eligible Orders','AOV','Forecast Air Orders','Forecast Activations','Forecast Attach','Forecast Activation','Forecast Air Rev','Source'].map(h => (
                         <th key={h} style={{ textAlign: h === 'Month' || h === 'Source' ? 'left' : 'right', padding:'8px 10px', fontWeight:600 }}>{h}</th>
                       ))}
                     </tr>
