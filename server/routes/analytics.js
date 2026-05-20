@@ -2,6 +2,10 @@ const express = require('express');
 const router  = express.Router();
 const { pgQuery } = require('../db/postgres');
 const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
+const { getNoblAirDataVersion } = require('../utils/noblAirDataVersion');
+const { withResponseCache } = require('../utils/responseCache');
+
+const metaAirWarmInFlight = new Set();
 
 /*
  * ══════════════════════════════════════════════════════════════
@@ -1849,6 +1853,23 @@ router.get('/subscriptions', async (req, res) => {
 
 // ── Legacy single-brand inline implementation removed (now in fetchNoblSubs / fetchFloSubs above) ──
 
+// GET /nobl/data-version — bump when nightly ETL updates Air / Meta tables (cache invalidation)
+router.get('/nobl/data-version', async (req, res) => {
+  try {
+    const meta = await getNoblAirDataVersion(true);
+    res.json({
+      version: meta.version,
+      air_daily_max: meta.air_daily_max,
+      meta_air_max: meta.meta_air_max,
+      aggregate_end: meta.aggregate_end,
+      last_etl_at: meta.last_etl_at,
+    });
+  } catch (e) {
+    console.error('[Analytics /nobl/data-version]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /nobl/air-performance
 router.get('/nobl/air-performance', async (req, res) => {
   const { start, end } = getDefaultDates(req);
@@ -1869,6 +1890,9 @@ router.get('/nobl/air-performance', async (req, res) => {
   const includeForecast = ['1', 'true', 'yes'].includes(String(req.query.includeForecast || '').toLowerCase());
 
   try {
+    const { version } = await getNoblAirDataVersion();
+    const cacheKey = `perf:${start}:${end}:${region}:${rollingDays}:${forecastDays}:${includeForecast ? 1 : 0}`;
+    const { body, hit } = await withResponseCache('nobl-air', cacheKey, version, async () => {
     const [effectiveEnd, effectiveStart] = await Promise.all([
       capNoblAirEndDate(end),
       clampNoblAirStartDate(start),
@@ -2021,7 +2045,7 @@ router.get('/nobl/air-performance', async (req, res) => {
       }
     }
 
-    res.json({
+    return {
       rows: rowsDesc,
       totals,
       forecast,
@@ -2036,7 +2060,11 @@ router.get('/nobl/air-performance', async (req, res) => {
       data_end: effectiveEnd,
       requested_start: start,
       requested_end: end,
+    };
     });
+    res.setHeader('X-Data-Version', version);
+    res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /nobl/air-performance]', e.message);
     res.status(500).json({ error: e.message });
@@ -2046,12 +2074,17 @@ router.get('/nobl/air-performance', async (req, res) => {
 // GET /nobl/air-forecast — revenue forecast tab (heavy; load on demand, not with performance KPIs)
 router.get('/nobl/air-forecast', async (req, res) => {
   try {
-    const effectiveEnd = await capNoblAirEndDate(
-      req.query.asOf ? String(req.query.asOf).slice(0, 10) : new Date().toISOString().slice(0, 10)
-    );
-    const ttpCohort = await loadNoblAirTtpAsOfEnd(effectiveEnd, null);
-    const forecastModel = await loadNoblAirRevenueForecast('2026-03-01', effectiveEnd, [], ttpCohort);
-    res.json({ revenue_forecast: forecastModel, as_of: effectiveEnd });
+    const asOfReq = req.query.asOf ? String(req.query.asOf).slice(0, 10) : new Date().toISOString().slice(0, 10);
+    const { version } = await getNoblAirDataVersion();
+    const cacheKey = `forecast:${asOfReq}`;
+    const { body, hit } = await withResponseCache('nobl-air', cacheKey, version, async () => {
+      const effectiveEnd = await capNoblAirEndDate(asOfReq);
+      const ttpCohort = await loadNoblAirTtpAsOfEnd(effectiveEnd, null);
+      const forecastModel = await loadNoblAirRevenueForecast('2026-03-01', effectiveEnd, [], ttpCohort);
+      return { revenue_forecast: forecastModel, as_of: effectiveEnd };
+    });
+    res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /nobl/air-forecast]', e.message);
     res.status(500).json({ error: e.message });
@@ -2292,6 +2325,9 @@ router.get('/nobl/air-attribution', async (req, res) => {
   const groupCols = groupFields.join(', ');
 
   try {
+    const { version } = await getNoblAirDataVersion();
+    const cacheKey = `attr:${start}:${end}:${level}`;
+    const { body, hit } = await withResponseCache('nobl-air', cacheKey, version, async () => {
     let source = 'cache';
     let cacheHint = null;
     let cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
@@ -2303,15 +2339,24 @@ router.get('/nobl/air-attribution', async (req, res) => {
            WHERE brand = 'NOBL' AND channel = 'facebook-ads'
              AND date BETWEEN $1::date AND $2::date) AS fb_attr,
           (SELECT COUNT(*)::int FROM nobl_air_meta_ad_daily
-           WHERE brand = 'NOBL') AS cache_total
+           WHERE brand = 'NOBL' AND date BETWEEN $1::date AND $2::date) AS range_cached
       `, [start, end]);
       const fbAttr = Number(src.rows[0]?.fb_attr || 0);
+      const rangeCached = Number(src.rows[0]?.range_cached || 0);
+      const warmKey = `${start}:${end}`;
 
-      if (fbAttr > 0) {
-        console.log(`[Analytics /nobl/air-attribution] warming cache ${start}..${end} (${fbAttr} fb attr rows)`);
-        await refreshNoblAirMetaAdDaily(start, end);
+      if (fbAttr > 0 && rangeCached === 0 && !metaAirWarmInFlight.has(warmKey)) {
+        metaAirWarmInFlight.add(warmKey);
+        try {
+          console.log(`[Analytics /nobl/air-attribution] warming cache ${start}..${end} (${fbAttr} fb attr rows)`);
+          await refreshNoblAirMetaAdDaily(start, end);
+          cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
+          source = cached.rows.length ? 'cache_warmed' : 'empty_after_warm';
+        } finally {
+          metaAirWarmInFlight.delete(warmKey);
+        }
+      } else if (rangeCached > 0) {
         cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
-        source = cached.rows.length ? 'cache_warmed' : 'empty_after_warm';
       }
 
       if (!cached.rows.length) {
@@ -2524,7 +2569,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
       ? Number((totals.attach_rate * totals.ttp_rate).toFixed(4))
       : null;
 
-    res.json({
+    return {
       rows: fmtRows(rowsWithRates),
       totals,
       level,
@@ -2532,7 +2577,10 @@ router.get('/nobl/air-attribution', async (req, res) => {
       end,
       source,
       cache_hint: cacheHint,
+    };
     });
+    res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /nobl/air-attribution]', e.message);
     res.status(500).json({ error: e.message });
@@ -2543,6 +2591,9 @@ router.get('/nobl/air-attribution', async (req, res) => {
 router.get('/nobl/air-subscribers', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const { version } = await getNoblAirDataVersion();
+    const cacheKey = `subs:${start}:${end}`;
+    const { body, hit } = await withResponseCache('nobl-air', cacheKey, version, async () => {
     // Status counts (across all contracts)
     const statusRes = await pgQuery(`
       SELECT status, COUNT(*)::int AS n
@@ -2568,12 +2619,15 @@ router.get('/nobl/air-subscribers', async (req, res) => {
       FROM nobl_air_subscribers
       WHERE LOWER(TRIM(status)) = 'active'`);
 
-    res.json({
+    return {
       status:       statusRes.rows,
       tiers:        tierRes.rows,
       active_arr:   Number(mrrRes.rows[0]?.active_arr || 0),
       active_count: mrrRes.rows[0]?.active_count || 0,
+    };
     });
+    res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /nobl/air-subscribers]', e.message);
     res.status(500).json({ error: e.message });

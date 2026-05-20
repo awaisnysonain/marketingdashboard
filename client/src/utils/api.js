@@ -1,3 +1,8 @@
+import {
+  cachedAnalyticsFetch,
+  fetchNoblAirDataVersion as fetchNoblAirDataVersionCached,
+} from './analyticsCache';
+
 const B = '';
 
 async function fetchJson(url, routeHint = 'API route') {
@@ -160,36 +165,48 @@ export const getSubscriptions = (start, end, brand = 'NOBL') =>
     `${B}/api/analytics/subscriptions?start=${start}&end=${end}&brand=${encodeURIComponent(brand)}`,
     '/api/analytics/subscriptions'
   );
+export const getNoblAirDataVersion = () => fetchNoblAirDataVersionCached();
+
 export const getNoblAirSubscribers = (start, end) =>
-  fetch(`${B}/api/analytics/nobl/air-subscribers?start=${start}&end=${end}`).then(r => r.json());
+  cachedAnalyticsFetch(
+    `subs:${start}:${end}`,
+    () => fetch(`${B}/api/analytics/nobl/air-subscribers?start=${start}&end=${end}`).then((r) => r.json()),
+  ).then((x) => x.data);
 
 export const getNoblAirPerformance = async (start, end, rollingDays = 14, forecastDays = 14, region = 'ALL') => {
   // region can be a single code ("US") or a comma-separated list ("US,CA").
   // Keep it as a string for URL encoding.
   const regionParam = Array.isArray(region) ? region.join(',') : region;
-  const res = await fetch(
-    `${B}/api/analytics/nobl/air-performance?start=${start}&end=${end}&rollingDays=${rollingDays}&forecastDays=${forecastDays}&region=${encodeURIComponent(regionParam)}`
-  );
-  const contentType = res.headers.get('content-type') || '';
-  if (!contentType.includes('application/json')) {
-    const body = await res.text();
-    const looksLikeHtml = body.trim().startsWith('<');
-    throw new Error(
-      looksLikeHtml
-        ? 'API route not available yet. Please restart the server so /api/analytics/nobl/air-performance is registered.'
-        : 'Unexpected response format from server.'
+  const cacheKey = `perf:${start}:${end}:${regionParam}:${rollingDays}:${forecastDays}`;
+  const { data } = await cachedAnalyticsFetch(cacheKey, async () => {
+    const res = await fetch(
+      `${B}/api/analytics/nobl/air-performance?start=${start}&end=${end}&rollingDays=${rollingDays}&forecastDays=${forecastDays}&region=${encodeURIComponent(regionParam)}`
     );
-  }
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      const body = await res.text();
+      const looksLikeHtml = body.trim().startsWith('<');
+      throw new Error(
+        looksLikeHtml
+          ? 'API route not available yet. Please restart the server so /api/analytics/nobl/air-performance is registered.'
+          : 'Unexpected response format from server.'
+      );
+    }
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error || `Request failed (${res.status})`);
+    return json;
+  });
   return data;
 };
 
 export const getNoblAirForecast = (asOf) =>
-  fetch(`${B}/api/analytics/nobl/air-forecast?asOf=${encodeURIComponent(asOf || '')}`).then(r => {
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  });
+  cachedAnalyticsFetch(
+    `forecast:${asOf || ''}`,
+    () => fetch(`${B}/api/analytics/nobl/air-forecast?asOf=${encodeURIComponent(asOf || '')}`).then((r) => {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }),
+  ).then((x) => x.data);
 
 export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
   const res = await fetch(`${B}/api/analytics/nobl/air-meta-adsets?start=${start}&end=${end}&limit=${limit}`);
@@ -213,10 +230,13 @@ export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', limit = 
     return r.json();
   });
 export const getNoblAirAttribution = (start, end, level = 'ad') =>
-  fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}`).then(r => {
-    if (!r.ok) throw new Error(r.status);
-    return r.json();
-  });
+  cachedAnalyticsFetch(
+    `attr:${start}:${end}:${level}`,
+    () => fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}`).then((r) => {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }),
+  ).then((x) => x.data);
 export const getForecastEngine = (brand = 'ALL', asOf = '') =>
   fetchJson(
     `${B}/api/analytics/forecast-engine?brand=${encodeURIComponent(brand)}${asOf ? `&asOf=${encodeURIComponent(asOf)}` : ''}`,

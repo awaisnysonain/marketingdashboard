@@ -4,7 +4,23 @@ import {
   LineChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getNoblAirPerformance, getNoblAirSubscribers, getNoblAirAttribution, getNoblAirForecast, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtPct } from '../utils/api';
+import {
+  getNoblAirPerformance,
+  getNoblAirSubscribers,
+  getNoblAirAttribution,
+  getNoblAirForecast,
+  getNoblAirDataVersion,
+  fmt$,
+  fmtFull$,
+  fmtNum,
+  fmtFullNum,
+  fmtPct,
+} from '../utils/api';
+import {
+  getAnalyticsCache,
+  setAnalyticsCache,
+  getCachedNoblAirDataVersion,
+} from '../utils/analyticsCache';
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
@@ -375,57 +391,102 @@ export default function NoblAirPerformancePage() {
   const regionParam = useMemo(() => regionsParam(regions), [regions]);
   const regionScoped = regionParam !== 'ALL';
 
-  const loadSecondary = useCallback(() => {
+  const applyPerf = useCallback((perf) => {
+    setData({
+      rows: perf?.rows || [],
+      totals: perf?.totals || {},
+      ttpCohort: perf?.ttp_cohort || {},
+      active_count: perf?.active_count ?? null,
+      active_arr: perf?.active_arr ?? null,
+    });
+  }, []);
+
+  const loadSecondary = useCallback(async (background = false) => {
     if (regionScoped) {
       setSubData(null);
       setAirAttr({ rows: [], totals: {}, error: null });
       setAirAttrLoading(false);
       return;
     }
-    setAirAttrLoading(true);
-    setAirAttr({ rows: [], totals: {}, error: null });
-    Promise.all([
-      getNoblAirSubscribers(range.start, range.end).catch(() => null),
-      getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message })),
-    ]).then(([subs, attr]) => {
+    const subsKey = `subs:${range.start}:${range.end}`;
+    const attrKey = `attr:${range.start}:${range.end}:ad`;
+    const cachedSubs = getAnalyticsCache(subsKey);
+    const cachedAttr = getAnalyticsCache(attrKey);
+    if (cachedSubs && cachedAttr) {
+      setSubData(cachedSubs);
+      setAirAttr(cachedAttr);
+      setAirAttrLoading(false);
+      return;
+    }
+    if (!background) {
+      setAirAttrLoading(true);
+      setAirAttr({ rows: [], totals: {}, error: null });
+    }
+    try {
+      await getNoblAirDataVersion();
+      const [subs, attr] = await Promise.all([
+        cachedSubs ? Promise.resolve(cachedSubs) : getNoblAirSubscribers(range.start, range.end).catch(() => null),
+        cachedAttr ? Promise.resolve(cachedAttr) : getNoblAirAttribution(range.start, range.end, 'ad').catch((e) => ({
+          rows: [], totals: {}, error: e.message,
+        })),
+      ]);
       setSubData(subs || null);
-      setAirAttr({
+      const attrPayload = {
         rows: attr?.rows || [],
         totals: attr?.totals || {},
         error: attr?.error || null,
         cache_hint: attr?.cache_hint || null,
         source: attr?.source || null,
-      });
-    }).finally(() => setAirAttrLoading(false));
+      };
+      setAirAttr(attrPayload);
+      if (!cachedSubs && subs) setAnalyticsCache(subsKey, subs);
+      if (!cachedAttr && attr && !attr.error) setAnalyticsCache(attrKey, attrPayload);
+    } finally {
+      setAirAttrLoading(false);
+    }
   }, [range, regionScoped]);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
+    const perfKey = `perf:${range.start}:${range.end}:${regionParam}:14:0`;
+    const cachedPerf = getCachedNoblAirDataVersion() ? getAnalyticsCache(perfKey) : null;
+
+    if (cachedPerf) {
+      applyPerf(cachedPerf);
+      setLoading(false);
+      loadSecondary(false);
+      return;
+    }
+
+    setLoading(true);
     setRevenueForecast(null);
     try {
+      await getNoblAirDataVersion();
       const perf = await getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
-      setData({
-        rows: perf?.rows || [],
-        totals: perf?.totals || {},
-        ttpCohort: perf?.ttp_cohort || {},
-        active_count: perf?.active_count ?? null,
-        active_arr: perf?.active_arr ?? null,
-      });
+      applyPerf(perf);
+      setAnalyticsCache(perfKey, perf);
       setLoading(false);
-      loadSecondary();
+      loadSecondary(true);
     } catch (e) {
       setError(e.message || 'Failed to load');
       setLoading(false);
     }
-  }, [range, regionParam, regionScoped, loadSecondary]);
+  }, [range, regionParam, regionScoped, loadSecondary, applyPerf]);
 
   const loadForecast = useCallback(async () => {
     if (regionScoped) return;
+    const forecastKey = `forecast:${range.end}`;
+    const cached = getAnalyticsCache(forecastKey);
+    if (cached) {
+      setRevenueForecast(cached?.revenue_forecast || cached);
+      return;
+    }
     setForecastLoading(true);
     try {
+      await getNoblAirDataVersion();
       const res = await getNoblAirForecast(range.end);
       setRevenueForecast(res?.revenue_forecast || null);
+      setAnalyticsCache(forecastKey, res);
     } catch {
       setRevenueForecast(null);
     } finally {
@@ -437,7 +498,10 @@ export default function NoblAirPerformancePage() {
     if (activeTab === 'forecast' && !regionScoped) loadForecast();
   }, [activeTab, range.end, regionScoped, loadForecast]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    getNoblAirDataVersion().catch(() => null);
+    load();
+  }, [load]);
 
   /* ── chart-friendly rows (asc date) ── */
   const chartRows = useMemo(

@@ -7,6 +7,8 @@ const { syncShopifyOrders } = require('./shopifyOrders');
 const { syncAppstleContracts, syncFloAppstleContracts } = require('./appstleContracts');
 const { aggregateNoblAir, aggregateProductDaily } = require('./noblAirAggregate');
 const { refreshNoblAirMetaAdDaily } = require('./noblAirMetaAdDaily');
+const { invalidateNoblAirDataVersionCache } = require('../utils/noblAirDataVersion');
+const { clearResponseCache } = require('../utils/responseCache');
 // Use the new SQL-based TW ETL (matches Brad's queries — Triple Attribution + Amazon + EU)
 const { refreshSummary } = require('./tripleWhaleSQL');
 const {
@@ -323,6 +325,8 @@ async function runSync(options = {}) {
         try {
           const agg = await refreshNoblAirMetaAdDaily(chunk.start, chunk.end);
           results.push({ task: 'nobl_air_meta_ad_daily', brand: 'NOBL', chunk, rows: agg.rows });
+          invalidateNoblAirDataVersionCache();
+          clearResponseCache('nobl-air');
         } catch (aggErr) {
           const aggMsg = `nobl_air_meta_ad_daily NOBL ${chunk.start}-${chunk.end}: ${aggErr.message}`;
           console.error('[SyncEngine]', aggMsg);
@@ -567,6 +571,8 @@ async function runSync(options = {}) {
       const r = await aggregateNoblAir(startDate, endDate);
       await logFinish(logId, 'success', r.rows);
       results.push({ task: 'nobl_air_aggregate', brand: 'NOBL', rows: r.rows, ttp_snapshot_rows: r.ttp_snapshot_rows });
+      invalidateNoblAirDataVersionCache();
+      clearResponseCache('nobl-air');
     } catch (e) {
       const msg = `nobl_air_aggregate: ${e.message}`;
       console.error('[SyncEngine]', msg);
