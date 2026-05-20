@@ -566,7 +566,7 @@ async function runSync(options = {}) {
     try {
       const r = await aggregateNoblAir(startDate, endDate);
       await logFinish(logId, 'success', r.rows);
-      results.push({ task: 'nobl_air_aggregate', brand: 'NOBL', rows: r.rows });
+      results.push({ task: 'nobl_air_aggregate', brand: 'NOBL', rows: r.rows, ttp_snapshot_rows: r.ttp_snapshot_rows });
     } catch (e) {
       const msg = `nobl_air_aggregate: ${e.message}`;
       console.error('[SyncEngine]', msg);

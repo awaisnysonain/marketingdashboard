@@ -19,6 +19,7 @@
  */
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 const { pgRun, pgQuery } = require('../db/postgres');
+const { refreshNoblAirTtpSnapshots } = require('./noblAirTtpSnapshot');
 
 const REGION_BUCKETS = [
   { key: 'US', codes: ['US'], includeBlank: false },
@@ -434,7 +435,14 @@ async function aggregateNoblAir(startDate, endDate) {
     written++;
   }
   const regional = await aggregateNoblAirRegionalCombos(startDate, endDate);
-  return { rows: written + regional.rows, all_rows: written, regional_rows: regional.rows };
+  let snapshotRows = 0;
+  try {
+    const snap = await refreshNoblAirTtpSnapshots(startDate, endDate);
+    snapshotRows = snap.rows;
+  } catch (e) {
+    console.error('[noblAirAggregate] TTP snapshot refresh failed:', e.message);
+  }
+  return { rows: written + regional.rows, all_rows: written, regional_rows: regional.rows, ttp_snapshot_rows: snapshotRows };
 }
 
 async function aggregateNoblAirRegionalCombos(startDate, endDate) {

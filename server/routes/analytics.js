@@ -136,7 +136,40 @@ function buildNoblAirSubscriberTtpSql(regionJoin, matureWhereSql) {
   `;
 }
 
+const ttpAsOfMemCache = new Map();
+const TTP_ASOF_MEM_TTL_MS = 5 * 60 * 1000;
+
+async function loadNoblAirTtpAsOfEndFromSnapshot(end) {
+  const mem = ttpAsOfMemCache.get(end);
+  if (mem && Date.now() - mem.ts < TTP_ASOF_MEM_TTL_MS) return mem.data;
+
+  const r = await pgQuery(`
+    SELECT mature, converted, cancelled_30d, ttp_rate, cancel_rate_30d
+    FROM nobl_air_ttp_snapshot
+    WHERE as_of_date <= $1::date
+    ORDER BY as_of_date DESC
+    LIMIT 1
+  `, [end]);
+  const row = r.rows[0];
+  if (!row) return null;
+
+  const data = {
+    mature: Number(row.mature || 0),
+    converted: Number(row.converted || 0),
+    cancelled_30d: Number(row.cancelled_30d || 0),
+    ttp_rate: row.ttp_rate != null ? Number(row.ttp_rate) : null,
+    cancel_rate_30d: row.cancel_rate_30d != null ? Number(row.cancel_rate_30d) : null,
+  };
+  ttpAsOfMemCache.set(end, { ts: Date.now(), data });
+  return data;
+}
+
 async function loadNoblAirTtpAsOfEnd(end, countryCodes = null) {
+  if (!countryCodes) {
+    const cached = await loadNoblAirTtpAsOfEndFromSnapshot(end);
+    if (cached) return cached;
+  }
+
   const regionJoin = countryCodes ? `
     JOIN shopify_orders_raw o ON o.brand = 'NOBL'
       AND o.has_air
@@ -204,10 +237,16 @@ async function loadNoblAirTtpCohort(start, end, countryCodes = null) {
     loadNoblAirTtpAsOfEnd(end, countryCodes),
     loadNoblAirTtpPeriod(start, end, countryCodes),
   ]);
+  const matureInPeriod = Number(period.mature || 0);
+  const convertedInPeriod = Number(period.converted || 0);
   return {
     ...asOf,
-    paid_conversions_in_period: period.converted,
-    mature_in_period: period.mature,
+    ttp_rate_as_of: asOf.ttp_rate,
+    paid_conversions_in_period: convertedInPeriod,
+    mature_in_period: matureInPeriod,
+    ttp_rate_in_period: matureInPeriod > 0
+      ? Number((convertedInPeriod / matureInPeriod).toFixed(4))
+      : null,
   };
 }
 
@@ -489,6 +528,10 @@ async function loadNoblAirRegionalCachedTtp(start, end, regionKey) {
     cancel_rate_30d: mature > 0 ? Number((cancelled30d / mature).toFixed(4)) : null,
     paid_conversions_in_period: Number(period.converted || 0),
     mature_in_period: Number(period.mature || 0),
+    ttp_rate_as_of: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
+    ttp_rate_in_period: Number(period.mature || 0) > 0
+      ? Number((Number(period.converted || 0) / Number(period.mature || 0)).toFixed(4))
+      : null,
   };
 }
 
@@ -1847,7 +1890,17 @@ router.get('/nobl/air-performance', async (req, res) => {
         regionKey = keyParts.join('_');
       }
     }
-    const [daily, ttpCohort] = await Promise.all([
+    const activeSubsPromise = !regionKey
+      ? pgQuery(`
+          SELECT
+            COALESCE(SUM(contract_amount), 0)::numeric(14,2) AS active_arr,
+            COUNT(*)::int AS active_count
+          FROM nobl_air_subscribers
+          WHERE LOWER(TRIM(status)) = 'active'
+        `)
+      : Promise.resolve({ rows: [{}] });
+
+    const [daily, ttpCohort, activeSubsRes] = await Promise.all([
       regionKey
         ? loadNoblAirRegionalCachedDaily(effectiveStart, effectiveEnd, regionKey)
         : pgQuery(
@@ -1871,7 +1924,9 @@ router.get('/nobl/air-performance', async (req, res) => {
       regionKey
         ? loadNoblAirRegionalCachedTtp(effectiveStart, effectiveEnd, regionKey)
         : loadNoblAirTtpCohort(effectiveStart, effectiveEnd, countryCodes),
+      activeSubsPromise,
     ]);
+    const activeSubsRow = activeSubsRes.rows[0] || {};
     let forecastModel = null;
     if (includeForecast && !regionKey) {
       const forecastTtpCohort = await loadNoblAirTtpAsOfEnd(effectiveEnd, null);
@@ -1973,6 +2028,8 @@ router.get('/nobl/air-performance', async (req, res) => {
       rolling_days: rollingDays,
       forecast_days: forecastDays,
       ttp_cohort: ttpCohort,
+      active_count: !regionKey ? Number(activeSubsRow.active_count || 0) : null,
+      active_arr: !regionKey ? Number(activeSubsRow.active_arr || 0) : null,
       region: region || 'ALL',
       data_start: effectiveStart,
       data_end: effectiveEnd,

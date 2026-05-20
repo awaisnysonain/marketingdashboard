@@ -26,6 +26,7 @@ const syncStatusRouter = require('./routes/syncStatus');
 const syncEngine = require('./etl/syncEngine');
 const { ensureNoblAirRegionDailyTable } = require('./etl/noblAirAggregate');
 const { ensureNoblAirMetaAdDailyTable } = require('./etl/noblAirMetaAdDaily');
+const { ensureNoblAirTtpSnapshotTable } = require('./etl/noblAirTtpSnapshot');
 const twRouter    = require('./routes/triplewhale');
 const storeRouter = require('./routes/store');
 
@@ -273,6 +274,7 @@ async function initPostgresTables() {
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_nobl_air_daily_date ON nobl_air_daily (date DESC)`).catch(() => {});
     await ensureNoblAirRegionDailyTable();
     await ensureNoblAirMetaAdDailyTable();
+    await ensureNoblAirTtpSnapshotTable();
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_orders_detail (

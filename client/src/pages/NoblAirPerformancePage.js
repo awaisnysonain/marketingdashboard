@@ -80,8 +80,11 @@ function forecastSourceLabel(row) {
 const KPI_TOOLTIPS = {
   airOrders: `${L.airOrders}\n${TIP.airOrders}`,
   attachRate: `${L.attachRate}\n${TIP.attachRate}`,
-  ttpRate: `${L.ttpRate}\n${TIP.ttpRate}`,
-  activationRate: `${L.activationRate}\n${TIP.activationRate}`,
+  ttpRateAsOf: `${L.ttpRateAsOf}\n${TIP.ttpRateAsOf}`,
+  ttpRateInPeriod: `${L.ttpRateInPeriod}\n${TIP.ttpRateInPeriod}`,
+  activationRateAsOf: `${L.activationRateAsOf}\n${TIP.activationRateAsOf}`,
+  activationRateInPeriod: `${L.activationRateInPeriod}\n${TIP.activationRateInPeriod}`,
+  matureInPeriod: `${L.matureInPeriod}\n${TIP.matureInPeriod}`,
   combinedNetRevenue: `${L.combinedNetRevenue}\n${TIP.combinedNetRevenue}`,
   rebillRevenue: `${L.rebillRevenue}\n${TIP.rebillRevenue}`,
   activeSubscribers: `${L.activeSubs}\n${TIP.activeSubs}`,
@@ -360,7 +363,7 @@ export default function NoblAirPerformancePage() {
   const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [data, setData] = useState({ rows: [], totals: {} });
+  const [data, setData] = useState({ rows: [], totals: {}, active_count: null, active_arr: null });
   const [subData, setSubData] = useState(null);
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
   const [airAttrLoading, setAirAttrLoading] = useState(false);
@@ -372,37 +375,44 @@ export default function NoblAirPerformancePage() {
   const regionParam = useMemo(() => regionsParam(regions), [regions]);
   const regionScoped = regionParam !== 'ALL';
 
+  const loadSecondary = useCallback(() => {
+    if (regionScoped) {
+      setSubData(null);
+      setAirAttr({ rows: [], totals: {}, error: null });
+      setAirAttrLoading(false);
+      return;
+    }
+    setAirAttrLoading(true);
+    setAirAttr({ rows: [], totals: {}, error: null });
+    Promise.all([
+      getNoblAirSubscribers(range.start, range.end).catch(() => null),
+      getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message })),
+    ]).then(([subs, attr]) => {
+      setSubData(subs || null);
+      setAirAttr(attr || { rows: [], totals: {}, error: null });
+    }).finally(() => setAirAttrLoading(false));
+  }, [range, regionScoped]);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    setAirAttrLoading(true);
-    setAirAttr({ rows: [], totals: {}, error: null });
     setRevenueForecast(null);
     try {
-      const perfPromise = getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
-      const subsPromise = regionScoped
-        ? Promise.resolve(null)
-        : getNoblAirSubscribers(range.start, range.end).catch(() => null);
-      const attrPromise = regionScoped
-        ? Promise.resolve({ rows: [], totals: {}, error: null })
-        : getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message }));
-
-      const [perf, subs, attr] = await Promise.all([perfPromise, subsPromise, attrPromise]);
-
+      const perf = await getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
       setData({
         rows: perf?.rows || [],
         totals: perf?.totals || {},
         ttpCohort: perf?.ttp_cohort || {},
+        active_count: perf?.active_count ?? null,
+        active_arr: perf?.active_arr ?? null,
       });
-      setSubData(subs || null);
-      setAirAttr(attr || { rows: [], totals: {}, error: null });
+      setLoading(false);
+      loadSecondary();
     } catch (e) {
       setError(e.message || 'Failed to load');
-    } finally {
       setLoading(false);
-      setAirAttrLoading(false);
     }
-  }, [range, regionParam, regionScoped]);
+  }, [range, regionParam, regionScoped, loadSecondary]);
 
   const loadForecast = useCallback(async () => {
     if (regionScoped) return;
@@ -446,17 +456,26 @@ export default function NoblAirPerformancePage() {
   /* ── KPIs from performance totals: range attach × cohort TTP ── */
   const kpi = useMemo(() => {
     const t = data.totals || {};
-    const ttp = t.ttp_rate;
     const attach = t.attach_rate;
-    const activation = (attach != null && ttp != null) ? attach * ttp : null;
     const ttpCohort = data.ttpCohort || {};
+    const ttpAsOf = ttpCohort.ttp_rate_as_of ?? ttpCohort.ttp_rate ?? t.ttp_rate;
+    const ttpInPeriod = ttpCohort.ttp_rate_in_period ?? (
+      (ttpCohort.mature_in_period || 0) > 0
+        ? (ttpCohort.paid_conversions_in_period || 0) / ttpCohort.mature_in_period
+        : null
+    );
+    const activationAsOf = (attach != null && ttpAsOf != null) ? attach * ttpAsOf : null;
+    const activationInPeriod = (attach != null && ttpInPeriod != null) ? attach * ttpInPeriod : null;
     return {
       eligibleOrders: t.total_orders || 0,
       airOrders: t.air_orders || 0,
       attachRate: attach,
-      ttpRate: ttpCohort.ttp_rate ?? ttp,
-      activationRate: activation,
+      ttpRateAsOf: ttpAsOf,
+      ttpRateInPeriod: ttpInPeriod,
+      activationRateAsOf: activationAsOf,
+      activationRateInPeriod: activationInPeriod,
       matureSubs: ttpCohort.mature || 0,
+      matureInPeriod: ttpCohort.mature_in_period || 0,
       convertedMatureSubs: ttpCohort.paid_conversions_in_period ?? ttpCohort.converted ?? 0,
       cancelled30d: ttpCohort.cancelled_30d || 0,
       cancelRate30d: ttpCohort.cancel_rate_30d,
@@ -466,8 +485,8 @@ export default function NoblAirPerformancePage() {
       combinedNetRevenue: t.combined_net_revenue || 0,
       rebillRevenue: t.rebill_revenue || 0,
       newSubRevenue: t.new_sub_revenue || 0,
-      activeSubs: !regionScoped ? (subData?.active_count || 0) : null,
-      activeArr:  !regionScoped ? (subData?.active_arr || 0) : null,
+      activeSubs: !regionScoped ? (data.active_count ?? subData?.active_count ?? 0) : null,
+      activeArr:  !regionScoped ? (data.active_arr ?? subData?.active_arr ?? 0) : null,
     };
   }, [data, subData, regionScoped]);
 
@@ -571,13 +590,30 @@ export default function NoblAirPerformancePage() {
           {/* ── Top KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
             <KpiCard label={L.airOrders} value={fmtNum(kpi.airOrders)} fullValue={fmtFullNum(kpi.airOrders)} color="nobl" tooltip={KPI_TOOLTIPS.airOrders} />
-            <KpiCard label={L.attachRate} value={fmtPct(kpi.attachRate || 0)} fullValue={fmtPct(kpi.attachRate || 0)} color="teal" tooltip={KPI_TOOLTIPS.attachRate} />
-            <KpiCard label={L.ttpRate} value={fmtPct(kpi.ttpRate || 0)} fullValue={fmtPct(kpi.ttpRate || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRate} />
-            <KpiCard label={L.activationRate} value={fmtPct(kpi.activationRate || 0)} fullValue={fmtPct(kpi.activationRate || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRate} />
+            <KpiCard label={L.attachRate} value={fmtPct(kpi.attachRate || 0)} fullValue={fmtPct(kpi.attachRate || 0)} color="teal" tooltip={KPI_TOOLTIPS.attachRate} sub="selected dates" />
+            <KpiCard label={L.ttpRateAsOf} value={fmtPct(kpi.ttpRateAsOf || 0)} fullValue={fmtPct(kpi.ttpRateAsOf || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRateAsOf} sub="as of end date" />
+            <KpiCard label={L.ttpRateInPeriod} value={fmtPct(kpi.ttpRateInPeriod || 0)} fullValue={fmtPct(kpi.ttpRateInPeriod || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRateInPeriod} sub="trial ended in range" />
+            <KpiCard label={L.activationRateAsOf} value={fmtPct(kpi.activationRateAsOf || 0)} fullValue={fmtPct(kpi.activationRateAsOf || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRateAsOf} sub="as of end date" />
+            <KpiCard label={L.activationRateInPeriod} value={fmtPct(kpi.activationRateInPeriod || 0)} fullValue={fmtPct(kpi.activationRateInPeriod || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRateInPeriod} sub="trial ended in range" />
             <KpiCard label={L.combinedNetRevenue} value={fmt$(kpi.combinedNetRevenue)} fullValue={fmtFull$(kpi.combinedNetRevenue)} color="blue" tooltip={KPI_TOOLTIPS.combinedNetRevenue} />
             <KpiCard label={L.rebillRevenue} value={fmt$(kpi.rebillRevenue)} fullValue={fmtFull$(kpi.rebillRevenue)} color="warn" tooltip={KPI_TOOLTIPS.rebillRevenue} />
             {!regionScoped && <KpiCard label={L.activeSubs} value={fmtNum(kpi.activeSubs)} fullValue={fmtFullNum(kpi.activeSubs)} color="green" tooltip={KPI_TOOLTIPS.activeSubscribers} />}
             {!regionScoped && <KpiCard label="Est. yearly sub value" value={fmt$(kpi.activeArr)} fullValue={fmtFull$(kpi.activeArr)} color="purple" tooltip={KPI_TOOLTIPS.activeArr} />}
+          </div>
+
+          <div style={{
+            fontSize: 12,
+            color: 'var(--text3)',
+            lineHeight: 1.5,
+            marginBottom: 14,
+            padding: '10px 14px',
+            borderRadius: 8,
+            border: '1px solid var(--border)',
+            background: 'var(--bg2)',
+          }}>
+            <strong style={{ color: 'var(--text2)' }}>Two TTP views:</strong>{' '}
+            <em>As of end date</em> uses every subscriber whose trial had finished by your end date (headline / forecast).{' '}
+            <em>Trial ended in range</em> only counts subscribers whose trial ended inside the selected dates — often a lower % (e.g. ~63% vs ~67%).
           </div>
 
           {/* ── Secondary KPI row ── */}
@@ -585,8 +621,9 @@ export default function NoblAirPerformancePage() {
             <KpiCard label={L.eligibleOrders} value={fmtNum(kpi.eligibleOrders)} fullValue={fmtFullNum(kpi.eligibleOrders)} color="text" tooltip={KPI_TOOLTIPS.eligibleOrders} />
             <KpiCard label={L.paidAir} value={fmtNum(kpi.paidAirOrders)} fullValue={fmtFullNum(kpi.paidAirOrders)} color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
             <KpiCard label={L.zeroAir} value={fmtNum(kpi.zeroAirOrders)} fullValue={fmtFullNum(kpi.zeroAirOrders)} color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
-            <KpiCard label={L.matureSubsAsOf} value={fmtNum(kpi.matureSubs)} fullValue={fmtFullNum(kpi.matureSubs)} color="purple" tooltip={KPI_TOOLTIPS.matureSubs} />
-            <KpiCard label={L.paidConversions} value={fmtNum(kpi.convertedMatureSubs)} fullValue={fmtFullNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.paidConversions} sub="in date range" />
+            <KpiCard label={L.matureSubsAsOf} value={fmtNum(kpi.matureSubs)} fullValue={fmtFullNum(kpi.matureSubs)} color="purple" tooltip={KPI_TOOLTIPS.matureSubs} sub="as of end date" />
+            <KpiCard label={L.matureInPeriod} value={fmtNum(kpi.matureInPeriod)} fullValue={fmtFullNum(kpi.matureInPeriod)} color="purple" tooltip={KPI_TOOLTIPS.matureInPeriod} sub="trial ended in range" />
+            <KpiCard label={L.paidConversions} value={fmtNum(kpi.convertedMatureSubs)} fullValue={fmtFullNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.paidConversions} sub="paid · in range" />
             <KpiCard label={L.cancels30d} value={fmtNum(kpi.cancelled30d)} fullValue={fmtFullNum(kpi.cancelled30d)} color="red" tooltip={KPI_TOOLTIPS.cancels30d} />
             <KpiCard label={L.cancelRate30d} value={fmtPct(kpi.cancelRate30d || 0)} fullValue={fmtPct(kpi.cancelRate30d || 0)} color="red" tooltip={KPI_TOOLTIPS.cancelRate30d} />
             <KpiCard label={L.newSubRevenue} value={fmt$(kpi.newSubRevenue)} fullValue={fmtFull$(kpi.newSubRevenue)} color="blue" tooltip={KPI_TOOLTIPS.newSubRevenue} />
@@ -616,7 +653,7 @@ export default function NoblAirPerformancePage() {
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Daily add-on & trial rates" subtitle="Each day: how many orders added Air, and how many trials turned into paying subscribers.">
+            <Card title="Daily add-on & trial rates" subtitle="Per-day rates (trial ended that day). KPI cards above show period totals; purple/green pairs compare as-of end date vs trial ended in range.">
               <ResponsiveContainer width="100%" height={250}>
                 <ComposedChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -635,8 +672,8 @@ export default function NoblAirPerformancePage() {
                   <Legend wrapperStyle={{ fontSize:12 }} />
                   <Bar  yAxisId="orders" dataKey="air_orders"      name={L.airOrders}      fill="#6366f1" radius={[2,2,0,0]} />
                   <Line yAxisId="rates"  dataKey="attach_rate"     name={L.attachRate}     stroke="#14b8a6" strokeWidth={2} dot={false} />
-                  <Line yAxisId="rates"  dataKey="ttp_rate"        name={L.ttpRate}        stroke="#f59e0b" strokeWidth={2} dot={false} />
-                  <Line yAxisId="rates"  dataKey="activation_rate" name={L.activationRate} stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                  <Line yAxisId="rates"  dataKey="ttp_rate"        name={L.ttpRateInPeriod} stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  <Line yAxisId="rates"  dataKey="activation_rate" name={L.activationRateInPeriod} stroke="#8b5cf6" strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </Card>
