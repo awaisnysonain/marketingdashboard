@@ -224,19 +224,16 @@ export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
 };
-export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', limit = 300) =>
-  fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${encodeURIComponent(brand)}&limit=${limit}`).then(r => {
+export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', page = 1, pageSize = 50) =>
+  fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${encodeURIComponent(brand)}&page=${page}&page_size=${pageSize}`).then(r => {
     if (!r.ok) throw new Error(r.status);
     return r.json();
   });
-export const getNoblAirAttribution = (start, end, level = 'ad') =>
-  cachedAnalyticsFetch(
-    `attr:${start}:${end}:${level}`,
-    () => fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}`).then((r) => {
-      if (!r.ok) throw new Error(r.status);
-      return r.json();
-    }),
-  ).then((x) => x.data);
+export const getNoblAirAttribution = (start, end, level = 'ad', page = 1, pageSize = 50) =>
+  fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}&page=${page}&page_size=${pageSize}`).then((r) => {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  });
 export const getForecastEngine = (brand = 'ALL', asOf = '') =>
   fetchJson(
     `${B}/api/analytics/forecast-engine?brand=${encodeURIComponent(brand)}${asOf ? `&asOf=${encodeURIComponent(asOf)}` : ''}`,

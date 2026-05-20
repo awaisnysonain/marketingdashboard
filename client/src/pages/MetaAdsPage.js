@@ -3,9 +3,12 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
+import TablePagination from '../components/TablePagination';
 import { getMetaAds, fmt$, fmtNum, fmtPct } from '../utils/api';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
+
+const PAGE_SIZE = 50;
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
@@ -52,30 +55,54 @@ export default function MetaAdsPage() {
   const [levelOpen, setLevelOpen] = useState(false);
   const [brand, setBrand] = useState('ALL');
   const [brandOpen, setBrandOpen] = useState(false);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [tableLoading, setTableLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [data, setData] = useState({ rows: [], totals: {} });
+  const [data, setData] = useState({ rows: [], totals: {}, pagination: {}, chart_rows: [] });
 
-  const load = useCallback(async () => {
-    setLoading(true); setError(null);
+  const load = useCallback(async (targetPage = 1, opts = { full: true }) => {
+    if (opts.full) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setTableLoading(true);
+    }
     try {
-      const res = await getMetaAds(range.start, range.end, level, brand, 300);
-      setData({ rows: res.rows || [], totals: res.totals || {} });
+      const res = await getMetaAds(range.start, range.end, level, brand, targetPage, PAGE_SIZE);
+      setData({
+        rows: res.rows || [],
+        totals: res.totals || {},
+        pagination: res.pagination || {},
+        chart_rows: res.chart_rows || [],
+      });
+      setPage(targetPage);
     } catch (e) {
       setError(e.message || 'Failed to load Meta ads');
     } finally {
       setLoading(false);
+      setTableLoading(false);
     }
   }, [range, level, brand]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setPage(1);
+    load(1, { full: true });
+  }, [range, level, brand, load]);
+
+  const handlePageChange = (nextPage) => {
+    if (nextPage === page) return;
+    load(nextPage, { full: false });
+  };
 
   const tableRows = useMemo(() => (data.rows || []).map(toTableRow), [data.rows]);
-  const chartRows = useMemo(() => (data.rows || []).slice(0, 12).map(r => ({
+  const chartRows = useMemo(() => (data.chart_rows || []).slice(0, 12).map(r => ({
     ...r,
     label: shortName(level === 'ad' ? r.ad_name : level === 'adset' ? r.adset_name : r.campaign_name),
-  })), [data.rows, level]);
+  })), [data.chart_rows, level]);
   const t = data.totals || {};
+  const pagination = data.pagination || {};
+  const totalRows = pagination.total_rows ?? 0;
 
   return (
     <div>
@@ -99,7 +126,7 @@ export default function MetaAdsPage() {
             <KpiCard label={L.roas} value={t.roas ? `${Number(t.roas).toFixed(2)}x` : '—'} tooltip={TIP.roas} />
             <KpiCard label={L.cac} value={t.cac ? fmt$(t.cac) : '—'} tooltip={TIP.cac} />
             <KpiCard label={L.ctr} value={t.ctr ? fmtPct(t.ctr) : '—'} tooltip={TIP.ctr} />
-            <KpiCard label="Rows in table" value={fmtNum((data.rows || []).length)} />
+            <KpiCard label="Total rows" value={fmtNum(totalRows)} />
           </div>
 
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, marginBottom:16 }}>
@@ -118,9 +145,23 @@ export default function MetaAdsPage() {
             </ResponsiveContainer>
           </div>
 
-          <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-            <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Meta Ads Detail</div>
-            <SheetTable headers={HEADERS} rows={tableRows} keyField="_key" maxHeight="620px" defaultSortField={L.spend} defaultSortDir="desc" />
+          <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' }}>
+            <div style={{ fontSize:14, fontWeight:700, padding:'20px 20px 14px' }}>Meta Ads Detail</div>
+            <SheetTable
+              headers={HEADERS}
+              rows={tableRows}
+              keyField="_key"
+              scrollable={false}
+              defaultSortField={L.spend}
+              defaultSortDir="desc"
+            />
+            <TablePagination
+              page={page}
+              pageSize={PAGE_SIZE}
+              totalRows={totalRows}
+              onPageChange={handlePageChange}
+              loading={tableLoading}
+            />
           </div>
         </>
       )}

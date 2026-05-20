@@ -1,6 +1,9 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import TablePagination from '../components/TablePagination';
 import PageIntro from '../components/PageIntro';
+
+const PER_PAGE = 50;
 import { L, plainHeader } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Cell} from 'recharts';
 
@@ -15,6 +18,7 @@ export default function FbAdsetsPage(){
   const [sortDir,setSortDir]=useState(-1);
   const [search,setSearch]=useState('');
   const [campaign,setCampaign]=useState('All');
+  const [page,setPage]=useState(1);
 
   useEffect(()=>{
     getTab('FB Adsets').then(d=>setRows((d.rows||[]).filter(r=>r['Adset Name']||r['Campaign Name']))).catch(()=>{}).finally(()=>setLoading(false));
@@ -30,6 +34,9 @@ export default function FbAdsetsPage(){
   const byCampaign=campaign==='All'?dataRows:dataRows.filter(r=>String(r['Campaign Name']||'')===campaign);
   const filtered=byCampaign.filter(r=>!search||String(r['Adset Name']||'').toLowerCase().includes(search.toLowerCase())||String(r['Campaign Name']||'').toLowerCase().includes(search.toLowerCase()));
   const sorted=[...filtered].sort((a,b)=>((+b[sortCol]||0)-(+a[sortCol]||0))*sortDir);
+  const totalPages=Math.max(1,Math.ceil(sorted.length/PER_PAGE));
+  const safePage=Math.min(page,totalPages);
+  const pageRows=sorted.slice((safePage-1)*PER_PAGE,safePage*PER_PAGE);
 
   const top8=sorted.slice(0,8);
   const chartData=top8.map((r,i)=>({
@@ -107,16 +114,16 @@ export default function FbAdsetsPage(){
 
       <Section title={`All Adsets (${dataRows.length})`}>
         <div style={{display:'flex',gap:10,marginBottom:10,flexWrap:'wrap',alignItems:'center'}}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search adsets…"
+          <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search adsets…"
             style={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'7px 14px',color:'var(--text)',fontSize:13,width:220,outline:'none'}}/>
-          <select value={campaign} onChange={e=>setCampaign(e.target.value)}
+          <select value={campaign} onChange={e=>{setCampaign(e.target.value);setPage(1);}}
             style={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'7px 12px',color:'var(--text)',fontSize:12,outline:'none',maxWidth:260}}>
             {campaigns.map(c=><option key={c} value={c}>{c==='All'?'All Campaigns':c.slice(0,40)}</option>)}
           </select>
           <span style={{fontSize:12,color:'var(--text3)'}}>{sorted.length} adsets</span>
         </div>
         <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
-          <div style={{overflowX:'auto',maxHeight:500,overflowY:'auto'}}>
+          <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead style={{position:'sticky',top:0,zIndex:1}}>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
@@ -129,7 +136,7 @@ export default function FbAdsetsPage(){
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r,i)=>(
+                {pageRows.map((r,i)=>(
                   <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:i%2===1?'rgba(255,255,255,.015)':'transparent'}}>
                     <td style={{padding:'8px 12px',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r['Adset Name']}</td>
                     <td style={{padding:'8px 12px',maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:'var(--text3)',fontSize:11}}>{r['Campaign Name']}</td>
@@ -144,6 +151,12 @@ export default function FbAdsetsPage(){
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={safePage}
+            pageSize={PER_PAGE}
+            totalRows={sorted.length}
+            onPageChange={setPage}
+          />
         </div>
       </Section>
     </div>

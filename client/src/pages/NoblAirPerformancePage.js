@@ -24,7 +24,10 @@ import {
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
+import TablePagination from '../components/TablePagination';
 import PageIntro from '../components/PageIntro';
+
+const AIR_ATTR_PAGE_SIZE = 50;
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 
 /* ────────────── helpers ────────────── */
@@ -381,8 +384,10 @@ export default function NoblAirPerformancePage() {
   const [error, setError] = useState(null);
   const [data, setData] = useState({ rows: [], totals: {}, active_count: null, active_arr: null });
   const [subData, setSubData] = useState(null);
-  const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
+  const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: null });
+  const [airAttrPage, setAirAttrPage] = useState(1);
   const [airAttrLoading, setAirAttrLoading] = useState(false);
+  const [airAttrTableLoading, setAirAttrTableLoading] = useState(false);
   const [forecastLoading, setForecastLoading] = useState(false);
   const [revenueForecast, setRevenueForecast] = useState(null);
   const [regions, setRegions] = useState(['ALL']);
@@ -401,50 +406,64 @@ export default function NoblAirPerformancePage() {
     });
   }, []);
 
+  const applyAirAttr = useCallback((attr, pageNum = 1) => {
+    setAirAttr({
+      rows: attr?.rows || [],
+      totals: attr?.totals || {},
+      pagination: attr?.pagination || {},
+      chart_rows: attr?.chart_rows || [],
+      error: attr?.error || null,
+      cache_hint: attr?.cache_hint || null,
+      source: attr?.source || null,
+    });
+    setAirAttrPage(pageNum);
+  }, []);
+
+  const loadAirAttrPage = useCallback(async (pageNum = 1, opts = { full: false }) => {
+    if (regionScoped) return;
+    if (opts.full) setAirAttrLoading(true);
+    else setAirAttrTableLoading(true);
+    try {
+      await getNoblAirDataVersion();
+      const attr = await getNoblAirAttribution(range.start, range.end, 'ad', pageNum, AIR_ATTR_PAGE_SIZE);
+      applyAirAttr(attr, pageNum);
+    } catch (e) {
+      applyAirAttr({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message }, pageNum);
+    } finally {
+      setAirAttrLoading(false);
+      setAirAttrTableLoading(false);
+    }
+  }, [range, regionScoped, applyAirAttr]);
+
   const loadSecondary = useCallback(async (background = false) => {
     if (regionScoped) {
       setSubData(null);
-      setAirAttr({ rows: [], totals: {}, error: null });
+      setAirAttr({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: null });
       setAirAttrLoading(false);
       return;
     }
     const subsKey = `subs:${range.start}:${range.end}`;
-    const attrKey = `attr:${range.start}:${range.end}:ad`;
     const cachedSubs = getAnalyticsCache(subsKey);
-    const cachedAttr = getAnalyticsCache(attrKey);
-    if (cachedSubs && cachedAttr) {
-      setSubData(cachedSubs);
-      setAirAttr(cachedAttr);
-      setAirAttrLoading(false);
-      return;
-    }
     if (!background) {
       setAirAttrLoading(true);
-      setAirAttr({ rows: [], totals: {}, error: null });
+      setAirAttr({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: null });
+      setAirAttrPage(1);
     }
     try {
       await getNoblAirDataVersion();
       const [subs, attr] = await Promise.all([
         cachedSubs ? Promise.resolve(cachedSubs) : getNoblAirSubscribers(range.start, range.end).catch(() => null),
-        cachedAttr ? Promise.resolve(cachedAttr) : getNoblAirAttribution(range.start, range.end, 'ad').catch((e) => ({
-          rows: [], totals: {}, error: e.message,
+        getNoblAirAttribution(range.start, range.end, 'ad', 1, AIR_ATTR_PAGE_SIZE).catch((e) => ({
+          rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message,
         })),
       ]);
       setSubData(subs || null);
-      const attrPayload = {
-        rows: attr?.rows || [],
-        totals: attr?.totals || {},
-        error: attr?.error || null,
-        cache_hint: attr?.cache_hint || null,
-        source: attr?.source || null,
-      };
-      setAirAttr(attrPayload);
+      applyAirAttr(attr, 1);
       if (!cachedSubs && subs) setAnalyticsCache(subsKey, subs);
-      if (!cachedAttr && attr && !attr.error) setAnalyticsCache(attrKey, attrPayload);
     } finally {
       setAirAttrLoading(false);
     }
-  }, [range, regionScoped]);
+  }, [range, regionScoped, applyAirAttr]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -519,9 +538,10 @@ export default function NoblAirPerformancePage() {
     [airAttr]
   );
   const airAttrChartRows = useMemo(
-    () => (airAttr?.rows || []).slice(0, 10).map(r => ({ ...r, chart_label: shortName(r.ad_name || r.adset_name, 24) })),
-    [airAttr]
+    () => (airAttr?.chart_rows || []).slice(0, 10).map(r => ({ ...r, chart_label: shortName(r.ad_name || r.adset_name, 24) })),
+    [airAttr?.chart_rows]
   );
+  const airAttrTotalRows = airAttr?.pagination?.total_rows ?? 0;
 
   /* ── KPIs from performance totals: range attach × cohort TTP ── */
   const kpi = useMemo(() => {
@@ -816,7 +836,7 @@ export default function NoblAirPerformancePage() {
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
             ) : airAttr?.error ? (
               <div style={{ color:'var(--danger)', fontSize:13 }}>NOBL Air ad attribution unavailable: {airAttr.error}</div>
-            ) : airAttrRows.length === 0 ? (
+            ) : airAttrTotalRows === 0 && airAttrRows.length === 0 ? (
               <Empty msg={airAttr?.cache_hint || 'No Meta ad data for this range yet. Run tw_air_attribution sync or wait for the nightly job.'} />
             ) : (
               <>
@@ -837,6 +857,7 @@ export default function NoblAirPerformancePage() {
                   <KpiCard label={L.ttpRate} value={fmtPct(airAttr.totals?.ttp_rate || 0)} fullValue={fmtPct(airAttr.totals?.ttp_rate || 0)} tooltip={TIP.ttpRate} />
                   <KpiCard label={L.activationRate} value={fmtPct(airAttr.totals?.activation_rate || 0)} fullValue={fmtPct(airAttr.totals?.activation_rate || 0)} tooltip={TIP.activationRate} />
                   <KpiCard label={L.attributedAirRevenue} value={fmt$(airAttr.totals?.attributed_air_revenue || 0)} fullValue={fmtFull$(airAttr.totals?.attributed_air_revenue || 0)} />
+                  <KpiCard label="Total ads" value={fmtNum(airAttrTotalRows)} fullValue={fmtFullNum(airAttrTotalRows)} />
                 </div>
 
                 <ResponsiveContainer width="100%" height={320}>
@@ -855,14 +876,23 @@ export default function NoblAirPerformancePage() {
                   </ComposedChart>
                 </ResponsiveContainer>
 
-                <SheetTable
-                  headers={AIR_ATTR_HEADERS}
-                  rows={airAttrRows}
-                  keyField="_ad"
-                  maxHeight="520px"
-                  defaultSortField={L.attributedAirOrders}
-                  defaultSortDir="desc"
-                />
+                <div style={{ border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' }}>
+                  <SheetTable
+                    headers={AIR_ATTR_HEADERS}
+                    rows={airAttrRows}
+                    keyField="_ad"
+                    scrollable={false}
+                    defaultSortField={L.attributedAirOrders}
+                    defaultSortDir="desc"
+                  />
+                  <TablePagination
+                    page={airAttrPage}
+                    pageSize={AIR_ATTR_PAGE_SIZE}
+                    totalRows={airAttrTotalRows}
+                    onPageChange={(p) => loadAirAttrPage(p)}
+                    loading={airAttrTableLoading}
+                  />
+                </div>
               </>
             )}
           </Card>

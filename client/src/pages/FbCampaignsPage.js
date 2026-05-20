@@ -1,6 +1,9 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import TablePagination from '../components/TablePagination';
 import PageIntro from '../components/PageIntro';
+
+const PER_PAGE = 50;
 import { L, plainHeader } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell} from 'recharts';
 
@@ -14,6 +17,7 @@ export default function FbCampaignsPage(){
   const [sortCol,setSortCol]=useState('Orders');
   const [sortDir,setSortDir]=useState(-1);
   const [search,setSearch]=useState('');
+  const [page,setPage]=useState(1);
 
   useEffect(()=>{
     getTab('FB Campaigns').then(d=>setRows((d.rows||[]).filter(r=>r['Campaign Name']))).catch(()=>{}).finally(()=>setLoading(false));
@@ -27,6 +31,9 @@ export default function FbCampaignsPage(){
 
   const filtered=dataRows.filter(r=>!search||String(r['Campaign Name']||'').toLowerCase().includes(search.toLowerCase()));
   const sorted=[...filtered].sort((a,b)=>sortDir*((+b[sortCol]||0)-(+a[sortCol]||0)));
+  const totalPages=Math.max(1,Math.ceil(sorted.length/PER_PAGE));
+  const safePage=Math.min(page,totalPages);
+  const pageRows=sorted.slice((safePage-1)*PER_PAGE,safePage*PER_PAGE);
 
   const top8=sorted.slice(0,8);
   const chartData=top8.map((r,i)=>({
@@ -108,11 +115,11 @@ export default function FbCampaignsPage(){
 
       <Section title={`All Campaigns (${dataRows.length})`}>
         <div style={{marginBottom:10}}>
-          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search campaigns…"
+          <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search campaigns…"
             style={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'8px 14px',color:'var(--text)',fontSize:13,width:280,outline:'none'}}/>
         </div>
         <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
-          <div style={{overflowX:'auto',maxHeight:480,overflowY:'auto'}}>
+          <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead style={{position:'sticky',top:0,zIndex:1}}>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
@@ -125,7 +132,7 @@ export default function FbCampaignsPage(){
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r,i)=>(
+                {pageRows.map((r,i)=>(
                   <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:i%2===1?'rgba(255,255,255,.015)':'transparent'}}>
                     <td style={{padding:'8px 12px',maxWidth:260,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:12}}>{r['Campaign Name']}</td>
                     <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtNum(r['Orders'])}</td>
@@ -141,6 +148,12 @@ export default function FbCampaignsPage(){
               </tbody>
             </table>
           </div>
+          <TablePagination
+            page={safePage}
+            pageSize={PER_PAGE}
+            totalRows={sorted.length}
+            onPageChange={setPage}
+          />
         </div>
       </Section>
     </div>

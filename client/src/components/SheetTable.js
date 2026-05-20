@@ -65,6 +65,7 @@ export default function SheetTable({
   rows = [],               // object[] — data rows
   keyField = null,         // string — unique field for row key (falls back to index)
   maxHeight = '480px',
+  scrollable = true,
   searchable = true,
   defaultSortField = null,
   defaultSortDir = 'desc',
@@ -367,7 +368,9 @@ export default function SheetTable({
       <div
         ref={tableRef}
         style={{
-          overflowX: 'auto', overflowY: 'auto', maxHeight,
+          overflowX: 'auto',
+          overflowY: scrollable ? 'auto' : 'visible',
+          maxHeight: scrollable ? maxHeight : 'none',
           border: '1px solid var(--border)',
           borderRadius: 8,
           background: 'var(--bg2)',

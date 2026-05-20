@@ -2170,12 +2170,23 @@ router.get('/nobl/air-meta-adsets', async (req, res) => {
   }
 });
 
+function parseTablePagination(req, defaultPageSize = 50) {
+  const page = Math.max(1, parseInt(req.query.page || '1', 10));
+  const pageSize = Math.max(10, Math.min(parseInt(req.query.page_size || req.query.limit || String(defaultPageSize), 10), 200));
+  return { page, pageSize, offset: (page - 1) * pageSize };
+}
+
+function buildPagination(page, pageSize, totalRows) {
+  const totalPages = Math.max(1, Math.ceil(totalRows / pageSize) || 1);
+  return { page, page_size: pageSize, total_rows: totalRows, total_pages: totalPages };
+}
+
 // GET /meta/ads — saved TW ad performance, grouped by campaign/adset/ad
 router.get('/meta/ads', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const brand = (req.query.brand || 'NOBL').toUpperCase();
   const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'adset';
-  const rowLimit = Math.max(50, Math.min(parseInt(req.query.limit || '300', 10), 2000));
+  const { page, pageSize, offset } = parseTablePagination(req);
   const sortBy = String(req.query.sortBy || '').trim();
   const sortDir = (String(req.query.dir || 'desc').toLowerCase() === 'asc') ? 'asc' : 'desc';
 
@@ -2184,6 +2195,9 @@ router.get('/meta/ads', async (req, res) => {
     adset: ['brand', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name'],
     ad: ['brand', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
   }[level];
+
+  const metaWhere = `($1 = 'ALL' OR brand = $1) AND platform = 'META' AND date BETWEEN $2::date AND $3::date`;
+  const groupHaving = 'SUM(spend) > 0 OR SUM(purchases) > 0';
 
   try {
     const totalsRes = await pgQuery(`
@@ -2195,15 +2209,22 @@ router.get('/meta/ads', async (req, res) => {
         SUM(clicks)::bigint AS clicks,
         SUM(link_clicks)::bigint AS link_clicks
       FROM tw_ads_daily
-      WHERE ($1 = 'ALL' OR brand = $1)
-        AND platform = 'META'
-        AND date BETWEEN $2::date AND $3::date
+      WHERE ${metaWhere}
     `, [brand, start, end]);
     const totalsRow = totalsRes.rows[0] || {};
 
-    const r = await pgQuery(`
-      SELECT
-        ${groupFields.join(', ')},
+    const countRes = await pgQuery(`
+      SELECT COUNT(*)::int AS n FROM (
+        SELECT 1
+        FROM tw_ads_daily
+        WHERE ${metaWhere}
+        GROUP BY ${groupFields.join(', ')}
+        HAVING ${groupHaving}
+      ) grouped
+    `, [brand, start, end]);
+    const totalRows = Number(countRes.rows[0]?.n || 0);
+
+    const metricsSelect = `
         SUM(spend)::numeric(14,2) AS spend,
         SUM(revenue)::numeric(14,2) AS revenue,
         SUM(purchases)::int AS purchases,
@@ -2216,16 +2237,28 @@ router.get('/meta/ads', async (req, res) => {
         CASE WHEN SUM(purchases) > 0 THEN SUM(spend) / SUM(purchases) ELSE NULL END AS cac,
         CASE WHEN SUM(impressions) > 0 THEN SUM(clicks)::numeric / SUM(impressions) ELSE NULL END AS ctr,
         CASE WHEN SUM(clicks) > 0 THEN SUM(spend) / SUM(clicks) ELSE NULL END AS cpc,
-        CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm
+        CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm`;
+
+    const [r, chartRes] = await Promise.all([
+      pgQuery(`
+      SELECT ${groupFields.join(', ')}, ${metricsSelect}
       FROM tw_ads_daily
-      WHERE ($1 = 'ALL' OR brand = $1)
-        AND platform = 'META'
-        AND date BETWEEN $2::date AND $3::date
+      WHERE ${metaWhere}
       GROUP BY ${groupFields.join(', ')}
-      HAVING SUM(spend) > 0 OR SUM(purchases) > 0
+      HAVING ${groupHaving}
       ORDER BY spend DESC
-      LIMIT $4
-    `, [brand, start, end, rowLimit]);
+      LIMIT $4 OFFSET $5
+    `, [brand, start, end, pageSize, offset]),
+      pgQuery(`
+      SELECT ${groupFields.join(', ')}, ${metricsSelect}
+      FROM tw_ads_daily
+      WHERE ${metaWhere}
+      GROUP BY ${groupFields.join(', ')}
+      HAVING ${groupHaving}
+      ORDER BY spend DESC
+      LIMIT 12
+    `, [brand, start, end]),
+    ]);
 
     const totals = {
       spend: Number(totalsRow.spend || 0),
@@ -2253,17 +2286,23 @@ router.get('/meta/ads', async (req, res) => {
         return sortDir === 'desc' ? -cmp : cmp;
       });
     }
-    res.json({ rows, totals, level, brand, row_limit: rowLimit, start, end });
+    res.json({
+      rows,
+      chart_rows: fmtRows(chartRes.rows),
+      totals,
+      pagination: buildPagination(page, pageSize, totalRows),
+      level,
+      brand,
+      start,
+      end,
+    });
   } catch (e) {
     console.error('[Analytics /meta/ads]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
 
-async function queryMetaAirAttributionGrouped(start, end, groupCols) {
-  return pgQuery(`
-    SELECT
-      ${groupCols},
+const AIR_ATTR_GROUP_METRICS = `
       SUM(spend)::numeric(14,2) AS spend,
       SUM(day_1_revenue)::numeric(14,2) AS day_1_revenue,
       SUM(purchases)::numeric(14,2) AS total_attributed_orders,
@@ -2274,18 +2313,124 @@ async function queryMetaAirAttributionGrouped(start, end, groupCols) {
       SUM(ttp_mature_air_orders)::numeric(14,2) AS ttp_mature_air_orders,
       SUM(ttp_paid_air_orders)::numeric(14,2) AS ttp_paid_air_orders,
       SUM(ttp_mature_subscribers)::int AS ttp_mature_subscribers,
-      SUM(ttp_paid_subscribers)::int AS ttp_paid_subscribers
+      SUM(ttp_paid_subscribers)::int AS ttp_paid_subscribers`;
+
+const AIR_ATTR_CACHE_HAVING = 'SUM(spend) > 0 OR SUM(air_orders) > 0 OR SUM(attributed_air_orders) > 0';
+const AIR_ATTR_ADS_ONLY_HAVING = 'SUM(spend) > 0 OR SUM(purchases) > 0';
+
+function mapAirAttributionRates(rows) {
+  return rows.map((row) => {
+    const totalOrders = Number(row.total_attributed_orders || 0);
+    const attrAir = Number(row.attributed_air_orders || 0);
+    const matureAir = Number(row.ttp_mature_air_orders || 0);
+    const paidAir = Number(row.ttp_paid_air_orders || 0);
+    const attach = totalOrders > 0 ? Number((attrAir / totalOrders).toFixed(4)) : null;
+    const ttp = matureAir > 0 ? Number((paidAir / matureAir).toFixed(4)) : null;
+    return {
+      ...row,
+      attach_rate: row.attach_rate ?? attach,
+      ttp_rate: row.ttp_rate ?? ttp,
+      activation_rate: row.activation_rate ?? (attach != null && ttp != null ? Number((attach * ttp).toFixed(4)) : null),
+    };
+  });
+}
+
+function buildAirAttributionTotals(row = {}) {
+  const totals = {
+    spend: Number(row.spend || 0),
+    day_1_revenue: Number(row.day_1_revenue || 0),
+    total_attributed_orders: Number(row.total_attributed_orders || 0),
+    air_orders: Number(row.air_orders || 0),
+    attributed_air_orders: Number(row.attributed_air_orders || 0),
+    attributed_air_revenue: Number(row.attributed_air_revenue || 0),
+    ttp_mature_air_orders: Number(row.ttp_mature_air_orders || 0),
+    ttp_paid_air_orders: Number(row.ttp_paid_air_orders || 0),
+    ttp_mature_subscribers: Number(row.ttp_mature_subscribers || 0),
+    ttp_paid_subscribers: Number(row.ttp_paid_subscribers || 0),
+  };
+  totals.aov = totals.total_attributed_orders > 0
+    ? Number((totals.day_1_revenue / totals.total_attributed_orders).toFixed(2))
+    : null;
+  totals.attach_rate = totals.total_attributed_orders > 0
+    ? Number((totals.attributed_air_orders / totals.total_attributed_orders).toFixed(4))
+    : null;
+  totals.ttp_rate = totals.ttp_mature_air_orders > 0
+    ? Number((totals.ttp_paid_air_orders / totals.ttp_mature_air_orders).toFixed(4))
+    : null;
+  totals.activation_rate = totals.attach_rate != null && totals.ttp_rate != null
+    ? Number((totals.attach_rate * totals.ttp_rate).toFixed(4))
+    : null;
+  return totals;
+}
+
+async function queryMetaAirAttributionGrouped(start, end, groupCols, limit, offset) {
+  const params = [start, end];
+  let limitSql = '';
+  if (limit != null) {
+    params.push(limit);
+    limitSql = ` LIMIT $${params.length}`;
+    if (offset != null) {
+      params.push(offset);
+      limitSql += ` OFFSET $${params.length}`;
+    }
+  }
+  return pgQuery(`
+    SELECT ${groupCols}, ${AIR_ATTR_GROUP_METRICS}
     FROM nobl_air_meta_ad_daily
     WHERE brand = 'NOBL'
       AND date BETWEEN $1::date AND $2::date
     GROUP BY ${groupCols}
-    HAVING SUM(spend) > 0 OR SUM(air_orders) > 0 OR SUM(attributed_air_orders) > 0
+    HAVING ${AIR_ATTR_CACHE_HAVING}
     ORDER BY SUM(attributed_air_orders) DESC, SUM(attributed_air_revenue) DESC
-    LIMIT 500
-  `, [start, end]);
+    ${limitSql}
+  `, params);
 }
 
-async function queryMetaAirAttributionAdsOnly(start, end, groupCols) {
+async function queryMetaAirAttributionGroupedCount(start, end, groupCols) {
+  const res = await pgQuery(`
+    SELECT COUNT(*)::int AS n FROM (
+      SELECT 1
+      FROM nobl_air_meta_ad_daily
+      WHERE brand = 'NOBL'
+        AND date BETWEEN $1::date AND $2::date
+      GROUP BY ${groupCols}
+      HAVING ${AIR_ATTR_CACHE_HAVING}
+    ) grouped
+  `, [start, end]);
+  return Number(res.rows[0]?.n || 0);
+}
+
+async function queryMetaAirAttributionTotalsDaily(start, end) {
+  const res = await pgQuery(`
+    SELECT
+      SUM(spend)::numeric(14,2) AS spend,
+      SUM(day_1_revenue)::numeric(14,2) AS day_1_revenue,
+      SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+      SUM(air_orders)::int AS air_orders,
+      SUM(attributed_air_orders)::numeric(14,2) AS attributed_air_orders,
+      SUM(attributed_air_revenue)::numeric(14,2) AS attributed_air_revenue,
+      SUM(ttp_mature_air_orders)::numeric(14,2) AS ttp_mature_air_orders,
+      SUM(ttp_paid_air_orders)::numeric(14,2) AS ttp_paid_air_orders,
+      SUM(ttp_mature_subscribers)::int AS ttp_mature_subscribers,
+      SUM(ttp_paid_subscribers)::int AS ttp_paid_subscribers
+    FROM nobl_air_meta_ad_daily
+    WHERE brand = 'NOBL'
+      AND date BETWEEN $1::date AND $2::date
+  `, [start, end]);
+  return buildAirAttributionTotals(res.rows[0] || {});
+}
+
+async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offset) {
+  const params = [start, end];
+  let limitSql = '';
+  if (limit != null) {
+    params.push(limit);
+    limitSql = ` LIMIT $${params.length}`;
+    if (offset != null) {
+      params.push(offset);
+      limitSql += ` OFFSET $${params.length}`;
+    }
+  }
   return pgQuery(`
     SELECT
       ${groupCols},
@@ -2306,16 +2451,68 @@ async function queryMetaAirAttributionAdsOnly(start, end, groupCols) {
       AND date BETWEEN $1::date AND $2::date
       AND COALESCE(ad_id, '') <> ''
     GROUP BY ${groupCols}
-    HAVING SUM(spend) > 0 OR SUM(purchases) > 0
+    HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
     ORDER BY SUM(spend) DESC
-    LIMIT 500
+    ${limitSql}
+  `, params);
+}
+
+async function queryMetaAirAttributionAdsOnlyCount(start, end, groupCols) {
+  const res = await pgQuery(`
+    SELECT COUNT(*)::int AS n FROM (
+      SELECT 1
+      FROM tw_ads_daily
+      WHERE brand = 'NOBL'
+        AND platform = 'META'
+        AND date BETWEEN $1::date AND $2::date
+        AND COALESCE(ad_id, '') <> ''
+      GROUP BY ${groupCols}
+      HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
+    ) grouped
   `, [start, end]);
+  return Number(res.rows[0]?.n || 0);
+}
+
+async function queryMetaAirAttributionAdsOnlyTotals(start, end) {
+  const res = await pgQuery(`
+    SELECT
+      SUM(spend)::numeric(14,2) AS spend,
+      SUM(revenue)::numeric(14,2) AS day_1_revenue,
+      SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+      0::int AS air_orders,
+      0::numeric(14,2) AS attributed_air_orders,
+      0::numeric(14,2) AS attributed_air_revenue,
+      0::numeric(14,2) AS ttp_mature_air_orders,
+      0::numeric(14,2) AS ttp_paid_air_orders,
+      0::int AS ttp_mature_subscribers,
+      0::int AS ttp_paid_subscribers
+    FROM tw_ads_daily
+    WHERE brand = 'NOBL'
+      AND platform = 'META'
+      AND date BETWEEN $1::date AND $2::date
+      AND COALESCE(ad_id, '') <> ''
+  `, [start, end]);
+  return buildAirAttributionTotals(res.rows[0] || {});
+}
+
+async function fetchAirAttributionPage(dataSource, start, end, groupCols, pageSize, offset) {
+  if (dataSource === 'cache') {
+    const r = await queryMetaAirAttributionGrouped(start, end, groupCols, pageSize, offset);
+    return fmtRows(mapAirAttributionRates(r.rows));
+  }
+  if (dataSource === 'meta_ads_only') {
+    const r = await queryMetaAirAttributionAdsOnly(start, end, groupCols, pageSize, offset);
+    return fmtRows(mapAirAttributionRates(r.rows));
+  }
+  return [];
 }
 
 // GET /nobl/air-attribution — exact NOBL Air purchases from TW order-level attribution
 router.get('/nobl/air-attribution', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'ad';
+  const { page, pageSize, offset } = parseTablePagination(req);
+  const allowLive = ['1', 'true', 'yes'].includes(String(req.query.live || '').toLowerCase());
 
   const groupFields = {
     campaign: ['campaign_id', 'campaign_name'],
@@ -2326,13 +2523,14 @@ router.get('/nobl/air-attribution', async (req, res) => {
 
   try {
     const { version } = await getNoblAirDataVersion();
-    const cacheKey = `attr:${start}:${end}:${level}`;
-    const { body, hit } = await withResponseCache('nobl-air', cacheKey, version, async () => {
+    const cacheKey = `attr-meta:${start}:${end}:${level}`;
+    const { body: meta, hit } = await withResponseCache('nobl-air', cacheKey, version, async () => {
     let source = 'cache';
     let cacheHint = null;
-    let cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
+    let dataSource = 'cache';
+    let totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols);
 
-    if (!cached.rows.length) {
+    if (totalRows === 0) {
       const src = await pgQuery(`
         SELECT
           (SELECT COUNT(*)::int FROM tw_air_order_attribution
@@ -2350,22 +2548,22 @@ router.get('/nobl/air-attribution', async (req, res) => {
         try {
           console.log(`[Analytics /nobl/air-attribution] warming cache ${start}..${end} (${fbAttr} fb attr rows)`);
           await refreshNoblAirMetaAdDaily(start, end);
-          cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
-          source = cached.rows.length ? 'cache_warmed' : 'empty_after_warm';
+          totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols);
+          source = totalRows > 0 ? 'cache_warmed' : 'empty_after_warm';
         } finally {
           metaAirWarmInFlight.delete(warmKey);
         }
-      } else if (rangeCached > 0) {
-        cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
       }
 
-      if (!cached.rows.length) {
-        const adsOnly = await queryMetaAirAttributionAdsOnly(start, end, groupCols);
-        if (adsOnly.rows.length) {
-          cached = adsOnly;
+      if (totalRows === 0) {
+        const adsCount = await queryMetaAirAttributionAdsOnlyCount(start, end, groupCols);
+        if (adsCount > 0) {
+          dataSource = 'meta_ads_only';
           source = 'meta_ads_only';
+          totalRows = adsCount;
           cacheHint = 'Meta spend loaded from ad reports. Air order attribution is still syncing — Air columns show 0 until tw_air_attribution cache is built.';
         } else {
+          dataSource = 'empty';
           source = 'empty';
           cacheHint = fbAttr === 0
             ? 'No Facebook-attributed Air orders in this date range. Run tw_air_attribution sync from Triple Whale.'
@@ -2374,9 +2572,26 @@ router.get('/nobl/air-attribution', async (req, res) => {
       }
     }
 
-    let r = cached;
-    const allowLive = ['1', 'true', 'yes'].includes(String(req.query.live || '').toLowerCase());
-    if (!cached.rows.length && allowLive) {
+    if (dataSource === 'empty' && allowLive) {
+      dataSource = 'live';
+      source = 'live';
+      cacheHint = null;
+    }
+
+    let totals = buildAirAttributionTotals({});
+    let chartRows = [];
+    let liveRowsCached = null;
+
+    if (dataSource === 'cache') {
+      totals = await queryMetaAirAttributionTotalsDaily(start, end);
+      totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols);
+      const top = await queryMetaAirAttributionGrouped(start, end, groupCols, 12, 0);
+      chartRows = fmtRows(mapAirAttributionRates(top.rows));
+    } else if (dataSource === 'meta_ads_only') {
+      totals = await queryMetaAirAttributionAdsOnlyTotals(start, end);
+      const top = await queryMetaAirAttributionAdsOnly(start, end, groupCols, 12, 0);
+      chartRows = fmtRows(mapAirAttributionRates(top.rows));
+    } else if (dataSource === 'live') {
       const totalJoin = groupFields
         .map(field => `COALESCE(air.${field}, '') = COALESCE(total.${field}, '')`)
         .join(' AND ');
@@ -2512,75 +2727,63 @@ router.get('/nobl/air-attribution', async (req, res) => {
       LEFT JOIN total ON ${totalJoin}
       LEFT JOIN cohort ON ${groupFields.map(field => `COALESCE(air.${field}, '') = COALESCE(cohort.${field}, '')`).join(' AND ')}
       ORDER BY attributed_air_orders DESC, attributed_air_revenue DESC
-      LIMIT 500
     `, [start, end]);
-      r = live;
-      source = 'live';
+      const liveRows = mapAirAttributionRates(live.rows);
+      totalRows = liveRows.length;
+      totals = buildAirAttributionTotals(liveRows.reduce((acc, row) => ({
+        spend: acc.spend + Number(row.spend || 0),
+        day_1_revenue: acc.day_1_revenue + Number(row.day_1_revenue || 0),
+        total_attributed_orders: acc.total_attributed_orders + Number(row.total_attributed_orders || 0),
+        air_orders: acc.air_orders + Number(row.air_orders || 0),
+        attributed_air_orders: acc.attributed_air_orders + Number(row.attributed_air_orders || 0),
+        attributed_air_revenue: acc.attributed_air_revenue + Number(row.attributed_air_revenue || 0),
+        ttp_mature_air_orders: acc.ttp_mature_air_orders + Number(row.ttp_mature_air_orders || 0),
+        ttp_paid_air_orders: acc.ttp_paid_air_orders + Number(row.ttp_paid_air_orders || 0),
+        ttp_mature_subscribers: acc.ttp_mature_subscribers + Number(row.ttp_mature_subscribers || 0),
+        ttp_paid_subscribers: acc.ttp_paid_subscribers + Number(row.ttp_paid_subscribers || 0),
+      }), {
+        spend: 0, day_1_revenue: 0, total_attributed_orders: 0, air_orders: 0,
+        attributed_air_orders: 0, attributed_air_revenue: 0,
+        ttp_mature_air_orders: 0, ttp_paid_air_orders: 0,
+        ttp_mature_subscribers: 0, ttp_paid_subscribers: 0,
+      }));
+      chartRows = fmtRows(liveRows.slice(0, 12));
+      liveRowsCached = fmtRows(liveRows);
     }
 
-    const rowsWithRates = r.rows.map(row => {
-      const totalOrders = Number(row.total_attributed_orders || 0);
-      const attrAir = Number(row.attributed_air_orders || 0);
-      const matureAir = Number(row.ttp_mature_air_orders || 0);
-      const paidAir = Number(row.ttp_paid_air_orders || 0);
-      const attach = totalOrders > 0 ? Number((attrAir / totalOrders).toFixed(4)) : null;
-      const ttp = matureAir > 0 ? Number((paidAir / matureAir).toFixed(4)) : null;
-      return {
-        ...row,
-        attach_rate: row.attach_rate ?? attach,
-        ttp_rate: row.ttp_rate ?? ttp,
-        activation_rate: row.activation_rate ?? (attach != null && ttp != null ? Number((attach * ttp).toFixed(4)) : null),
-      };
-    });
-
-    const totals = rowsWithRates.reduce((acc, row) => ({
-      spend: acc.spend + Number(row.spend || 0),
-      day_1_revenue: acc.day_1_revenue + Number(row.day_1_revenue || 0),
-      total_attributed_orders: acc.total_attributed_orders + Number(row.total_attributed_orders || 0),
-      air_orders: acc.air_orders + Number(row.air_orders || 0),
-      attributed_air_orders: acc.attributed_air_orders + Number(row.attributed_air_orders || 0),
-      attributed_air_revenue: acc.attributed_air_revenue + Number(row.attributed_air_revenue || 0),
-      ttp_mature_air_orders: acc.ttp_mature_air_orders + Number(row.ttp_mature_air_orders || 0),
-      ttp_paid_air_orders: acc.ttp_paid_air_orders + Number(row.ttp_paid_air_orders || 0),
-      ttp_mature_subscribers: acc.ttp_mature_subscribers + Number(row.ttp_mature_subscribers || 0),
-      ttp_paid_subscribers: acc.ttp_paid_subscribers + Number(row.ttp_paid_subscribers || 0),
-    }), {
-      spend: 0,
-      day_1_revenue: 0,
-      total_attributed_orders: 0,
-      air_orders: 0,
-      attributed_air_orders: 0,
-      attributed_air_revenue: 0,
-      ttp_mature_air_orders: 0,
-      ttp_paid_air_orders: 0,
-      ttp_mature_subscribers: 0,
-      ttp_paid_subscribers: 0,
-    });
-    totals.aov = totals.total_attributed_orders > 0
-      ? Number((totals.day_1_revenue / totals.total_attributed_orders).toFixed(2))
-      : null;
-    totals.attach_rate = totals.total_attributed_orders > 0
-      ? Number((totals.attributed_air_orders / totals.total_attributed_orders).toFixed(4))
-      : null;
-    totals.ttp_rate = totals.ttp_mature_air_orders > 0
-      ? Number((totals.ttp_paid_air_orders / totals.ttp_mature_air_orders).toFixed(4))
-      : null;
-    totals.activation_rate = totals.attach_rate != null && totals.ttp_rate != null
-      ? Number((totals.attach_rate * totals.ttp_rate).toFixed(4))
-      : null;
-
     return {
-      rows: fmtRows(rowsWithRates),
+      data_source: dataSource,
       totals,
+      total_rows: totalRows,
+      chart_rows: chartRows,
       level,
       start,
       end,
       source,
       cache_hint: cacheHint,
+      live_rows: liveRowsCached,
     };
     });
+
+    let rows = [];
+    if (meta.data_source === 'live' && meta.live_rows) {
+      rows = meta.live_rows.slice(offset, offset + pageSize);
+    } else if (meta.data_source !== 'empty') {
+      rows = await fetchAirAttributionPage(meta.data_source, start, end, groupCols, pageSize, offset);
+    }
+
     res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
-    res.json(body);
+    res.json({
+      rows,
+      chart_rows: meta.chart_rows || [],
+      totals: meta.totals || {},
+      pagination: buildPagination(page, pageSize, meta.total_rows || 0),
+      level,
+      start,
+      end,
+      source: meta.source,
+      cache_hint: meta.cache_hint,
+    });
   } catch (e) {
     console.error('[Analytics /nobl/air-attribution]', e.message);
     res.status(500).json({ error: e.message });
