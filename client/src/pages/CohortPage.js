@@ -1,5 +1,8 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum} from '../utils/api';
+import TablePagination from '../components/TablePagination';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L } from '../copy/plainLanguage';
 import {LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer} from 'recharts';
@@ -13,6 +16,8 @@ export default function CohortPage(){
   useEffect(()=>{
     getTab('Cohort Analysis').then(d=>setRows((d.rows||[]).filter(r=>r['Cohort Week']))).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
+
+  const { page, setPage, pageItems, totalRows } = useClientPagination(rows, TABLE_PAGE_SIZE, [rows]);
 
   if(loading) return <Loader/>;
   if(!rows.length) return <Empty/>;
@@ -77,7 +82,7 @@ export default function CohortPage(){
                 </tr>
               </thead>
               <tbody>
-                {rows.map((r,i)=>(
+                {pageItems.map((r,i)=>(
                   <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:i%2===1?'rgba(255,255,255,.015)':'transparent'}}>
                     <td style={{padding:'8px 14px',fontFamily:'var(--font-mono)'}}>{r['Cohort Week']}</td>
                     <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtNum(r['Total Subs'])}</td>
@@ -91,6 +96,7 @@ export default function CohortPage(){
               </tbody>
             </table>
           </div>
+          <TablePagination page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={setPage} />
         </div>
       </Section>
     </div>

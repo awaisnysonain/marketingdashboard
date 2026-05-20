@@ -89,7 +89,7 @@ export default function SubscriptionPage(){
 
       <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:'20px 22px',marginBottom:18}}>
         <div style={{fontFamily:'var(--font-head)',fontSize:15,fontWeight:600,marginBottom:14}}>Trial to Paid Table</div>
-        {ttp && <DataTable tab="Trial to Paid" headers={ttp.headers} rows={ttp.rows} maxHeight="320px" searchable={false}/>}
+        {ttp && <DataTable tab="Trial to Paid" headers={ttp.headers} rows={ttp.rows} searchable={false}/>}
       </div>
 
       <ChartCard title="Weekly trends" subtitle={`Orders · ${L.newSubs} · ${L.combinedNetRevenue}`} style={{marginBottom:18}}>
@@ -122,12 +122,12 @@ export default function SubscriptionPage(){
 
       <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:'20px 22px',marginBottom:18}}>
         <div style={{fontFamily:'var(--font-head)',fontSize:15,fontWeight:600,marginBottom:14}}>Cohort Analysis Table</div>
-        {cohort && <DataTable tab="Cohort Analysis" headers={cohort.headers} rows={cohort.rows} maxHeight="340px"/>}
+        {cohort && <DataTable tab="Cohort Analysis" headers={cohort.headers} rows={cohort.rows}/>}
       </div>
 
       <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:'20px 22px'}}>
         <div style={{fontFamily:'var(--font-head)',fontSize:15,fontWeight:600,marginBottom:14}}>Weekly Trends Table</div>
-        {weekly && <DataTable tab="Weekly Trends" headers={weekly.headers} rows={weekly.rows} maxHeight="340px"/>}
+        {weekly && <DataTable tab="Weekly Trends" headers={weekly.headers} rows={weekly.rows}/>}
       </div>
     </div>
   );

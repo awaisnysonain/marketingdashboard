@@ -4,6 +4,9 @@ import {
   ComposedChart,
 } from 'recharts';
 import { getForecastEngine, fmt$, fmtNum, fmtPct } from '../utils/api';
+import TablePagination from '../components/TablePagination';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { L, PAGE } from '../copy/plainLanguage';
 
 const STATUS = {
@@ -121,6 +124,13 @@ export default function ForecastEnginePage() {
   const brands = data?.brands || [];
   const selected = brands.find(b => b.brand === detailBrand) || brands[0] || null;
   const combined = data?.combined || {};
+  const dailyProjection = selected?.daily_projection || [];
+  const {
+    page: dailyPage,
+    setPage: setDailyPage,
+    pageItems: dailyPageItems,
+    totalRows: dailyTotal,
+  } = useClientPagination(dailyProjection, TABLE_PAGE_SIZE, [detailBrand, dailyProjection.length]);
 
   useEffect(() => {
     if (!brands.length) return;
@@ -292,12 +302,12 @@ export default function ForecastEnginePage() {
 
           <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1.7fr) minmax(280px, .8fr)', gap:16 }}>
             <Card title="Current month daily projection" subtitle="Auditable formula: base × day-of-week × seasonality × sale × drop.">
-              <div style={{ overflowX:'auto', maxHeight:440, border:'1px solid var(--border)', borderRadius:14 }}>
+              <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:14 }}>
                 <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
                   <thead><tr style={{ color:'var(--text3)', background:'var(--bg3)' }}>
-                    {['Date','Type',L.sales,'DOW','Season','Sale','Drop','Weight'].map(h => <th key={h} style={{ textAlign:h === 'Date' || h === 'Type' || h === 'Sale' || h === 'Drop' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', position:'sticky', top:0, background:'var(--bg3)', zIndex:1 }}>{h}</th>)}
+                    {['Date','Type',L.sales,'DOW','Season','Sale','Drop','Weight'].map(h => <th key={h} style={{ textAlign:h === 'Date' || h === 'Type' || h === 'Sale' || h === 'Drop' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', background:'var(--bg3)' }}>{h}</th>)}
                   </tr></thead>
-                  <tbody>{selected.daily_projection.map(r => <tr key={r.date} style={{ color:r.is_actual ? '#16a34a' : 'var(--text2)' }}>
+                  <tbody>{dailyPageItems.map(r => <tr key={r.date} style={{ color:r.is_actual ? '#16a34a' : 'var(--text2)' }}>
                     <td style={tdLeft}>{r.date}</td>
                     <td style={tdLeft}>{r.is_actual ? 'Actual' : 'Projected'}</td>
                     <td style={tdRight}>{money(r.projected_revenue)}</td>
@@ -308,6 +318,7 @@ export default function ForecastEnginePage() {
                     <td style={tdRight}>{Number(r.weight).toFixed(2)}x</td>
                   </tr>)}</tbody>
                 </table>
+                <TablePagination page={dailyPage} pageSize={TABLE_PAGE_SIZE} totalRows={dailyTotal} onPageChange={setDailyPage} />
               </div>
             </Card>
             <Card title="Regional pacing" subtitle={`Year-to-date actual ${L.sales.toLowerCase()} by region. ${L.mer} shows when regional ad spend is available.`}>

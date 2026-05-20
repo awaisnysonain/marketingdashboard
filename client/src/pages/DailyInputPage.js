@@ -1,5 +1,8 @@
-import React,{useState,useEffect} from 'react';
+import React,{useState,useEffect,useMemo} from 'react';
 import {getTab,fmt$,fmtPct,fmtNum,fmtDate} from '../utils/api';
+import TablePagination from '../components/TablePagination';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,LineChart,Line} from 'recharts';
@@ -79,17 +82,22 @@ export default function DailyInputPage(){
     }).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
 
+  const totalRow=useMemo(()=>allRows.find(r=>String(r['Date']||'').toUpperCase()==='TOTAL'),[allRows]);
+  const dataRows=useMemo(
+    ()=>allRows.filter(r=>String(r['Date']||'').toUpperCase()!=='TOTAL'&&r['Date']),
+    [allRows],
+  );
+  const activeGroup=COL_GROUPS.find(g=>g.label===colFilter);
+  const visibleCols=useMemo(()=>(
+    colFilter==='All'
+      ? ALL_COLS.filter(c=>headers.includes(c.key)||c.key==='Date')
+      : ALL_COLS.filter(c=>activeGroup?.keys.includes(c.key))
+  ),[colFilter,headers,activeGroup]);
+  const displayRows=useMemo(()=>[...dataRows].reverse(),[dataRows]);
+  const { page, setPage, pageItems, totalRows } = useClientPagination(displayRows, TABLE_PAGE_SIZE, [allRows, colFilter]);
+
   if(loading) return <Loader/>;
   if(!allRows.length) return <Empty/>;
-
-  const totalRow=allRows.find(r=>String(r['Date']||'').toUpperCase()==='TOTAL');
-  const dataRows=allRows.filter(r=>String(r['Date']||'').toUpperCase()!=='TOTAL'&&r['Date']);
-
-  // Pick which columns to show
-  const activeGroup=COL_GROUPS.find(g=>g.label===colFilter);
-  const visibleCols=colFilter==='All'
-    ? ALL_COLS.filter(c=>headers.includes(c.key)||c.key==='Date')
-    : ALL_COLS.filter(c=>activeGroup?.keys.includes(c.key));
 
   // Chart data — current month-to-date
   const now=new Date();
@@ -182,7 +190,7 @@ export default function DailyInputPage(){
         </div>
 
         <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
-          <div style={{overflowX:'auto',maxHeight:520,overflowY:'auto'}}>
+          <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
               <thead style={{position:'sticky',top:0,zIndex:2}}>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
@@ -203,7 +211,7 @@ export default function DailyInputPage(){
                 </tr>
               </thead>
               <tbody>
-                {dataRows.slice().reverse().map((r,i)=>(
+                {pageItems.map((r,i)=>(
                   <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.035)',background:i%2===1?'rgba(255,255,255,.012)':'transparent'}}>
                     {visibleCols.map(c=>{
                       const val=r[c.key];
@@ -248,6 +256,7 @@ export default function DailyInputPage(){
               </tbody>
             </table>
           </div>
+          <TablePagination page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={setPage} />
         </div>
       </Section>
     </div>

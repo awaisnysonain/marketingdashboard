@@ -113,7 +113,7 @@ export default function ChannelPage(){
 
       <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:'20px 22px',marginBottom:18}}>
         <div style={{fontFamily:'var(--font-head)',fontSize:15,fontWeight:600,marginBottom:14}}>Channel Funnel Table</div>
-        {funnel && <DataTable tab="Channel Funnel" headers={funnel.headers} rows={funnel.rows} maxHeight="340px" searchable={false}/>}
+        {funnel && <DataTable tab="Channel Funnel" headers={funnel.headers} rows={funnel.rows} searchable={false}/>}
       </div>
 
       {/* FB Campaigns collapsible */}
@@ -123,7 +123,7 @@ export default function ChannelPage(){
           FB Campaigns
           <span style={{fontSize:12,color:'var(--text3)',fontWeight:400,marginLeft:4}}>({(fbCampaigns?.rows||[]).length} campaigns)</span>
         </button>
-        {showFbC && fbCampaigns && <div style={{marginTop:14}}><DataTable tab="FB Campaigns" headers={fbCampaigns.headers} rows={fbCampaigns.rows} maxHeight="360px"/></div>}
+        {showFbC && fbCampaigns && <div style={{marginTop:14}}><DataTable tab="FB Campaigns" headers={fbCampaigns.headers} rows={fbCampaigns.rows}/></div>}
       </div>
 
       <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:'16px 22px'}}>
@@ -132,7 +132,7 @@ export default function ChannelPage(){
           FB Adsets
           <span style={{fontSize:12,color:'var(--text3)',fontWeight:400,marginLeft:4}}>({(fbAdsets?.rows||[]).length} adsets)</span>
         </button>
-        {showFbA && fbAdsets && <div style={{marginTop:14}}><DataTable tab="FB Adsets" headers={fbAdsets.headers} rows={fbAdsets.rows} maxHeight="360px"/></div>}
+        {showFbA && fbAdsets && <div style={{marginTop:14}}><DataTable tab="FB Adsets" headers={fbAdsets.headers} rows={fbAdsets.rows}/></div>}
       </div>
     </div>
   );

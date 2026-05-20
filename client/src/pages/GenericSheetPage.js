@@ -131,7 +131,7 @@ export default function GenericSheetPage({tabName}){
   const [page,setPage]=useState(0);
   const [selCols,setSelCols]=useState(null);
   const [selectedRows,setSelectedRows]=useState([]);
-  const PER_PAGE=100;
+  const PER_PAGE=20; // matches TABLE_PAGE_SIZE
 
   useEffect(()=>{
     setLoading(true);
@@ -300,7 +300,7 @@ export default function GenericSheetPage({tabName}){
       {/* ── Data Table ───────────────────────────────────────────── */}
       <Section title={`Data${selectedRows.length>0?` · ${selectedRows.length} selected`:''}`}>
         <div style={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:12,overflow:'hidden'}}>
-          <div style={{overflowX:'auto',maxHeight:560,overflowY:'auto'}}>
+          <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:12.5}}>
               <thead style={{position:'sticky',top:0,zIndex:2}}>
                 <tr style={{background:'var(--bg4)',borderBottom:'2px solid var(--border2)'}}>

@@ -23,11 +23,11 @@ import {
 } from '../utils/analyticsCache';
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import TablePagination from '../components/TablePagination';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
-
-const AIR_ATTR_PAGE_SIZE = 50;
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 
 /* ────────────── helpers ────────────── */
@@ -425,7 +425,7 @@ export default function NoblAirPerformancePage() {
     else setAirAttrTableLoading(true);
     try {
       await getNoblAirDataVersion();
-      const attr = await getNoblAirAttribution(range.start, range.end, 'ad', pageNum, AIR_ATTR_PAGE_SIZE);
+      const attr = await getNoblAirAttribution(range.start, range.end, 'ad', pageNum, TABLE_PAGE_SIZE);
       applyAirAttr(attr, pageNum);
     } catch (e) {
       applyAirAttr({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message }, pageNum);
@@ -453,7 +453,7 @@ export default function NoblAirPerformancePage() {
       await getNoblAirDataVersion();
       const [subs, attr] = await Promise.all([
         cachedSubs ? Promise.resolve(cachedSubs) : getNoblAirSubscribers(range.start, range.end).catch(() => null),
-        getNoblAirAttribution(range.start, range.end, 'ad', 1, AIR_ATTR_PAGE_SIZE).catch((e) => ({
+        getNoblAirAttribution(range.start, range.end, 'ad', 1, TABLE_PAGE_SIZE).catch((e) => ({
           rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message,
         })),
       ]);
@@ -595,6 +595,20 @@ export default function NoblAirPerformancePage() {
     () => [...forecastRows, forecastFullYear].filter(Boolean),
     [forecastRows, forecastFullYear]
   );
+  const forecastMonthlyOnly = useMemo(
+    () => forecastTableRows.filter((r) => r.row_type !== 'total'),
+    [forecastTableRows],
+  );
+  const forecastTotalRow = useMemo(
+    () => forecastTableRows.find((r) => r.row_type === 'total') || forecastFullYear,
+    [forecastTableRows, forecastFullYear],
+  );
+  const {
+    page: forecastPage,
+    setPage: setForecastPage,
+    pageItems: forecastPageItems,
+    totalRows: forecastTableTotal,
+  } = useClientPagination(forecastMonthlyOnly, TABLE_PAGE_SIZE, [forecastTableRows]);
   const currentForecastRow = useMemo(
     () => forecastRows.find(r => r.row_type === 'current_projection'),
     [forecastRows]
@@ -877,17 +891,17 @@ export default function NoblAirPerformancePage() {
                 </ResponsiveContainer>
 
                 <div style={{ border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' }}>
-                  <SheetTable
+                  <PaginatedSheetTable
                     headers={AIR_ATTR_HEADERS}
                     rows={airAttrRows}
                     keyField="_ad"
-                    scrollable={false}
+                    showPagination={false}
                     defaultSortField={L.attributedAirOrders}
                     defaultSortDir="desc"
                   />
                   <TablePagination
                     page={airAttrPage}
-                    pageSize={AIR_ATTR_PAGE_SIZE}
+                    pageSize={TABLE_PAGE_SIZE}
                     totalRows={airAttrTotalRows}
                     onPageChange={(p) => loadAirAttrPage(p)}
                     loading={airAttrTableLoading}
@@ -900,11 +914,11 @@ export default function NoblAirPerformancePage() {
 
           {/* ── Daily detail table ── */}
           <Card title="Day-by-day numbers" subtitle="One row per day — orders, add-on rate, trials, and sales breakdown.">
-            <SheetTable
+            <PaginatedSheetTable
               headers={HEADERS}
               rows={tableRows}
               keyField="_date"
-              maxHeight="620px"
+              resetDeps={[range.start, range.end, regionParam]}
               defaultSortField={L.date}
               defaultSortDir="desc"
             />
@@ -1014,7 +1028,7 @@ export default function NoblAirPerformancePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {forecastTableRows.map((r, idx) => {
+                    {forecastPageItems.map((r, idx) => {
                       const statusStyle = FORECAST_STATUS_STYLES[r.row_type] || FORECAST_STATUS_STYLES.no_data;
                       const isSummary = r.row_type === 'total';
                       return (
@@ -1047,8 +1061,44 @@ export default function NoblAirPerformancePage() {
                         <td style={{ padding:'8px 10px', color:'var(--text3)', whiteSpace:'nowrap' }} title={r.order_source || undefined}>{forecastSourceLabel(r)}</td>
                       </tr>
                     );})}
+                    {forecastTotalRow && (() => {
+                      const r = forecastTotalRow;
+                      const statusStyle = FORECAST_STATUS_STYLES[r.row_type] || FORECAST_STATUS_STYLES.no_data;
+                      const isSummary = true;
+                      return (
+                      <tr key={r.month || 'total'} style={{ borderBottom:'1px solid var(--border)', color: 'var(--text)', fontWeight: 700 }}>
+                        <td style={{ padding:'8px 10px', whiteSpace:'nowrap' }}>{forecastMonthLabel(r)}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right' }}>
+                          <span style={{ display:'inline-block', padding:'3px 8px', borderRadius:999, background:statusStyle.bg, color:statusStyle.color, fontSize:11, fontWeight:700, whiteSpace:'nowrap' }}>
+                            {r.status_label || statusStyle.label}
+                          </span>
+                        </td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_store_revenue')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualNumber(r, 'actual_orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualNumber(r, 'actual_eligible_orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualNumber(r, 'actual_air_orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualPct(r, 'actual_attach_rate')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualPct(r, 'actual_ttp_rate')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualPct(r, 'actual_activation_rate')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_tag_rev_net')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_sub_rev_net')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_rebill_rev_net')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums', color: hasActualForecastData(r) ? '#22c55e' : 'var(--text3)' }}>{fmtActualCurrency(r, 'actual_air_rev_net')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedCurrency(r, 'store_revenue')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedNumber(r, 'orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{hasProjectedForecastData(r) ? fmt$(r.aov) : '—'}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedNumber(r, 'est_air_orders')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedNumber(r, 'est_activations')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedPct(r, 'attach_rate')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedPct(r, 'activation_rate')}</td>
+                        <td style={{ padding:'8px 10px', textAlign:'right', fontVariantNumeric:'tabular-nums' }}>{fmtProjectedCurrency(r, 'total_air_rev_net_est')}</td>
+                        <td style={{ padding:'8px 10px', color:'var(--text3)', whiteSpace:'nowrap' }} title={r.order_source || undefined}>{forecastSourceLabel(r)}</td>
+                      </tr>
+                      );
+                    })()}
                   </tbody>
                 </table>
+                <TablePagination page={forecastPage} pageSize={TABLE_PAGE_SIZE} totalRows={forecastTableTotal} onPageChange={setForecastPage} />
               </div>
             </Card>
           </>

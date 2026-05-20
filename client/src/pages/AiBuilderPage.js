@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { generateDashboard, executeDashboard, saveDashboard, fmt$, aiChat } from '../utils/api';
 import { Icons } from '../components/Icons';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 
 const CHART_COLORS = ['#6366f1','#14b8a6','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#1877f2','#ea4335'];
 
@@ -106,11 +106,10 @@ function TableSection({ section, data }) {
     return out;
   });
   return (
-    <SheetTable
+    <PaginatedSheetTable
       headers={headers}
       rows={rows}
       keyField="_key"
-      maxHeight="320px"
       searchable={false}
       defaultSortField={headers[0]}
       defaultSortDir="desc"

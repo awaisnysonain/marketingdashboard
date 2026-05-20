@@ -6,7 +6,7 @@ import {
 import { getStoreNobl, fmt$, fmtNum, fmtPct } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 
@@ -279,7 +279,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
       {/* Daily summary table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Summary — All Days</div>
-        <SheetTable headers={OV_HEADERS} rows={rows} maxHeight="500px" defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable headers={OV_HEADERS} rows={rows} defaultSortField="Date" defaultSortDir="desc" />
       </div>
     </div>
   );
@@ -370,7 +370,7 @@ function ChannelsTab({ channels, chAgg }) {
       {/* Aggregated channel table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Period Totals by Channel</div>
-        <SheetTable headers={CH_AGG_HEADERS} rows={aggRows} maxHeight="320px" defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable headers={CH_AGG_HEADERS} rows={aggRows} defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
       </div>
 
       {/* Daily channel table — every day × every channel */}
@@ -379,7 +379,7 @@ function ChannelsTab({ channels, chAgg }) {
         <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>
           Each row = one day × one channel. Sort and filter to explore.
         </div>
-        <SheetTable headers={CH_DAILY_HEADERS} rows={dailyRows} maxHeight="600px" defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable headers={CH_DAILY_HEADERS} rows={dailyRows} defaultSortField="Date" defaultSortDir="desc" />
       </div>
     </div>
   );
@@ -483,14 +483,14 @@ function RegionsTab({ geo, geoAgg }) {
       {/* Aggregated geo table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Period Totals by Region</div>
-        <SheetTable headers={GEO_AGG_HEADERS} rows={aggRows} maxHeight="280px" defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable headers={GEO_AGG_HEADERS} rows={aggRows} defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
       </div>
 
       {/* Daily geo table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Daily Regional Data — Every Day</div>
         <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>Each row = one day × one region (EU always shown)</div>
-        <SheetTable headers={GEO_DAILY_HEADERS} rows={dailyRows} maxHeight="600px" defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable headers={GEO_DAILY_HEADERS} rows={dailyRows} defaultSortField="Date" defaultSortDir="desc" />
       </div>
     </div>
   );
@@ -565,7 +565,7 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
       {/* Daily table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Subscription Detail</div>
-        <SheetTable headers={SUB_HEADERS} rows={rows} maxHeight="500px" defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable headers={SUB_HEADERS} rows={rows} defaultSortField="Date" defaultSortDir="desc" />
       </div>
     </div>
   );
@@ -632,7 +632,7 @@ function EmailTab({ email, emailTotals }) {
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Email Stats</div>
-        <SheetTable headers={EMAIL_HEADERS} rows={rows} maxHeight="500px" defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable headers={EMAIL_HEADERS} rows={rows} defaultSortField="Date" defaultSortDir="desc" />
       </div>
     </div>
   );

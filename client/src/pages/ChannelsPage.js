@@ -5,7 +5,7 @@ import {
 import { getChannels, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 
@@ -187,10 +187,10 @@ export default function ChannelsPage({ showToast }) {
                 — click cells · shift+click range · ctrl+C copy
               </span>
             </div>
-            <SheetTable
+            <PaginatedSheetTable
               headers={CH_HEADERS}
               rows={sheetRows}
-              maxHeight="540px"
+              resetDeps={[range.start, range.end]}
               defaultSortField={L.date}
               defaultSortDir="desc"
               searchable={true}

@@ -224,12 +224,12 @@ export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
 };
-export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', page = 1, pageSize = 50) =>
+export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', page = 1, pageSize = 20) =>
   fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${encodeURIComponent(brand)}&page=${page}&page_size=${pageSize}`).then(r => {
     if (!r.ok) throw new Error(r.status);
     return r.json();
   });
-export const getNoblAirAttribution = (start, end, level = 'ad', page = 1, pageSize = 50) =>
+export const getNoblAirAttribution = (start, end, level = 'ad', page = 1, pageSize = 20) =>
   fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}&page=${page}&page_size=${pageSize}`).then((r) => {
     if (!r.ok) throw new Error(r.status);
     return r.json();

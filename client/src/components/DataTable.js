@@ -1,6 +1,9 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { setHighlight, removeHighlight, fmtCell } from '../utils/api';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import AnnotationModal from './AnnotationModal';
+import TablePagination from './TablePagination';
 
 const HL_BG = { yellow: 'var(--hl-yellow)', green: 'var(--hl-green)', red: 'var(--hl-red)', blue: 'var(--hl-blue)' };
 const HL_CYCLE = ['yellow', 'green', 'red', 'blue', null];
@@ -22,7 +25,13 @@ function isDateSortColumn(header) {
   return h === 'date' || h === 'day' || h.endsWith(' date') || h.includes('created at') || h.includes('updated at');
 }
 
-export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight = '480px', searchable = true }) {
+export default function DataTable({
+  tab, headers, rows, onRowsChange,
+  maxHeight = '480px',
+  searchable = true,
+  paginated = true,
+  pageSize = TABLE_PAGE_SIZE,
+}) {
   const [search, setSearch]       = useState('');
   const [localRows, setLocalRows] = useState(rows);
   const [modal, setModal]         = useState(null);
@@ -88,6 +97,11 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
         return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
       })
     : filtered;
+
+  const {
+    page, setPage, pageItems, totalRows, rowOffset,
+  } = useClientPagination(sorted, pageSize, [search, sortBy, sortDir, rows]);
+  const displayRows = paginated ? pageItems : sorted;
 
   function handleSort(h) {
     if (!isDateSortColumn(h)) return;
@@ -222,7 +236,7 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
         )}
 
         <span style={{ fontSize: 11, color: 'var(--text4)', marginLeft: 'auto' }}>
-          {sorted.length.toLocaleString()} rows
+          {sorted.length.toLocaleString()} rows{paginated ? ` · page ${page}` : ''}
         </span>
 
         {selType && (
@@ -246,7 +260,9 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
 
       {/* Table */}
       <div style={{
-        overflowX: 'auto', overflowY: 'auto', maxHeight,
+        overflowX: 'auto',
+        overflowY: paginated ? 'visible' : 'auto',
+        maxHeight: paginated ? 'none' : maxHeight,
         border: '1px solid var(--border)',
         borderRadius: 'var(--radius)',
         background: 'var(--bg2)',
@@ -330,8 +346,9 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
                 </td>
               </tr>
             )}
-            {sorted.map((row, ri) => {
-              const isRowSel = selectedRows.has(ri);
+            {displayRows.map((row, ri) => {
+              const rowIdx = paginated ? rowOffset + ri : ri;
+              const isRowSel = selectedRows.has(rowIdx);
               const isHL = row._highlighted;
               const evenBg = ri % 2 === 1 ? 'var(--bg3)' : 'var(--bg2)';
               const rowBg = isRowSel ? 'var(--accent-dim)' : isHL ? HL_BG[isHL] : evenBg;
@@ -339,15 +356,15 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
               return (
                 <tr
                   key={row._rowKey || ri}
-                  onMouseDown={e => handleRowMouseDown(e, ri)}
-                  onMouseEnter={() => handleRowMouseEnter(ri)}
+                  onMouseDown={e => handleRowMouseDown(e, rowIdx)}
+                  onMouseEnter={() => handleRowMouseEnter(rowIdx)}
                   onContextMenu={e => openAnnotate(e, row)}
                   className={isRowSel ? 'row-selected' : ''}
                   style={{ background: rowBg }}
                 >
                   {/* Row number */}
                   <td
-                    onClick={e => selectRow(e, ri)}
+                    onClick={e => selectRow(e, rowIdx)}
                     style={{
                       padding: '5px 6px',
                       textAlign: 'center',
@@ -360,7 +377,7 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
                       whiteSpace: 'nowrap',
                     }}
                   >
-                    {ri + 1}
+                    {rowIdx + 1}
                   </td>
 
                   {/* Data cells */}
@@ -436,6 +453,15 @@ export default function DataTable({ tab, headers, rows, onRowsChange, maxHeight 
           </tbody>
         </table>
       </div>
+
+      {paginated && (
+        <TablePagination
+          page={page}
+          pageSize={pageSize}
+          totalRows={totalRows}
+          onPageChange={setPage}
+        />
+      )}
 
       {/* Hint */}
       <div style={{ marginTop: 5, fontSize: 10, color: 'var(--text4)' }}>

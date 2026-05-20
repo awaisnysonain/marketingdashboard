@@ -1,5 +1,8 @@
-import React,{useState,useEffect} from 'react';
+import React,{useState,useEffect,useMemo} from 'react';
 import {getTab,fmtNum,fmtPct} from '../utils/api';
+import TablePagination from '../components/TablePagination';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Cell,PieChart,Pie,Legend} from 'recharts';
@@ -17,11 +20,19 @@ export default function ProductColorPage(){
     getTab('Product x Color').then(d=>setRows((d.rows||[]).filter(r=>r['Product']&&r['Color']))).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
 
+  const products=useMemo(()=>['All',...new Set(rows.map(r=>String(r['Product']||'')).filter(Boolean))],[rows]);
+  const filtered=useMemo(
+    ()=>(selectedProduct==='All'?rows:rows.filter(r=>String(r['Product']||'')===selectedProduct)),
+    [rows,selectedProduct],
+  );
+  const tableSorted=useMemo(
+    ()=>[...filtered].sort((a,b)=>(+b['Air Orders']||0)-(+a['Air Orders']||0)),
+    [filtered],
+  );
+  const { page, setPage, pageItems, totalRows } = useClientPagination(tableSorted, TABLE_PAGE_SIZE, [rows, selectedProduct]);
+
   if(loading) return <Loader/>;
   if(!rows.length) return <Empty/>;
-
-  const products=['All',...new Set(rows.map(r=>String(r['Product']||'')).filter(Boolean))];
-  const filtered=selectedProduct==='All'?rows:rows.filter(r=>String(r['Product']||'')===selectedProduct);
 
   // Aggregate by color
   const byColor={};
@@ -119,7 +130,7 @@ export default function ProductColorPage(){
 
       <Section title="Detailed Table">
         <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
-          <div style={{overflowX:'auto',maxHeight:400,overflowY:'auto'}}>
+          <div style={{overflowX:'auto'}}>
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead style={{position:'sticky',top:0,zIndex:1}}>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
@@ -129,7 +140,7 @@ export default function ProductColorPage(){
                 </tr>
               </thead>
               <tbody>
-                {filtered.sort((a,b)=>(+b['Air Orders']||0)-(+a['Air Orders']||0)).map((r,i)=>(
+                {pageItems.map((r,i)=>(
                   <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:i%2===1?'rgba(255,255,255,.015)':'transparent'}}>
                     <td style={{padding:'8px 14px',maxWidth:220,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r['Product']}</td>
                     <td style={{padding:'8px 14px'}}><span style={{display:'inline-flex',alignItems:'center',gap:6}}><span style={{width:8,height:8,borderRadius:'50%',background:COLORS[colorData.findIndex(c=>c.name===r['Color'])%COLORS.length]||'var(--text3)',flexShrink:0}}/>{r['Color']}</span></td>
@@ -139,6 +150,7 @@ export default function ProductColorPage(){
               </tbody>
             </table>
           </div>
+          <TablePagination page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={setPage} />
         </div>
       </Section>
     </div>

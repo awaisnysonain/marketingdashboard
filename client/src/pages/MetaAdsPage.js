@@ -2,13 +2,12 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Line, ComposedChart } from 'recharts';
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import TablePagination from '../components/TablePagination';
 import { getMetaAds, fmt$, fmtNum, fmtPct } from '../utils/api';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
-
-const PAGE_SIZE = 50;
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
@@ -69,7 +68,7 @@ export default function MetaAdsPage() {
       setTableLoading(true);
     }
     try {
-      const res = await getMetaAds(range.start, range.end, level, brand, targetPage, PAGE_SIZE);
+      const res = await getMetaAds(range.start, range.end, level, brand, targetPage, TABLE_PAGE_SIZE);
       setData({
         rows: res.rows || [],
         totals: res.totals || {},
@@ -147,17 +146,17 @@ export default function MetaAdsPage() {
 
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' }}>
             <div style={{ fontSize:14, fontWeight:700, padding:'20px 20px 14px' }}>Meta Ads Detail</div>
-            <SheetTable
+            <PaginatedSheetTable
               headers={HEADERS}
               rows={tableRows}
               keyField="_key"
-              scrollable={false}
+              showPagination={false}
               defaultSortField={L.spend}
               defaultSortDir="desc"
             />
             <TablePagination
               page={page}
-              pageSize={PAGE_SIZE}
+              pageSize={TABLE_PAGE_SIZE}
               totalRows={totalRows}
               onPageChange={handlePageChange}
               loading={tableLoading}

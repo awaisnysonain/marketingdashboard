@@ -1,9 +1,8 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
 import TablePagination from '../components/TablePagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
-
-const PER_PAGE = 50;
 import { L, plainHeader } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell} from 'recharts';
 
@@ -31,9 +30,9 @@ export default function FbCampaignsPage(){
 
   const filtered=dataRows.filter(r=>!search||String(r['Campaign Name']||'').toLowerCase().includes(search.toLowerCase()));
   const sorted=[...filtered].sort((a,b)=>sortDir*((+b[sortCol]||0)-(+a[sortCol]||0)));
-  const totalPages=Math.max(1,Math.ceil(sorted.length/PER_PAGE));
+  const totalPages=Math.max(1,Math.ceil(sorted.length/TABLE_PAGE_SIZE));
   const safePage=Math.min(page,totalPages);
-  const pageRows=sorted.slice((safePage-1)*PER_PAGE,safePage*PER_PAGE);
+  const pageRows=sorted.slice((safePage-1)*TABLE_PAGE_SIZE,safePage*TABLE_PAGE_SIZE);
 
   const top8=sorted.slice(0,8);
   const chartData=top8.map((r,i)=>({
@@ -150,7 +149,7 @@ export default function FbCampaignsPage(){
           </div>
           <TablePagination
             page={safePage}
-            pageSize={PER_PAGE}
+            pageSize={TABLE_PAGE_SIZE}
             totalRows={sorted.length}
             onPageChange={setPage}
           />

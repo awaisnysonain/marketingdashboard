@@ -6,7 +6,7 @@ import {
 import { getFloTopline, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
 import { L, TIP } from '../copy/plainLanguage';
 
@@ -172,7 +172,7 @@ function ToplineTab({ summary }) {
           Daily Summary
           <span style={{ fontSize:11, fontWeight:400, color:'var(--text3)', marginLeft:8 }}>— click cells · shift+click range · ctrl+C copy</span>
         </div>
-        <SheetTable headers={FLO_TOPLINE_HEADERS} rows={sheetRows} maxHeight="460px" defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable headers={FLO_TOPLINE_HEADERS} rows={sheetRows} defaultSortField="Date" defaultSortDir="desc" />
       </div>
     </div>
   );
@@ -207,7 +207,7 @@ function ChannelsTab({ channelList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Channel Performance</div>
-        <SheetTable headers={FLO_CH_HEADERS} rows={chRows} maxHeight="340px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable headers={FLO_CH_HEADERS} rows={chRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );
@@ -256,7 +256,7 @@ function GeoTab({ geoList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Geographic Breakdown</div>
-        <SheetTable headers={FLO_GEO_HEADERS} rows={geoSheetRows} maxHeight="400px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable headers={FLO_GEO_HEADERS} rows={geoSheetRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );
@@ -295,7 +295,7 @@ function ProductsTab({ productList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Product Performance</div>
-        <SheetTable headers={FLO_PROD_HEADERS} rows={prodRows} maxHeight="400px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable headers={FLO_PROD_HEADERS} rows={prodRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );

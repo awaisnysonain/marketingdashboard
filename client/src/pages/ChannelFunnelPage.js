@@ -1,5 +1,8 @@
-import React,{useState,useEffect} from 'react';
+import React,{useState,useEffect,useMemo} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import TablePagination from '../components/TablePagination';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell} from 'recharts';
@@ -16,12 +19,17 @@ export default function ChannelFunnelPage(){
     getTab('Channel Funnel').then(d=>setRows((d.rows||[]).filter(r=>r['Channel']))).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
 
+  const { totalRow, sorted } = useMemo(() => {
+    if (!rows.length) return { totalRow: null, sorted: [] };
+    const tr = rows.find(r => String(r['Channel'] || '').toUpperCase().includes('TOTAL') || String(r['Channel'] || '').toUpperCase() === 'ALL');
+    const cr = rows.filter(r => !String(r['Channel'] || '').toUpperCase().includes('TOTAL') && String(r['Channel'] || '').toUpperCase() !== 'ALL');
+    return { totalRow: tr, sorted: [...cr].sort((a, b) => (+b['Orders'] || 0) - (+a['Orders'] || 0)) };
+  }, [rows]);
+
+  const { page, setPage, pageItems, totalRows } = useClientPagination(sorted, TABLE_PAGE_SIZE, [rows]);
+
   if(loading) return <Loader/>;
   if(!rows.length) return <Empty/>;
-
-  const totalRow=rows.find(r=>String(r['Channel']||'').toUpperCase().includes('TOTAL')||String(r['Channel']||'').toUpperCase()==='ALL');
-  const chanRows=rows.filter(r=>!String(r['Channel']||'').toUpperCase().includes('TOTAL')&&String(r['Channel']||'').toUpperCase()!=='ALL');
-  const sorted=[...chanRows].sort((a,b)=>(+b['Orders']||0)-(+a['Orders']||0));
 
   const chartData=sorted.map((r,i)=>({
     channel:String(r['Channel']||'').slice(0,16),
@@ -105,11 +113,9 @@ export default function ChannelFunnelPage(){
                 </tr>
               </thead>
               <tbody>
-                {[...sorted,totalRow].filter(Boolean).map((r,i)=>{
-                  const isTotal=String(r['Channel']||'').toUpperCase().includes('TOTAL')||String(r['Channel']||'').toUpperCase()==='ALL';
-                  return(
-                    <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:isTotal?'rgba(79,142,247,.08)':i%2===1?'rgba(255,255,255,.015)':'transparent'}}>
-                      <td style={{padding:'9px 14px',fontWeight:isTotal?700:400,color:isTotal?'var(--accent)':'var(--text)'}}>{r['Channel']}</td>
+                {pageItems.map((r,i)=>(
+                    <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:i%2===1?'rgba(255,255,255,.015)':'transparent'}}>
+                      <td style={{padding:'9px 14px'}}>{r['Channel']}</td>
                       <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtNum(r['Orders'])}</td>
                       <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtNum(r['Air Orders'])}</td>
                       <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--teal)'}}>{fmtPct(r['Attach Rate'])}</td>
@@ -119,11 +125,24 @@ export default function ChannelFunnelPage(){
                       <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmt$(r['Avg Order Rev'])}</td>
                       <td style={{padding:'9px 14px',color:'var(--text3)',fontSize:12,maxWidth:160,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r['Notes']||''}</td>
                     </tr>
-                  );
-                })}
+                ))}
+                {totalRow && (
+                  <tr style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:'rgba(79,142,247,.08)'}}>
+                    <td style={{padding:'9px 14px',fontWeight:700,color:'var(--accent)'}}>{totalRow['Channel']}</td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtNum(totalRow['Orders'])}</td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtNum(totalRow['Air Orders'])}</td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--teal)'}}>{fmtPct(totalRow['Attach Rate'])}</td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmtNum(totalRow['New Subs'])}</td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--accent)'}}>{fmtPct(totalRow['Sub TTP Rate'])}</td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--success)'}}>{fmt$(totalRow['Sub Revenue'])}</td>
+                    <td style={{padding:'9px 14px',textAlign:'right',fontFamily:'var(--font-mono)'}}>{fmt$(totalRow['Avg Order Rev'])}</td>
+                    <td style={{padding:'9px 14px',color:'var(--text3)',fontSize:12}}>{totalRow['Notes']||''}</td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
+          <TablePagination page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={setPage} />
         </div>
       </Section>
     </div>

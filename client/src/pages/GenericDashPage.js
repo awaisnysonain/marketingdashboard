@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import { executeDashboard, fmt$ } from '../utils/api';
 import { Icons } from '../components/Icons';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 
 const CHART_COLORS = ['#6366f1','#14b8a6','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#1877f2','#ea4335','#10b981','#f97316'];
 
@@ -346,10 +346,10 @@ function SmartTabRenderer({ headers, rows, tabName }) {
             · {rows.length.toLocaleString()} rows · {headers.length} columns · click · shift+click · ctrl+C
           </span>
         </div>
-        <SheetTable
+        <PaginatedSheetTable
           headers={headers}
           rows={rows}
-          maxHeight="calc(100vh - 380px)"
+          resetDeps={[tabName, rows.length]}
           searchable={true}
           defaultSortDir="asc"
         />
@@ -533,17 +533,16 @@ function TableViz({ section, data }) {
   if (!data?.length) return <div style={{padding:'24px',textAlign:'center',color:'var(--text3)',fontSize:13}}>No data</div>;
   const cols = section.columns || Object.keys(data[0]).map(f=>({field:f,label:f}));
   const headers = cols.map(c => c.label || c.field);
-  const tableRows = data.slice(0, 500).map((row, i) => {
+  const tableRows = data.map((row, i) => {
     const out = { _key: i };
     cols.forEach(c => { out[c.label || c.field] = fmtV(row[c.field], c.format); });
     return out;
   });
   return (
-    <SheetTable
+    <PaginatedSheetTable
       headers={headers}
       rows={tableRows}
       keyField="_key"
-      maxHeight="340px"
       searchable={false}
       defaultSortField={headers[0]}
       defaultSortDir="desc"

@@ -6,7 +6,7 @@ import {
 import { getSubscriptions, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 
@@ -206,11 +206,11 @@ export default function SubsPage({ showToast }) {
 
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
             <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Subscription Detail</div>
-            <SheetTable
+            <PaginatedSheetTable
               headers={DAILY_HEADERS}
               rows={dailyRows}
               keyField="_date"
-              maxHeight="560px"
+              resetDeps={[range.start, range.end]}
               defaultSortField="Date"
               defaultSortDir="desc"
             />

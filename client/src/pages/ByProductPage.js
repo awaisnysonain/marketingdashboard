@@ -1,5 +1,8 @@
-import React,{useState,useEffect} from 'react';
+import React,{useState,useEffect,useMemo} from 'react';
 import {getTab,fmt$,fmtNum,fmtPct} from '../utils/api';
+import TablePagination from '../components/TablePagination';
+import { useClientPagination } from '../hooks/useClientPagination';
+import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Cell} from 'recharts';
@@ -16,13 +19,17 @@ export default function ByProductPage(){
     getTab('By Product').then(d=>setRows((d.rows||[]).filter(r=>r['Product / Bundle']&&String(r['Product / Bundle']).trim()!==''))).catch(()=>{}).finally(()=>setLoading(false));
   },[]);
 
+  const { totalRow, sorted } = useMemo(() => {
+    if (!rows.length) return { totalRow: null, sorted: [] };
+    const tr = rows.find(r => String(r['Product / Bundle'] || '').toUpperCase().includes('TOTAL'));
+    const dr = rows.filter(r => !String(r['Product / Bundle'] || '').toUpperCase().includes('TOTAL'));
+    return { totalRow: tr, sorted: [...dr].sort((a, b) => (+b['Air Orders'] || 0) - (+a['Air Orders'] || 0)) };
+  }, [rows]);
+
+  const { page, setPage, pageItems, totalRows, rowOffset } = useClientPagination(sorted, TABLE_PAGE_SIZE, [rows]);
+
   if(loading) return <Loader/>;
   if(!rows.length) return <Empty/>;
-
-  const totalRow=rows.find(r=>String(r['Product / Bundle']||'').toUpperCase().includes('TOTAL'));
-  const dataRows=rows.filter(r=>!String(r['Product / Bundle']||'').toUpperCase().includes('TOTAL'));
-
-  const sorted=[...dataRows].sort((a,b)=>(+b['Air Orders']||0)-(+a['Air Orders']||0));
   const top10=sorted.slice(0,10);
 
   const chartData=top10.map((r,i)=>({
@@ -34,10 +41,10 @@ export default function ByProductPage(){
   }));
 
   const kpis=[
-    {label:'Total Products',   value:fmtNum(dataRows.length),                               color:'var(--accent)'},
-    {label:'Total Air Orders', value:fmtNum(totalRow?.['Air Orders']??dataRows.reduce((s,r)=>s+(+r['Air Orders']||0),0)), color:'var(--accent2)'},
-    {label:'Gross sales',    value:fmt$(totalRow?.['Gross Revenue']??dataRows.reduce((s,r)=>s+(+r['Gross Revenue']||0),0)), color:'var(--success)'},
-    {label:'Intl Orders',      value:fmtNum(totalRow?.['Intl Orders']??dataRows.reduce((s,r)=>s+(+r['Intl Orders']||0),0)), color:'var(--warn)'},
+    {label:'Total Products',   value:fmtNum(sorted.length),                               color:'var(--accent)'},
+    {label:'Total Air Orders', value:fmtNum(totalRow?.['Air Orders']??sorted.reduce((s,r)=>s+(+r['Air Orders']||0),0)), color:'var(--accent2)'},
+    {label:'Gross sales',    value:fmt$(totalRow?.['Gross Revenue']??sorted.reduce((s,r)=>s+(+r['Gross Revenue']||0),0)), color:'var(--success)'},
+    {label:'Intl Orders',      value:fmtNum(totalRow?.['Intl Orders']??sorted.reduce((s,r)=>s+(+r['Intl Orders']||0),0)), color:'var(--warn)'},
   ];
 
   return(
@@ -100,9 +107,9 @@ export default function ByProductPage(){
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((r,i)=>(
+                {pageItems.map((r,i)=>(
                   <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,.04)',background:i%2===1?'rgba(255,255,255,.015)':'transparent'}}>
-                    <td style={{padding:'8px 14px',color:'var(--text3)',fontSize:12,fontFamily:'var(--font-mono)'}}>{i+1}</td>
+                    <td style={{padding:'8px 14px',color:'var(--text3)',fontSize:12,fontFamily:'var(--font-mono)'}}>{rowOffset+i+1}</td>
                     <td style={{padding:'8px 14px',maxWidth:300,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{r['Product / Bundle']}</td>
                     <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)',fontWeight:600}}>{fmtNum(r['Air Orders'])}</td>
                     <td style={{padding:'8px 14px',textAlign:'right',fontFamily:'var(--font-mono)',color:'var(--success)'}}>{fmt$(r['Gross Revenue'])}</td>
@@ -121,6 +128,7 @@ export default function ByProductPage(){
               </tbody>
             </table>
           </div>
+          <TablePagination page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={setPage} />
         </div>
       </Section>
     </div>

@@ -40,7 +40,6 @@ export default function RawTablePage(){
             tab={selected}
             headers={data.headers||[]}
             rows={data.rows||[]}
-            maxHeight="620px"
             searchable={true}
           />
         </div>

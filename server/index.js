@@ -1939,7 +1939,17 @@ app.use(express.static(clientBuild));
 app.get('*', (req, res) => res.sendFile(path.join(clientBuild, 'index.html')));
 
 // ── Start ────────────────────────────────────────────────────────
-app.listen(PORT, async () => {
+const server = app.listen(PORT, async () => {
   console.log(`\n  NOBL Analytics Dashboard → http://localhost:${PORT}\n`);
   await initPostgresTables();
+});
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[UNCAUGHT] listen EADDRINUSE: address already in use :::${PORT}`, err);
+    console.error(`  Another process is using port ${PORT}. Stop other "npm run dev" windows, or run:`);
+    console.error(`  netstat -ano | findstr :${PORT}`);
+    console.error(`  taskkill /PID <pid> /F`);
+    process.exit(1);
+  }
+  throw err;
 });

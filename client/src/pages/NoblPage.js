@@ -6,7 +6,7 @@ import {
 import { getNoblTopline, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
-import SheetTable from '../components/SheetTable';
+import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
 import { L, TIP } from '../copy/plainLanguage';
 
@@ -193,7 +193,7 @@ function ToplineTab({ summary }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Summary</div>
-        <SheetTable headers={NOBL_TOPLINE_HEADERS} rows={sheetRows} maxHeight="460px" defaultSortField={L.date} defaultSortDir="desc" />
+        <PaginatedSheetTable headers={NOBL_TOPLINE_HEADERS} rows={sheetRows} defaultSortField={L.date} defaultSortDir="desc" />
       </div>
     </div>
   );
@@ -226,7 +226,7 @@ function ChannelsTab({ channels, channelList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Channel Performance</div>
-        <SheetTable headers={NOBL_CH_HEADERS} rows={chRows} maxHeight="340px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable headers={NOBL_CH_HEADERS} rows={chRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );
@@ -271,10 +271,9 @@ function GeoTab({ geoList, geo }) {
       </div>
       <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
         <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Geographic Breakdown</div>
-        <SheetTable
+        <PaginatedSheetTable
           headers={NOBL_GEO_HEADERS}
           rows={geoSheetRows}
-          maxHeight="400px"
           defaultSortField={L.sales}
           defaultSortDir="desc"
           searchable={false}
@@ -326,10 +325,9 @@ function SubsTab({ subs, subStats }) {
         </div>
         <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: 16 }}>
           <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 14 }}>Daily Subscription Detail</div>
-          <SheetTable
+          <PaginatedSheetTable
             headers={NOBL_SUBS_HEADERS}
             rows={subSheetRows}
-            maxHeight="300px"
             defaultSortField={L.date}
             defaultSortDir="desc"
           />

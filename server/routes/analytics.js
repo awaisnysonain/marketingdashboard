@@ -2170,7 +2170,7 @@ router.get('/nobl/air-meta-adsets', async (req, res) => {
   }
 });
 
-function parseTablePagination(req, defaultPageSize = 50) {
+function parseTablePagination(req, defaultPageSize = 20) {
   const page = Math.max(1, parseInt(req.query.page || '1', 10));
   const pageSize = Math.max(10, Math.min(parseInt(req.query.page_size || req.query.limit || String(defaultPageSize), 10), 200));
   return { page, pageSize, offset: (page - 1) * pageSize };
