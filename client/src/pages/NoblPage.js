@@ -7,6 +7,8 @@ import { getNoblTopline, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import SheetTable from '../components/SheetTable';
+import PageIntro from '../components/PageIntro';
+import { L, TIP } from '../copy/plainLanguage';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
@@ -117,10 +119,7 @@ export default function NoblPage({ showToast }) {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, fontFamily: 'var(--font-head)', color: '#6366f1' }}>NOBL Air</h1>
-          <p style={{ fontSize: 13, color: 'var(--text3)', margin: '4px 0 0' }}>Analytics dashboard for NOBL Air brand</p>
-        </div>
+        <PageIntro title="NOBL Air" desc="Sales, ad spend, channels, regions, and subscriptions for the NOBL Air brand." accent="#6366f1" />
         <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="nobl" />
       </div>
 
@@ -128,12 +127,12 @@ export default function NoblPage({ showToast }) {
         <>
           {/* KPI Row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
-            <KpiCard label="Total Revenue" value={fmt$(totals.revenue)} color="nobl" />
-            <KpiCard label="Total Spend" value={fmt$(totals.spend)} color="warn" />
-            <KpiCard label="MER" value={avgMer.toFixed(2) + 'x'} color="green" />
-            <KpiCard label="Sub Revenue" value={fmt$(totalSubRev)} color="purple" />
-            <KpiCard label="Top Channel" value={topChannelByRev} color="blue" />
-            <KpiCard label="Best ROAS Channel" value={bestROASChannel} color="teal" />
+            <KpiCard label={`Total ${L.sales}`} value={fmt$(totals.revenue)} tooltip={TIP.revenue} color="nobl" />
+            <KpiCard label={`Total ${L.spend}`} value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn" />
+            <KpiCard label={L.mer} value={avgMer.toFixed(2) + 'x'} tooltip={TIP.mer} color="green" />
+            <KpiCard label={L.subRevenue} value={fmt$(totalSubRev)} color="purple" />
+            <KpiCard label="Top channel" value={topChannelByRev} color="blue" />
+            <KpiCard label={`Best ${L.roas} channel`} value={bestROASChannel} color="teal" />
           </div>
 
           {/* Inner Tabs */}
@@ -159,21 +158,21 @@ export default function NoblPage({ showToast }) {
   );
 }
 
-const NOBL_TOPLINE_HEADERS = ['Date','Revenue','Spend','MER','Orders','NC Orders','RC Orders'];
+const NOBL_TOPLINE_HEADERS = [L.date, L.sales, L.spend, L.mer, L.orders, L.ncOrders, 'Repeat customer orders'];
 function ToplineTab({ summary }) {
   const sheetRows = summary.map(r => ({
-    'Date':      r.date,
-    'Revenue':   r.total_revenue,
-    'Spend':     r.total_spend,
-    'MER':       r.total_spend > 0 ? parseFloat((r.total_revenue / r.total_spend).toFixed(4)) : null,
-    'Orders':    r.total_orders,
-    'NC Orders': r.new_customer_orders,
-    'RC Orders': r.returning_customer_orders,
+    [L.date]:      r.date,
+    [L.sales]:   r.total_revenue,
+    [L.spend]:     r.total_spend,
+    [L.mer]:       r.total_spend > 0 ? parseFloat((r.total_revenue / r.total_spend).toFixed(4)) : null,
+    [L.orders]:    r.total_orders,
+    [L.ncOrders]: r.new_customer_orders,
+    'Repeat customer orders': r.returning_customer_orders,
   }));
   return (
     <div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, marginBottom:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Revenue & Spend Over Time</div>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>{L.sales} & {L.spend.toLowerCase()} over time</div>
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={summary} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <defs>
@@ -187,39 +186,39 @@ function ToplineTab({ summary }) {
             <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize:11 }} width={70} stroke="var(--border2)" />
             <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtDateLabel} contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
             <Legend wrapperStyle={{ fontSize:12 }} />
-            <Area type="monotone" dataKey="total_revenue" name="Revenue" stroke="#6366f1" fill="url(#gradRev)" strokeWidth={2} dot={false} />
-            <Area type="monotone" dataKey="total_spend" name="Spend" stroke="#f59e0b" fill="none" strokeWidth={2} strokeDasharray="4 2" dot={false} />
+            <Area type="monotone" dataKey="total_revenue" name={L.sales} stroke="#6366f1" fill="url(#gradRev)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="total_spend" name={L.spend} stroke="#f59e0b" fill="none" strokeWidth={2} strokeDasharray="4 2" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Summary</div>
-        <SheetTable headers={NOBL_TOPLINE_HEADERS} rows={sheetRows} maxHeight="460px" defaultSortField="Date" defaultSortDir="desc" />
+        <SheetTable headers={NOBL_TOPLINE_HEADERS} rows={sheetRows} maxHeight="460px" defaultSortField={L.date} defaultSortDir="desc" />
       </div>
     </div>
   );
 }
 
-const NOBL_CH_HEADERS = ['Channel','Spend','Revenue','Avg ROAS','NC Orders'];
+const NOBL_CH_HEADERS = ['Channel', L.spend, L.sales, `Avg ${L.roas}`, L.ncOrders];
 function ChannelsTab({ channels, channelList }) {
   const chRows = channelList.map(r => ({
     'Channel':   r.channel,
-    'Spend':     r.spend,
-    'Revenue':   r.revenue,
-    'Avg ROAS':  r.avg_roas,
-    'NC Orders': r.orders,
+    [L.spend]:     r.spend,
+    [L.sales]:   r.revenue,
+    [`Avg ${L.roas}`]:  r.avg_roas,
+    [L.ncOrders]: r.orders,
   }));
   return (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Spend by Channel</div>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>{L.spend} by channel</div>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={channelList} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="channel" tick={{ fontSize:11 }} stroke="var(--border2)" />
             <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize:11 }} width={70} stroke="var(--border2)" />
             <Tooltip formatter={(v,n) => [fmt$(v),n]} contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
-            <Bar dataKey="spend" name="Spend" fill="#6366f1" radius={[3,3,0,0]}>
+            <Bar dataKey="spend" name={L.spend} fill="#6366f1" radius={[3,3,0,0]}>
               {channelList.map((entry, i) => <Cell key={i} fill={CHANNEL_COLORS[entry.channel] || '#6366f1'} />)}
             </Bar>
           </BarChart>
@@ -227,25 +226,25 @@ function ChannelsTab({ channels, channelList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Channel Performance</div>
-        <SheetTable headers={NOBL_CH_HEADERS} rows={chRows} maxHeight="340px" defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <SheetTable headers={NOBL_CH_HEADERS} rows={chRows} maxHeight="340px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );
 }
 
-const NOBL_GEO_HEADERS = ['Region', 'Revenue', 'Spend', 'MER'];
+const NOBL_GEO_HEADERS = ['Region', L.sales, L.spend, L.mer];
 function GeoTab({ geoList, geo }) {
   const geoSheetRows = geoList.map(r => ({
     'Region':  r.region,
-    'Revenue': r.revenue,
-    'Spend':   r.spend,
-    'MER':     r.spend > 0 ? parseFloat((r.revenue / r.spend).toFixed(4)) : null,
+    [L.sales]: r.revenue,
+    [L.spend]:   r.spend,
+    [L.mer]:     r.spend > 0 ? parseFloat((r.revenue / r.spend).toFixed(4)) : null,
   }));
   return (
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 20 }}>
         <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Revenue by Region</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>{L.sales} by region</div>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie data={geoList} dataKey="revenue" nameKey="region" cx="50%" cy="50%" outerRadius={80} label={({ region, percent }) => `${region} ${(percent*100).toFixed(0)}%`} labelLine={false}>
@@ -256,14 +255,14 @@ function GeoTab({ geoList, geo }) {
           </ResponsiveContainer>
         </div>
         <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Spend by Region</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>{L.spend} by region</div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={geoList} layout="vertical" margin={{ top: 4, right: 16, left: 40, bottom: 4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis type="number" tickFormatter={v => fmt$(v)} tick={{ fontSize: 11 }} stroke="var(--border2)" />
               <YAxis type="category" dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
               <Tooltip formatter={(v) => fmt$(v)} contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
-              <Bar dataKey="spend" name="Spend" fill="#6366f1" radius={[0,3,3,0]}>
+              <Bar dataKey="spend" name={L.spend} fill="#6366f1" radius={[0,3,3,0]}>
                 {geoList.map((entry, i) => <Cell key={i} fill={GEO_COLORS[i % GEO_COLORS.length]} />)}
               </Bar>
             </BarChart>
@@ -276,7 +275,7 @@ function GeoTab({ geoList, geo }) {
           headers={NOBL_GEO_HEADERS}
           rows={geoSheetRows}
           maxHeight="400px"
-          defaultSortField="Revenue"
+          defaultSortField={L.sales}
           defaultSortDir="desc"
           searchable={false}
         />
@@ -285,13 +284,13 @@ function GeoTab({ geoList, geo }) {
   );
 }
 
-const NOBL_SUBS_HEADERS = ['Date', 'Total Sub Rev', 'Rebill Rev', 'New Sub Rev', 'Gross', 'Discount', 'Refunds'];
+const NOBL_SUBS_HEADERS = [L.date, 'Total subscription sales', L.rebillRevenue, L.newSubRevenue, 'Gross', 'Discount', 'Refunds'];
 function SubsTab({ subs, subStats }) {
   const subSheetRows = subs.map(r => ({
-    'Date':        r.date,
-    'Total Sub Rev': r.sub_revenue_actual,
-    'Rebill Rev':  r.rebill_revenue,
-    'New Sub Rev': r.new_sub_revenue,
+    [L.date]:        r.date,
+    'Total subscription sales': r.sub_revenue_actual,
+    [L.rebillRevenue]:  r.rebill_revenue,
+    [L.newSubRevenue]: r.new_sub_revenue,
     'Gross':       r.shopify_sub_gross,
     'Discount':    r.shopify_sub_disc,
     'Refunds':     r.shopify_sub_refunds,
@@ -299,13 +298,13 @@ function SubsTab({ subs, subStats }) {
   return (
     <div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, marginBottom: 20 }}>
-        <KpiCard label="Total Sub Revenue" value={fmt$(subStats.total_rev)} color="purple" />
-        <KpiCard label="Rebill Revenue" value={fmt$(subStats.rebill)} color="nobl" />
-        <KpiCard label="New Sub Revenue" value={fmt$(subStats.new_sub)} color="teal" />
+        <KpiCard label="Total subscription sales" value={fmt$(subStats.total_rev)} tooltip={TIP.totalSubRevenue} color="purple" />
+        <KpiCard label={L.rebillRevenue} value={fmt$(subStats.rebill)} tooltip={TIP.rebillRevenue} color="nobl" />
+        <KpiCard label={L.newSubRevenue} value={fmt$(subStats.new_sub)} tooltip={TIP.newSubRevenue} color="teal" />
       </div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
         <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: 20 }}>
-          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Subscription Revenue Over Time</div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Subscription sales over time</div>
           <ResponsiveContainer width="100%" height={240}>
             <AreaChart data={subs} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
               <defs>
@@ -319,8 +318,8 @@ function SubsTab({ subs, subStats }) {
               <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
               <Tooltip formatter={(v,n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, fontSize: 12 }} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Area type="monotone" dataKey="sub_revenue_actual" name="Total Sub Revenue" stroke="#8b5cf6" fill="url(#gradSub)" strokeWidth={2} dot={false} />
-              <Area type="monotone" dataKey="rebill_revenue" name="Rebill" stroke="#6366f1" fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
+              <Area type="monotone" dataKey="sub_revenue_actual" name="Total subscription sales" stroke="#8b5cf6" fill="url(#gradSub)" strokeWidth={2} dot={false} />
+              <Area type="monotone" dataKey="rebill_revenue" name="Renewals" stroke="#6366f1" fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
               <Area type="monotone" dataKey="new_sub_revenue" name="New Subs" stroke="#14b8a6" fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
@@ -331,7 +330,7 @@ function SubsTab({ subs, subStats }) {
             headers={NOBL_SUBS_HEADERS}
             rows={subSheetRows}
             maxHeight="300px"
-            defaultSortField="Date"
+            defaultSortField={L.date}
             defaultSortDir="desc"
           />
         </div>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { getSyncDetail, runBackfill, triggerSync } from '../utils/api';
 import { Icons } from '../components/Icons';
+import PageIntro from '../components/PageIntro';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function toISO(d) { return d.toISOString().slice(0, 10); }
@@ -53,7 +54,7 @@ const STATUS_COLORS = {
 
 const BACKFILL_TASKS = [
   { key: 'klaviyo',      label: 'Klaviyo Emails',         group: 'Core' },
-  { key: 'appstle',      label: 'Appstle Sub Revenue',    group: 'Core' },
+  { key: 'appstle',      label: 'Appstle subscription sales',    group: 'Core' },
   { key: 'tw_refresh',   label: 'TW Summary',             group: 'Core' },
   { key: 'tw_channels',  label: 'TW Channels',            group: 'TW SQL' },
   { key: 'tw_geo',       label: 'TW Geo / Regions',       group: 'TW SQL' },
@@ -62,7 +63,7 @@ const BACKFILL_TASKS = [
   { key: 'tw_sessions',  label: 'TW Sessions / Traffic',  group: 'TW SQL' },
   { key: 'tw_refunds',   label: 'TW Refunds',             group: 'TW SQL' },
   { key: 'tw_email_sms', label: 'TW Email / SMS',         group: 'TW SQL' },
-  { key: 'tw_order_revenue', label: 'TW Order Revenue (Fix)',  group: 'TW SQL' },
+  { key: 'tw_order_revenue', label: 'TW order sales (fix)',  group: 'TW SQL' },
   { key: 'tw_customers', label: 'TW Customers (LTV)',        group: 'TW SQL' },
   { key: 'tw_segments',  label: 'TW RFM Segments',        group: 'TW SQL' },
   { key: 'tw_benchmarks',label: 'TW Benchmarks',          group: 'TW SQL' },
@@ -245,12 +246,7 @@ export default function SyncPage({ showToast }) {
     <div>
       {/* ── Page Header ── */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, fontFamily: 'var(--font-head)' }}>Data Sync</h1>
-          <p style={{ fontSize: 13, color: 'var(--text3)', margin: '4px 0 0' }}>
-            Monitor data freshness, sync history, and run manual backfills
-          </p>
-        </div>
+        <PageIntro title="Data sync" desc="Check when data was last refreshed, view sync history, and run manual backfills." />
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           {lastSync?.finished_at && (
             <span style={{ fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' }}>

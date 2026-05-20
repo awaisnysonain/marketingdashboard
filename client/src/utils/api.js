@@ -115,6 +115,13 @@ export function fmtFullNum(n){
   return v.toLocaleString();
 }
 
+export function fmtFull$(n){
+  const v=parseFloat(n);
+  if(isNaN(v)) return '—';
+  const sign = v < 0 ? '-' : '';
+  return `${sign}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 

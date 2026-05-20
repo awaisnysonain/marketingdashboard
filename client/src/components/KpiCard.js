@@ -8,7 +8,7 @@ function fmtV(value, prefix, suffix) {
   return `${prefix || ''}${s}${suffix || ''}`;
 }
 
-export default function KpiCard({ label, value, subValue, sub, trend, trendLabel, prefix, suffix, size = 'md', onClick, tooltip }) {
+export default function KpiCard({ label, value, fullValue, subValue, sub, trend, trendLabel, prefix, suffix, size = 'md', onClick, tooltip }) {
   const fs = size === 'lg' ? 24 : size === 'sm' ? 16 : 20;
   const trendNum = parseFloat(trend);
   const isPos = !isNaN(trendNum) && trendNum > 0;
@@ -37,11 +37,14 @@ export default function KpiCard({ label, value, subValue, sub, trend, trendLabel
       <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--text3)', letterSpacing: '.2px', marginBottom: 7 }}>
         {label}
       </div>
-      <div style={{
-        fontSize: fs, fontWeight: 600, lineHeight: 1.15,
-        color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-      }}>
+      <div
+        title={fullValue || undefined}
+        style={{
+          fontSize: fs, fontWeight: 600, lineHeight: 1.15,
+          color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}
+      >
         {fmtV(value, prefix, suffix)}
       </div>
       {(subValue || sub) && (

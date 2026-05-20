@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -35,17 +37,17 @@ export default function ChannelFunnelPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Channel Funnel" desc="Full subscription funnel metrics by sales channel"/>
+      <PageIntro title="Channel funnel" desc="Orders, Air add-ons, new subscriptions, and subscription sales by channel." />
 
       {totalRow&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:14}}>
           {[
             {label:'Total Orders',  value:fmtNum(totalRow['Orders']),      color:'var(--accent)'},
             {label:'Air Orders',    value:fmtNum(totalRow['Air Orders']),   color:'var(--accent2)'},
-            {label:'Attach Rate',   value:fmtPct(totalRow['Attach Rate']),  color:'var(--teal)'},
-            {label:'New Subs',      value:fmtNum(totalRow['New Subs']),     color:'var(--success)'},
-            {label:'Sub TTP Rate',  value:fmtPct(totalRow['Sub TTP Rate']), color:'var(--warn)'},
-            {label:'Sub Revenue',   value:fmt$(totalRow['Sub Revenue']),    color:'var(--success)'},
+            {label:L.attachRate,   value:fmtPct(totalRow['Attach Rate']),  color:'var(--teal)'},
+            {label:L.newSubs,      value:fmtNum(totalRow['New Subs']),     color:'var(--success)'},
+            {label:L.ttpRate,  value:fmtPct(totalRow['Sub TTP Rate']), color:'var(--warn)'},
+            {label:L.subRevenue,   value:fmt$(totalRow['Sub Revenue']),    color:'var(--success)'},
           ].map(k=>(
             <div key={k.label} style={{...CARD,position:'relative',overflow:'hidden'}}>
               <div style={{position:'absolute',top:0,left:0,right:0,height:3,background:k.color,borderRadius:'3px 3px 0 0'}}/>
@@ -74,7 +76,7 @@ export default function ChannelFunnelPage(){
           </div>
         </Section>
 
-        <Section title="Attach Rate by Channel">
+        <Section title={`${L.attachRate} by channel`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={chartData} layout="vertical" barSize={18}>
@@ -82,7 +84,7 @@ export default function ChannelFunnelPage(){
                 <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <YAxis dataKey="channel" type="category" tick={{fontSize:10,fill:'var(--text2)'}} tickLine={false} axisLine={false} width={90}/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Bar dataKey="attach" name="Attach %" radius={[0,4,4,0]}>
+                <Bar dataKey="attach" name={L.attachRate} radius={[0,4,4,0]}>
                   {chartData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                 </Bar>
               </BarChart>
@@ -97,7 +99,7 @@ export default function ChannelFunnelPage(){
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                  {['Channel','Orders','Air Orders','Attach Rate','New Subs','TTP Rate','Sub Revenue','Avg Order Rev','Notes'].map((h,i)=>(
+                  {['Channel','Orders',L.airOrders,L.attachRate,L.newSubs,L.ttpRate,L.subRevenue,'Avg order sales','Notes'].map((h,i)=>(
                     <th key={h} style={{padding:'10px 14px',textAlign:i===0||i===8?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
@@ -129,6 +131,5 @@ export default function ChannelFunnelPage(){
 }
 
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

@@ -1,5 +1,6 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import PageIntro from '../components/PageIntro';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -40,7 +41,7 @@ export default function TierChannelPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Tier × Channel" desc="Subscription distribution across price tiers and channels"/>
+      <PageIntro title="Tier × channel" desc="New subscriptions by price tier and sales channel." />
 
       {tierCols.length>0&&(
         <Section title="Subs by Channel and Tier">
@@ -98,6 +99,5 @@ export default function TierChannelPage(){
 }
 
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

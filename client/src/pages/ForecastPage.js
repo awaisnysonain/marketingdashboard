@@ -2,6 +2,8 @@ import React,{useState,useEffect} from 'react';
 import {BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,CartesianGrid} from 'recharts';
 import {getTab,fmt$,fmtPct,fmtNum} from '../utils/api';
 import ChartCard from '../components/ChartCard';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 
 const TT={background:'#1e2438',border:'1px solid rgba(255,255,255,.12)',borderRadius:8,fontSize:12,color:'#edf0f7'};
 
@@ -60,14 +62,14 @@ export default function ForecastPage(){
 
   return(
     <div>
-      <h2 style={{fontFamily:'var(--font-head)',fontSize:18,fontWeight:700,marginBottom:20}}>Revenue Forecast 2026</h2>
+      <div style={{ marginBottom: 20 }}><PageIntro title="Sales forecast 2026" desc="Monthly and full-year Air sales estimates from the forecast sheet." /></div>
 
       {fullYear&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(160px,1fr))',gap:14,marginBottom:24}}>
           {[
-            {label:'Full Year Est. Revenue',val:fmt$(fullYear[totalAirH]),color:'teal'},
-            {label:'Est. Tag Revenue',val:fmt$(fullYear[tagRevH]),color:'blue'},
-            {label:'Est. Sub Revenue',val:fmt$(fullYear[subRevH]),color:'purple'},
+            {label:'Full-year est. sales',val:fmt$(fullYear[totalAirH]),color:'teal'},
+            {label:'Est. tag sales',val:fmt$(fullYear[tagRevH]),color:'blue'},
+            {label:'Est. subscription sales',val:fmt$(fullYear[subRevH]),color:'purple'},
             {label:'Est. Air Orders',val:fmtNum(fullYear[estAirH]),color:'warn'},
           ].map(k=>(
             <div key={k.label} style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:'var(--radius-lg)',padding:'16px 18px',position:'relative',overflow:'hidden'}}>
@@ -80,7 +82,7 @@ export default function ForecastPage(){
       )}
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18,marginBottom:18}}>
-        <ChartCard title="Monthly Revenue Estimate" subtitle="Tag + Sub air revenue">
+        <ChartCard title="Monthly sales estimate" subtitle="Tag + subscription Air sales">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData}>
               <CartesianGrid stroke="rgba(255,255,255,.04)" strokeDasharray="3 3"/>
@@ -93,14 +95,14 @@ export default function ForecastPage(){
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Store Revenue by Month" subtitle="Total Shopify store revenue">
+        <ChartCard title="Store sales by month" subtitle="Total Shopify store sales">
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={chartData}>
               <CartesianGrid stroke="rgba(255,255,255,.04)" strokeDasharray="3 3"/>
               <XAxis dataKey="month" tick={{fill:'#4e5873',fontSize:11}} tickLine={false} axisLine={false}/>
               <YAxis tick={{fill:'#4e5873',fontSize:10}} tickLine={false} axisLine={false} tickFormatter={v=>fmt$(v)}/>
-              <Tooltip contentStyle={TT} formatter={v=>[fmt$(v),'Store Revenue']}/>
-              <Bar dataKey="storeRevenue" fill="rgba(34,211,176,.35)" name="Store Revenue" radius={[2,2,0,0]}/>
+              <Tooltip contentStyle={TT} formatter={v=>[fmt$(v),L.sales]}/>
+              <Bar dataKey="storeRevenue" fill="rgba(34,211,176,.35)" name={L.sales} radius={[2,2,0,0]}/>
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>

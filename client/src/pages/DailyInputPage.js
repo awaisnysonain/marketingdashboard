@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmt$,fmtPct,fmtNum,fmtDate} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,LineChart,Line} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -10,9 +12,9 @@ const ALL_COLS=[
   {key:'Date',           label:'Date',              fmt:'date',   align:'left',  sticky:true},
   {key:'Total Orders',   label:'Total Orders',       fmt:'num',    align:'right'},
   {key:'Air Orders',     label:'Air Orders',         fmt:'num',    align:'right', color:'var(--accent)'},
-  {key:'Attach Rate',    label:'Attach %',           fmt:'pct',    align:'right', color:'var(--teal)'},
-  {key:'TTP Rate',       label:'TTP %',              fmt:'pct',    align:'right', color:'var(--accent2)'},
-  {key:'Activation Rate',label:'Activation %',       fmt:'pct',    align:'right', color:'var(--warn)'},
+  {key:'Attach Rate',    label:L.attachRate,           fmt:'pct',    align:'right', color:'var(--teal)'},
+  {key:'TTP Rate',       label:L.ttpRate,              fmt:'pct',    align:'right', color:'var(--accent2)'},
+  {key:'Activation Rate',label:L.activationRate,       fmt:'pct',    align:'right', color:'var(--warn)'},
   {key:'$0 Air Orders',  label:'$0 Air',             fmt:'num',    align:'right'},
   {key:'Paid Air Orders',label:'Paid Air',           fmt:'num',    align:'right'},
   {key:'Same-Day Cancel',label:'Same-Day Cancel',    fmt:'num',    align:'right', color:'var(--danger)'},
@@ -24,11 +26,11 @@ const ALL_COLS=[
   {key:'Sub Discounts',  label:'Sub Discounts',      fmt:'$',      align:'right'},
   {key:'Sub Net Sales',  label:'Sub Net Sales',      fmt:'$',      align:'right'},
   {key:'Sub Refunds',    label:'Sub Refunds',        fmt:'$',      align:'right', color:'var(--danger)'},
-  {key:'Rebill Revenue', label:'Rebill Revenue',     fmt:'$',      align:'right', color:'var(--success)'},
-  {key:'New Sub Revenue',label:'New Sub Revenue',    fmt:'$',      align:'right'},
+  {key:'Rebill Revenue', label:L.rebillRevenue,     fmt:'$',      align:'right', color:'var(--success)'},
+  {key:'New Sub Revenue',label:L.newSubRevenue,    fmt:'$',      align:'right'},
   {key:'Combined Gross', label:'Combined Gross',     fmt:'$',      align:'right'},
   {key:'Combined Net Sales',label:'Combined Net Sales',fmt:'$',   align:'right'},
-  {key:'Combined Net Revenue',label:'Combined Net Rev',fmt:'$',   align:'right', color:'var(--success)'},
+  {key:'Combined Net Revenue',label:L.combinedNetRevenue,fmt:'$',   align:'right', color:'var(--success)'},
   {key:'New $79',        label:'New $79',            fmt:'num',    align:'right'},
   {key:'New $99',        label:'New $99',            fmt:'num',    align:'right'},
   {key:'New $119',       label:'New $119',           fmt:'num',    align:'right'},
@@ -61,7 +63,7 @@ const COL_GROUPS=[
   {label:'Sub',       keys:['Sub Gross','Sub Discounts','Sub Net Sales','Sub Refunds']},
   {label:'Combined',  keys:['Rebill Revenue','New Sub Revenue','Combined Gross','Combined Net Sales','Combined Net Revenue']},
   {label:'New Subs',  keys:['New $79','New $99','New $119','New $129','New $139','New $149']},
-  {label:'Rebills',   keys:['Rebill $79','Rebill $99','Rebill $119','Rebill $129','Rebill $139','Rebill $149']},
+  {label:'Renewals',   keys:['Rebill $79','Rebill $99','Rebill $119','Rebill $129','Rebill $139','Rebill $149']},
 ];
 
 export default function DailyInputPage(){
@@ -109,19 +111,19 @@ export default function DailyInputPage(){
   const kpis=[
     {label:'Total Orders',        value:fmtNum(T['Total Orders']),         color:'var(--accent)'},
     {label:'Air Orders',          value:fmtNum(T['Air Orders']),            color:'var(--accent2)'},
-    {label:'Attach Rate',         value:fmtPct(T['Attach Rate']),           color:'var(--teal)'},
-    {label:'TTP Rate',            value:fmtPct(T['TTP Rate']),              color:'var(--accent2)'},
-    {label:'Activation Rate',     value:fmtPct(T['Activation Rate']),       color:'var(--warn)'},
+    {label:L.attachRate,         value:fmtPct(T['Attach Rate']),           color:'var(--teal)'},
+    {label:L.ttpRate,            value:fmtPct(T['TTP Rate']),              color:'var(--accent2)'},
+    {label:L.activationRate,     value:fmtPct(T['Activation Rate']),       color:'var(--warn)'},
     {label:'Same-Day Cancel',     value:fmtNum(T['Same-Day Cancel']),       color:'var(--danger)'},
-    {label:'Combined Net Rev',    value:fmt$(T['Combined Net Revenue']),     color:'var(--success)'},
-    {label:'Rebill Revenue',      value:fmt$(T['Rebill Revenue']),           color:'var(--success)'},
-    {label:'New Sub Revenue',     value:fmt$(T['New Sub Revenue']),          color:'var(--text2)'},
+    {label:L.combinedNetRevenue,    value:fmt$(T['Combined Net Revenue']),     color:'var(--success)'},
+    {label:L.rebillRevenue,      value:fmt$(T['Rebill Revenue']),           color:'var(--success)'},
+    {label:L.newSubRevenue,     value:fmt$(T['New Sub Revenue']),          color:'var(--text2)'},
     {label:'Tag Net Sales',       value:fmt$(T['Tag Net Sales']),            color:'var(--text2)'},
   ];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Daily Input" desc={`${dataRows.length} days of data · all columns from the sheet`}/>
+      <PageIntro title="Daily input" desc={`${dataRows.length} days of detailed Air metrics from the daily input sheet.`} />
 
       {/* KPI Strip */}
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(155px,1fr))',gap:12}}>
@@ -152,7 +154,7 @@ export default function DailyInputPage(){
           </div>
         </Section>
 
-        <Section title="Attach Rate (Current Month)">
+        <Section title={`${L.attachRate} (current month)`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={chartData}>
@@ -160,7 +162,7 @@ export default function DailyInputPage(){
                 <XAxis dataKey="date" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={4}/>
                 <YAxis tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%" tickFormatter={v=>v.toFixed(0)}/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Line type="monotone" dataKey="attach" name="Attach %" stroke="var(--teal)" strokeWidth={2} dot={false}/>
+                <Line type="monotone" dataKey="attach" name={L.attachRate} stroke="var(--teal)" strokeWidth={2} dot={false}/>
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -263,6 +265,5 @@ function Section({title,children}){
     </div>
   );
 }
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

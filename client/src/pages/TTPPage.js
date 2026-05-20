@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Cell} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -29,15 +31,15 @@ export default function TTPPage(){
   const COLORS=['#4f8ef7','#7b5cf5','#2dd4bf','#4ade80','#f59e0b','#f87171'];
 
   const kpis=[
-    {label:'Overall TTP Rate', value:fmtPct(totalRow['Conv%']),    color:'var(--teal)'},
+    {label:`Overall ${L.ttpRate}`, value:fmtPct(totalRow['Conv%']),    color:'var(--teal)'},
     {label:'Total Subs',       value:fmtNum(totalRow['Total']),     color:'var(--accent)'},
-    {label:'Total Converted',  value:fmtNum(totalRow['Converted']), color:'var(--success)'},
+    {label:`Total ${L.converted}`,  value:fmtNum(totalRow['Converted']), color:'var(--success)'},
     {label:'On Trial',         value:fmtNum(totalRow['On Trial']),  color:'var(--warn)'},
   ];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Trial to Paid" desc="Subscription conversion rates by price tier"/>
+      <PageIntro title="Trial to paid" desc="How many subscribers finished trial and started paying, by price tier." />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:14}}>
         {kpis.map(k=>(
@@ -50,7 +52,7 @@ export default function TTPPage(){
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
-        <Section title="TTP Rate by Tier">
+        <Section title={`${L.ttpRate} by tier`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={chartData} barSize={32}>
@@ -58,7 +60,7 @@ export default function TTPPage(){
                 <XAxis dataKey="tier" tick={{fontSize:12,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Bar dataKey="ttp" name="TTP Rate %" radius={[4,4,0,0]}>
+                <Bar dataKey="ttp" name={L.ttpRate} radius={[4,4,0,0]}>
                   {chartData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                 </Bar>
               </BarChart>
@@ -66,7 +68,7 @@ export default function TTPPage(){
           </div>
         </Section>
 
-        <Section title="Total vs Converted by Tier">
+        <Section title={`Total vs ${L.converted.toLowerCase()} by tier`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={chartData} barGap={4}>
@@ -75,7 +77,7 @@ export default function TTPPage(){
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <Tooltip contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Bar dataKey="subs"      name="Total Subs" fill="#4f8ef7" radius={[3,3,0,0]}/>
-                <Bar dataKey="converted" name="Converted"  fill="#4ade80" radius={[3,3,0,0]}/>
+                <Bar dataKey="converted" name={L.converted}  fill="#4ade80" radius={[3,3,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -87,7 +89,7 @@ export default function TTPPage(){
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
               <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                {['Tier','Total','Converted','TTP Rate','On Trial','Cancelled','Revenue'].map(h=>(
+                {['Tier','Total',L.converted,L.ttpRate,'On Trial','Cancelled',L.sales].map(h=>(
                   <th key={h} style={{padding:'10px 14px',textAlign:h==='Tier'?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12}}>{h}</th>
                 ))}
               </tr>
@@ -126,6 +128,5 @@ function Section({title,children}){
     </div>
   );
 }
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

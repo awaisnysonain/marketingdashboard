@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -35,7 +37,7 @@ export default function DayOfWeekPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Day of Week" desc="Average performance metrics broken down by day of week"/>
+      <PageIntro title="Day of week" desc="Average orders, Air add-ons, and subscriptions for each weekday." />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:14}}>
         {chartData.map(d=>(
@@ -44,7 +46,7 @@ export default function DayOfWeekPage(){
             <div style={{fontSize:13,fontWeight:700,marginBottom:6,color:'var(--text)'}}>{d.day}</div>
             <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>Avg Orders</div>
             <div style={{...TH,fontSize:18,fontWeight:700,marginBottom:6}}>{fmtNum(d.orders)}</div>
-            <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>Attach Rate</div>
+            <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>{L.attachRate}</div>
             <div style={{fontSize:16,fontWeight:600,color:d.day===best.day?'var(--success)':d.day===worst.day?'var(--danger)':'var(--teal)'}}>{d.attach.toFixed(1)}%</div>
           </div>
         ))}
@@ -68,7 +70,7 @@ export default function DayOfWeekPage(){
           </div>
         </Section>
 
-        <Section title="Avg Attach Rate by Day">
+        <Section title={`Avg ${L.attachRate} by day`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={chartData}>
@@ -76,7 +78,7 @@ export default function DayOfWeekPage(){
                 <XAxis dataKey="day" tick={{fontSize:12,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Bar dataKey="attach" name="Attach %" radius={[4,4,0,0]}>
+                <Bar dataKey="attach" name={L.attachRate} radius={[4,4,0,0]}>
                   {chartData.map((d,i)=><Cell key={i} fill={d.day===best.day?'var(--success)':d.day===worst.day?'var(--danger)':COLORS[i%COLORS.length]}/>)}
                 </Bar>
               </BarChart>
@@ -90,7 +92,7 @@ export default function DayOfWeekPage(){
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
               <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                {['Day','# Days in Range','Avg Orders/Day','Avg Air Orders/Day','Avg Attach Rate','Avg New Subs/Day','Notes'].map(h=>(
+                {['Day','# Days in Range','Avg Orders/Day','Avg Air Orders/Day',`Avg ${L.attachRate}`,'Avg New Subs/Day','Notes'].map(h=>(
                   <th key={h} style={{padding:'10px 14px',textAlign:h==='Day'||h==='Notes'?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
                 ))}
               </tr>
@@ -126,6 +128,5 @@ function Section({title,children}){
     </div>
   );
 }
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

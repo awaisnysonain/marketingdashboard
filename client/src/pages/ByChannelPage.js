@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell,ReferenceLine} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -39,12 +41,12 @@ export default function ByChannelPage(){
     {label:'Channels Tracked', value:fmtNum(chanRows.length),          color:'var(--accent)'},
     {label:'Total Orders',     value:fmtNum(totalRow?.['Total Orders']??chanRows.reduce((s,r)=>s+(+r['Total Orders']||0),0)), color:'var(--accent2)'},
     {label:'Air Orders',       value:fmtNum(totalRow?.['Orders w/ Nobl Air']??chanRows.reduce((s,r)=>s+(+r['Orders w/ Nobl Air']||0),0)), color:'var(--teal)'},
-    {label:'Avg Attach Rate',  value:fmtPct(avgAttach),                 color:'var(--success)'},
+    {label:`Avg ${L.attachRate}`,  value:fmtPct(avgAttach),                 color:'var(--success)'},
   ];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="By Channel" desc="Attach rate and order volume broken down by sales channel"/>
+      <PageIntro title="By Channel" desc="Air add-on rate and order volume for each sales channel." />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:14}}>
         {kpis.map(k=>(
@@ -75,7 +77,7 @@ export default function ByChannelPage(){
           </div>
         </Section>
 
-        <Section title={`Attach Rate vs Avg (${avgPct.toFixed(1)}%)`}>
+        <Section title={`${L.attachRate} vs avg (${avgPct.toFixed(1)}%)`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={chartData} layout="vertical" barSize={18}>
@@ -84,7 +86,7 @@ export default function ByChannelPage(){
                 <YAxis dataKey="channel" type="category" tick={{fontSize:11,fill:'var(--text2)'}} tickLine={false} axisLine={false} width={100}/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <ReferenceLine x={avgPct} stroke="var(--warn)" strokeDasharray="4 2" label={{value:'avg',position:'top',fontSize:10,fill:'var(--warn)'}}/>
-                <Bar dataKey="attach" name="Attach %" radius={[0,4,4,0]}>
+                <Bar dataKey="attach" name={L.attachRate} radius={[0,4,4,0]}>
                   {chartData.map((d,i)=><Cell key={i} fill={d.attach>=avgPct?'var(--success)':'var(--danger)'}/>)}
                 </Bar>
               </BarChart>
@@ -98,7 +100,7 @@ export default function ByChannelPage(){
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
               <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                {['Channel','Total Orders','Air Orders','Attach Rate','vs. Avg'].map((h,i)=>(
+                {['Channel','Total Orders',L.airOrders,L.attachRate,'Vs average'].map((h,i)=>(
                   <th key={h} style={{padding:'10px 14px',textAlign:i===0?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
                 ))}
               </tr>
@@ -127,6 +129,5 @@ export default function ByChannelPage(){
 }
 
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

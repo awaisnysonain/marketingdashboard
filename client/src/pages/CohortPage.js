@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -28,7 +30,7 @@ export default function CohortPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Cohort Analysis" desc="Subscription cohort performance by start week"/>
+      <PageIntro title="Cohort analysis" desc="How each signup week performed: trials ended, now paying, and trial-to-paid rate." />
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
         <Section title="Subs by Cohort">
@@ -41,14 +43,14 @@ export default function CohortPage(){
                 <Tooltip contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Legend wrapperStyle={{fontSize:11}}/>
                 <Line type="monotone" dataKey="totalSubs" name="Total Subs" stroke={COLORS[0]} strokeWidth={2} dot={false}/>
-                <Line type="monotone" dataKey="converted" name="Converted"  stroke={COLORS[2]} strokeWidth={2} dot={false}/>
+                <Line type="monotone" dataKey="converted" name={L.converted}  stroke={COLORS[2]} strokeWidth={2} dot={false}/>
                 <Line type="monotone" dataKey="onTrial"   name="On Trial"   stroke={COLORS[4]} strokeWidth={2} dot={false}/>
               </LineChart>
             </ResponsiveContainer>
           </div>
         </Section>
 
-        <Section title="TTP Rate by Cohort">
+        <Section title={`${L.ttpRate} by cohort`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={200}>
               <LineChart data={chartData}>
@@ -56,7 +58,7 @@ export default function CohortPage(){
                 <XAxis dataKey="cohort" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={Math.max(1,Math.floor(chartData.length/6))}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Line type="monotone" dataKey="ttp" name="TTP %" stroke={COLORS[1]} strokeWidth={2} dot={false}/>
+                <Line type="monotone" dataKey="ttp" name={L.ttpRate} stroke={COLORS[1]} strokeWidth={2} dot={false}/>
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -69,7 +71,7 @@ export default function CohortPage(){
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                  {['Cohort Week','Total Subs','Mature','Converted','TTP Rate','Still on Trial','Status'].map(h=>(
+                  {['Cohort Week','Total Subs',L.matureSubs,L.converted,L.ttpRate,'Still on Trial','Status'].map(h=>(
                     <th key={h} style={{padding:'10px 14px',textAlign:h==='Cohort Week'||h==='Status'?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
@@ -106,6 +108,5 @@ function Section({title,children}){
     </div>
   );
 }
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

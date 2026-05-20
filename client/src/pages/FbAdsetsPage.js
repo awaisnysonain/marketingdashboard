@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L, plainHeader } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Cell} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -42,8 +44,8 @@ export default function FbAdsetsPage(){
     {label:'Total Adsets',  value:fmtNum(dataRows.length),            color:'var(--accent)'},
     {label:'Total Orders',  value:fmtNum(totalRow['Orders']),          color:'var(--accent2)'},
     {label:'Air Orders',    value:fmtNum(totalRow['Air Orders']),       color:'var(--teal)'},
-    {label:'Attach Rate',   value:fmtPct(totalRow['Attach Rate']),      color:'var(--success)'},
-    {label:'Revenue',       value:fmt$(totalRow['Order Revenue']),      color:'var(--warn)'},
+    {label:L.attachRate,   value:fmtPct(totalRow['Attach Rate']),      color:'var(--success)'},
+    {label:L.sales,       value:fmt$(totalRow['Order Revenue']),      color:'var(--warn)'},
   ]:[];
 
   function handleSort(col){
@@ -55,7 +57,7 @@ export default function FbAdsetsPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="FB Adsets" desc="Facebook adset performance — drill down from campaign level"/>
+      <PageIntro title="Facebook ad sets" desc="Orders, Air add-ons, and sales for each Facebook ad set in your campaigns." />
 
       {kpis.length>0&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:14}}>
@@ -86,7 +88,7 @@ export default function FbAdsetsPage(){
           </div>
         </Section>
 
-        <Section title="Top 8 Adsets by Attach Rate">
+        <Section title={`Top 8 ad sets by ${L.attachRate.toLowerCase()}`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={[...chartData].sort((a,b)=>b.attach-a.attach)} layout="vertical" barSize={14}>
@@ -94,7 +96,7 @@ export default function FbAdsetsPage(){
                 <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <YAxis dataKey="name" type="category" tick={{fontSize:9,fill:'var(--text2)'}} tickLine={false} axisLine={false} width={110}/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Bar dataKey="attach" name="Attach %" radius={[0,4,4,0]}>
+                <Bar dataKey="attach" name={L.attachRate} radius={[0,4,4,0]}>
                   {chartData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                 </Bar>
               </BarChart>
@@ -121,7 +123,7 @@ export default function FbAdsetsPage(){
                   {COLS.map((h,i)=>(
                     <th key={h} onClick={i>1?()=>handleSort(h):undefined}
                       style={{padding:'10px 12px',textAlign:i<2?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:11,whiteSpace:'nowrap',cursor:i>1?'pointer':'default',userSelect:'none'}}>
-                      {h}{sortCol===h?(sortDir<0?' ↓':' ↑'):''}
+                      {plainHeader(h)}{sortCol===h?(sortDir<0?' ↓':' ↑'):''}
                     </th>
                   ))}
                 </tr>
@@ -149,6 +151,5 @@ export default function FbAdsetsPage(){
 }
 
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

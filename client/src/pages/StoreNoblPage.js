@@ -7,6 +7,8 @@ import { getStoreNobl, fmt$, fmtNum, fmtPct } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import SheetTable from '../components/SheetTable';
+import PageIntro from '../components/PageIntro';
+import { L, TIP, PAGE } from '../copy/plainLanguage';
 
 /* ── helpers ──────────────────────────────────────────────────────── */
 function toISO(d) { return d.toISOString().slice(0, 10); }
@@ -143,7 +145,7 @@ export default function StoreNoblPage({ showToast }) {
             </span>
           </div>
           <p style={{ fontSize:13, color:'var(--text3)', margin:0 }}>
-            Complete store analytics · All regions incl. EU · {range.start} → {range.end}
+            {PAGE.storeNobl.desc} · {range.start} → {range.end}
           </p>
         </div>
         <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="storenobl" />
@@ -162,14 +164,14 @@ export default function StoreNoblPage({ showToast }) {
 
           {/* KPI Strip */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Total Revenue"  value={fmt$(totals.revenue)}        color="nobl"   />
-            <KpiCard label="Total Spend"    value={fmt$(totals.spend)}          color="warn"   />
-            <KpiCard label="MER"            value={totalMer.toFixed(2)+'x'}     color={totalMer>=2?'green':totalMer>=1.8?'warn':'red'} />
-            <KpiCard label="Total Orders"   value={fmtNum(totals.orders)}       color="blue"   />
-            <KpiCard label="NC Orders"      value={fmtNum(totals.nc)}           color="teal"   />
-            <KpiCard label="AOV"            value={fmt$(totalAov)}              color="purple" />
-            <KpiCard label="NVP %"          value={nvpPct.toFixed(1)+'%'}       color={nvpPct>=50?'green':nvpPct>=45?'warn':'red'} />
-            <KpiCard label="Active Subs"    value={fmtNum(subStats.active||0)}  color="nobl"   />
+            <KpiCard label="Total sales"  value={fmt$(totals.revenue)} tooltip={TIP.revenue} color="nobl"   />
+            <KpiCard label="Total ad spend"    value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn"   />
+            <KpiCard label={L.mer}            value={totalMer.toFixed(2)+'x'} tooltip={TIP.mer} color={totalMer>=2?'green':totalMer>=1.8?'warn':'red'} />
+            <KpiCard label="Total orders"   value={fmtNum(totals.orders)} tooltip={TIP.orders} color="blue"   />
+            <KpiCard label={L.ncOrders}      value={fmtNum(totals.nc)} tooltip={TIP.ncOrders} color="teal"   />
+            <KpiCard label={L.aov}            value={fmt$(totalAov)} tooltip={TIP.aov} color="purple" />
+            <KpiCard label={L.nvp}          value={nvpPct.toFixed(1)+'%'} tooltip={TIP.nvp} color={nvpPct>=50?'green':nvpPct>=45?'warn':'red'} />
+            <KpiCard label={L.activeSubs}    value={fmtNum(subStats.active||0)} tooltip={TIP.activeSubs} color="nobl"   />
           </div>
 
           {/* Tabs */}
@@ -523,17 +525,17 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {/* Period KPIs (move with the date picker) */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
-        <KpiCard label="Period Sub Revenue" sub="in range" value={fmt$(subTotals.total)}        color="nobl"   />
-        <KpiCard label="New Subs"           sub="in range" value={fmtNum(subTotals.newSubCount)} color="teal"   />
-        <KpiCard label="New Sub Revenue"    sub="in range" value={fmt$(subTotals.newSubRev)}    color="teal"   />
-        <KpiCard label="Rebill Revenue"     sub="in range" value={fmt$(subTotals.rebill)}       color="blue"   />
+        <KpiCard label="Subscription sales" sub="in date range" value={fmt$(subTotals.total)} tooltip={TIP.totalSubRevenue} color="nobl"   />
+        <KpiCard label={L.newSubs}           sub="in date range" value={fmtNum(subTotals.newSubCount)} tooltip={TIP.newSubs} color="teal"   />
+        <KpiCard label={L.newSubRevenue}    sub="in date range" value={fmt$(subTotals.newSubRev)} tooltip={TIP.newSubRevenue} color="teal"   />
+        <KpiCard label={L.rebillRevenue}     sub="in date range" value={fmt$(subTotals.rebill)} tooltip={TIP.rebillRevenue} color="blue"   />
       </div>
       {/* All-time subscriber snapshot */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
-        <KpiCard label="Active Subs"        sub="all-time" value={fmtNum(subStats.active    || 0)} color="nobl"   />
-        <KpiCard label="Converted"          sub="all-time" value={fmtNum(subStats.converted || 0)} color="blue"   />
-        <KpiCard label="Cancelled"          sub="all-time" value={fmtNum(subStats.cancelled || 0)} color="warn"   />
-        <KpiCard label="Avg Contract Value" sub="all-time" value={fmt$(subStats.avg_order_amount || 0)} color="purple" />
+        <KpiCard label={L.activeSubs}        sub="right now" value={fmtNum(subStats.active    || 0)} tooltip={TIP.activeSubs} color="nobl"   />
+        <KpiCard label={L.converted}          sub="right now" value={fmtNum(subStats.converted || 0)} tooltip={TIP.converted} color="blue"   />
+        <KpiCard label={L.cancelled}          sub="right now" value={fmtNum(subStats.cancelled || 0)} tooltip={TIP.cancelled} color="warn"   />
+        <KpiCard label={L.avgContract} sub="right now" value={fmt$(subStats.avg_order_amount || 0)} tooltip={TIP.avgContract} color="purple" />
       </div>
 
       {/* Trend chart */}
@@ -600,12 +602,12 @@ function EmailTab({ email, emailTotals }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
-        <KpiCard label="Emails Sent"  value={fmtNum(emailTotals.sent)}    color="blue"   />
-        <KpiCard label="Opened"       value={fmtNum(emailTotals.opened)}  color="teal"   />
-        <KpiCard label="Clicked"      value={fmtNum(emailTotals.clicked)} color="nobl"   />
-        <KpiCard label="Avg Open Rate" value={fmtPct(avgOpenRate)}        color="green"  />
-        <KpiCard label="Avg Click Rate"value={fmtPct(avgClickRate)}       color="purple" />
-        <KpiCard label="Email Revenue" value={fmt$(emailTotals.revenue)}  color="nobl"   />
+        <KpiCard label={L.emailSent}  value={fmtNum(emailTotals.sent)}    color="blue"   />
+        <KpiCard label={L.emailOpened}       value={fmtNum(emailTotals.opened)}  color="teal"   />
+        <KpiCard label={L.emailClicked}      value={fmtNum(emailTotals.clicked)} color="nobl"   />
+        <KpiCard label={L.openRate} value={fmtPct(avgOpenRate)}        color="green"  />
+        <KpiCard label={L.clickRate}value={fmtPct(avgClickRate)}       color="purple" />
+        <KpiCard label={L.emailRevenue} value={fmt$(emailTotals.revenue)} tooltip={TIP.emailRevenue} color="nobl"   />
       </div>
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>

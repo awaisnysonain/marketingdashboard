@@ -194,7 +194,7 @@ const STARTERS = [
   { label:'Channel comparison',    text:'Compare all channels for both brands' },
   { label:'Subscription trends',   text:'NOBL Air subscription revenue and trends' },
   { label:'Import Google Sheet',   text:'Import a Google Sheet to create a dashboard' },
-  { label:'Daily MER trend',       text:'NOBL Air daily MER trend last 90 days' },
+  { label:'Daily sales per ad $',       text:'NOBL Air daily sales per ad dollar trend last 90 days' },
 ];
 
 function fmtHistDate(ts) {

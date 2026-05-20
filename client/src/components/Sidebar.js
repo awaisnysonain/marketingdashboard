@@ -4,13 +4,13 @@ import { Icons, sheetIcon } from './Icons';
 export const CORE_TABS = [
   { id: 'Overview',      icon: Icons.LayoutDashboard, label: 'Overview'       },
   { id: 'Channels',      icon: Icons.BarChart2,       label: 'Channels'       },
-  { id: 'Meta Ads',      icon: Icons.Crosshair,       label: 'Meta Ads'       },
+  { id: 'Meta Ads',      icon: Icons.Crosshair,       label: 'Facebook ads'   },
   { id: 'Subscriptions', icon: Icons.CreditCard,      label: 'Subscriptions'  },
-  { id: 'Live Data',     icon: Icons.Zap,             label: 'Live Data'      },
+  { id: 'Live Data',     icon: Icons.Zap,             label: "Today's snapshot" },
 ];
 
 const FIXED_DASHBOARD_TABS = [
-  { id: 'Forecast Engine', icon: Icons.TrendingUp, label: 'Forecast Engine' },
+  { id: 'Forecast Engine', icon: Icons.TrendingUp, label: 'Sales forecast' },
   { id: 'NOBL Air Performance', icon: Icons.Activity, label: 'NOBL Air Performance' },
 ];
 

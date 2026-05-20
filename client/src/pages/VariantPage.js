@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell,RadarChart,Radar,PolarGrid,PolarAngleAxis} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -31,15 +33,15 @@ export default function VariantPage(){
   }));
 
   const kpis=[
-    {label:'Overall Attach',    value:fmtPct(totalRow?.['Attach Rate']),    color:'var(--accent)'},
-    {label:'Overall TTP',       value:fmtPct(totalRow?.['TTP Rate']),       color:'var(--teal)'},
-    {label:'Overall Activation',value:fmtPct(totalRow?.['Activation Rate']),color:'var(--warn)'},
-    {label:'Rev per 1K Orders', value:fmt$(totalRow?.['Total Rev (per 1K)']),color:'var(--success)'},
+    {label:`Overall ${L.attachRate}`,    value:fmtPct(totalRow?.['Attach Rate']),    color:'var(--accent)'},
+    {label:`Overall ${L.ttpRate}`,       value:fmtPct(totalRow?.['TTP Rate']),       color:'var(--teal)'},
+    {label:`Overall ${L.activationRate}`,value:fmtPct(totalRow?.['Activation Rate']),color:'var(--warn)'},
+    {label:'Sales per 1K orders', value:fmt$(totalRow?.['Total Rev (per 1K)']),color:'var(--success)'},
   ];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Variant Activation" desc="Attach rate, TTP, and activation metrics by subscription price tier"/>
+      <PageIntro title="Price tier performance" desc="Air add-on rate, trial-to-paid rate, and overall success by subscription price." />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:14}}>
         {kpis.map(k=>(
@@ -57,9 +59,9 @@ export default function VariantPage(){
             <div style={{position:'absolute',top:0,left:0,right:0,height:3,background:d.color,borderRadius:'3px 3px 0 0'}}/>
             <div style={{fontSize:14,fontWeight:700,marginBottom:10,color:'var(--text)'}}>{d.tier}<span style={{fontSize:11,fontWeight:400,color:'var(--text3)',marginLeft:4}}>/ mo</span></div>
             <div style={{display:'flex',flexDirection:'column',gap:6}}>
-              <Stat label="Attach" val={`${d.attach.toFixed(1)}%`} color="var(--accent)"/>
-              <Stat label="TTP"    val={`${d.ttp.toFixed(1)}%`}    color="var(--teal)"/>
-              <Stat label="Act."   val={`${d.activation.toFixed(1)}%`} color="var(--warn)"/>
+              <Stat label="Add-on" val={`${d.attach.toFixed(1)}%`} color="var(--accent)"/>
+              <Stat label="Trial→paid" val={`${d.ttp.toFixed(1)}%`}    color="var(--teal)"/>
+              <Stat label="Success" val={`${d.activation.toFixed(1)}%`} color="var(--warn)"/>
             </div>
           </div>
         ))}
@@ -75,15 +77,15 @@ export default function VariantPage(){
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Legend wrapperStyle={{fontSize:11}}/>
-                <Bar dataKey="attach"     name="Attach %"     fill="#4f8ef7" radius={[3,3,0,0]}/>
-                <Bar dataKey="ttp"        name="TTP %"        fill="#2dd4bf" radius={[3,3,0,0]}/>
-                <Bar dataKey="activation" name="Activation %"  fill="#f59e0b" radius={[3,3,0,0]}/>
+                <Bar dataKey="attach"     name={L.attachRate}     fill="#4f8ef7" radius={[3,3,0,0]}/>
+                <Bar dataKey="ttp"        name={L.ttpRate}        fill="#2dd4bf" radius={[3,3,0,0]}/>
+                <Bar dataKey="activation" name={L.activationRate}  fill="#f59e0b" radius={[3,3,0,0]}/>
               </BarChart>
             </ResponsiveContainer>
           </div>
         </Section>
 
-        <Section title="Revenue per 1K Orders by Tier">
+        <Section title="Sales per 1K orders by tier">
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={chartData} barSize={32}>
@@ -91,7 +93,7 @@ export default function VariantPage(){
                 <XAxis dataKey="tier" tick={{fontSize:12,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>`$${v}`}/>
                 <Tooltip formatter={v=>fmt$(v)} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Bar dataKey="revenue" name="Rev / 1K" radius={[4,4,0,0]}>
+                <Bar dataKey="revenue" name="Sales / 1K" radius={[4,4,0,0]}>
                   {chartData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                 </Bar>
               </BarChart>
@@ -105,7 +107,7 @@ export default function VariantPage(){
           <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
             <thead>
               <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                {['Tier','Attach Rate','TTP Rate','Activation Rate','Activations / 1K','Revenue / 1K','Cancellation'].map((h,i)=>(
+                {['Tier',L.attachRate,L.ttpRate,L.activationRate,'Successes / 1K','Sales / 1K','Cancellation'].map((h,i)=>(
                   <th key={h} style={{padding:'10px 14px',textAlign:i===0?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
                 ))}
               </tr>
@@ -142,6 +144,5 @@ function Stat({label,val,color}){
   );
 }
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

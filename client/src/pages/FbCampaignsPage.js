@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L, plainHeader } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,Cell} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -39,9 +41,9 @@ export default function FbCampaignsPage(){
   const kpis=totalRow?[
     {label:'Total Orders',   value:fmtNum(totalRow['Orders']),       color:'var(--accent)'},
     {label:'Air Orders',     value:fmtNum(totalRow['Air Orders']),    color:'var(--accent2)'},
-    {label:'Attach Rate',    value:fmtPct(totalRow['Attach Rate']),   color:'var(--teal)'},
-    {label:'New Subs',       value:fmtNum(totalRow['New Subs']),      color:'var(--success)'},
-    {label:'Order Revenue',  value:fmt$(totalRow['Order Revenue']),   color:'var(--warn)'},
+    {label:L.attachRate,    value:fmtPct(totalRow['Attach Rate']),   color:'var(--teal)'},
+    {label:L.newSubs,       value:fmtNum(totalRow['New Subs']),      color:'var(--success)'},
+    {label:'Order sales',  value:fmt$(totalRow['Order Revenue']),   color:'var(--warn)'},
     {label:'Campaigns',      value:fmtNum(dataRows.length),           color:'var(--text2)'},
   ]:[];
 
@@ -54,7 +56,7 @@ export default function FbCampaignsPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="FB Campaigns" desc="Facebook campaign performance — orders, attach rate, and revenue"/>
+      <PageIntro title="Facebook campaigns" desc="Orders, Air add-ons, trial-to-paid rate, and sales by Facebook campaign." />
 
       {kpis.length>0&&(
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))',gap:14}}>
@@ -87,7 +89,7 @@ export default function FbCampaignsPage(){
           </div>
         </Section>
 
-        <Section title="Attach Rate by Campaign">
+        <Section title={`${L.attachRate} by campaign`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={chartData} layout="vertical" barSize={18}>
@@ -95,7 +97,7 @@ export default function FbCampaignsPage(){
                 <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <YAxis dataKey="name" type="category" tick={{fontSize:9,fill:'var(--text2)'}} tickLine={false} axisLine={false} width={120}/>
                 <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Bar dataKey="attach" name="Attach %" radius={[0,4,4,0]}>
+                <Bar dataKey="attach" name={L.attachRate} radius={[0,4,4,0]}>
                   {chartData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                 </Bar>
               </BarChart>
@@ -117,7 +119,7 @@ export default function FbCampaignsPage(){
                   {COLS.map((h,i)=>(
                     <th key={h} onClick={i>0?()=>handleSort(h):undefined}
                       style={{padding:'10px 12px',textAlign:i===0?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:11,whiteSpace:'nowrap',cursor:i>0?'pointer':'default',userSelect:'none'}}>
-                      {h}{sortCol===h?(sortDir<0?' ↓':' ↑'):''}
+                      {plainHeader(h)}{sortCol===h?(sortDir<0?' ↓':' ↑'):''}
                     </th>
                   ))}
                 </tr>
@@ -146,6 +148,5 @@ export default function FbCampaignsPage(){
 }
 
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

@@ -4,6 +4,8 @@ import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
 import { getMetaAds, fmt$, fmtNum, fmtPct } from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L, TIP, PAGE } from '../copy/plainLanguage';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
@@ -13,9 +15,9 @@ function shortName(s, max = 24) {
 }
 
 const HEADERS = [
-  'Brand', 'Campaign', 'Campaign ID', 'Ad Set', 'Ad Set ID', 'Ad', 'Ad ID',
-  'Spend', 'Revenue', 'Purchases', 'ROAS', 'CAC',
-  'Impressions', 'Clicks', 'Link Clicks', 'CTR', 'CPC', 'CPM', 'Add To Cart', 'Checkout',
+  'Brand', 'Campaign', 'Campaign ID', 'Ad set', 'Ad set ID', 'Ad', 'Ad ID',
+  L.spend, L.revenue, L.purchases, L.roas, L.cac,
+  L.impressions, L.clicks, L.linkClicks, L.ctr, L.cpc, L.cpm, L.addToCart, L.checkout,
 ];
 
 function toTableRow(r) {
@@ -23,23 +25,23 @@ function toTableRow(r) {
     'Brand': r.brand,
     'Campaign': r.campaign_name || 'Unknown campaign',
     'Campaign ID': r.campaign_id || 'Unknown campaign ID',
-    'Ad Set': r.adset_name || 'Unknown ad set',
-    'Ad Set ID': r.adset_id || 'Unknown ad set ID',
+    'Ad set': r.adset_name || 'Unknown ad set',
+    'Ad set ID': r.adset_id || 'Unknown ad set ID',
     'Ad': r.ad_name || 'All ads',
     'Ad ID': r.ad_id || 'Unknown ad ID',
-    'Spend': r.spend,
-    'Revenue': r.revenue,
-    'Purchases': r.purchases,
-    'ROAS': r.roas,
-    'CAC': r.cac,
-    'Impressions': r.impressions,
-    'Clicks': r.clicks,
-    'Link Clicks': r.link_clicks,
-    'CTR': r.ctr,
-    'CPC': r.cpc,
-    'CPM': r.cpm,
-    'Add To Cart': r.add_to_cart,
-    'Checkout': r.initiate_checkout,
+    [L.spend]: r.spend,
+    [L.revenue]: r.revenue,
+    [L.purchases]: r.purchases,
+    [L.roas]: r.roas,
+    [L.cac]: r.cac,
+    [L.impressions]: r.impressions,
+    [L.clicks]: r.clicks,
+    [L.linkClicks]: r.link_clicks,
+    [L.ctr]: r.ctr,
+    [L.cpc]: r.cpc,
+    [L.cpm]: r.cpm,
+    [L.addToCart]: r.add_to_cart,
+    [L.checkout]: r.initiate_checkout,
     _key: [r.brand, r.campaign_id, r.adset_id, r.ad_id, r.ad_name].map(v => v || '').join('|'),
   };
 }
@@ -78,10 +80,7 @@ export default function MetaAdsPage() {
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, gap:12, flexWrap:'wrap' }}>
-        <div>
-          <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:'#1877f2' }}>Meta Ads</h1>
-          <p style={{ margin:'4px 0 0', fontSize:13, color:'var(--text3)' }}>All saved Triple Whale Meta performance by campaign, ad set, and ad</p>
-        </div>
+        <PageIntro title={PAGE.metaAds.title} desc={PAGE.metaAds.desc} accent="#1877f2" />
         <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
           <BrandDropdown value={brand} open={brandOpen} onOpenChange={setBrandOpen} onChange={setBrand} />
           <LevelDropdown value={level} open={levelOpen} onOpenChange={setLevelOpen} onChange={setLevel} />
@@ -94,13 +93,13 @@ export default function MetaAdsPage() {
       ) : (
         <>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Spend" value={fmt$(t.spend || 0)} />
-            <KpiCard label="Revenue" value={fmt$(t.revenue || 0)} />
-            <KpiCard label="Purchases" value={fmtNum(t.purchases || 0)} />
-            <KpiCard label="ROAS" value={t.roas ? `${Number(t.roas).toFixed(2)}x` : '—'} />
-            <KpiCard label="CAC" value={t.cac ? fmt$(t.cac) : '—'} />
-            <KpiCard label="CTR" value={t.ctr ? fmtPct(t.ctr) : '—'} />
-            <KpiCard label="Rows" value={fmtNum((data.rows || []).length)} />
+            <KpiCard label={L.spend} value={fmt$(t.spend || 0)} tooltip={TIP.spend} />
+            <KpiCard label={L.revenue} value={fmt$(t.revenue || 0)} tooltip={TIP.revenue} />
+            <KpiCard label={L.purchases} value={fmtNum(t.purchases || 0)} tooltip={TIP.purchases} />
+            <KpiCard label={L.roas} value={t.roas ? `${Number(t.roas).toFixed(2)}x` : '—'} tooltip={TIP.roas} />
+            <KpiCard label={L.cac} value={t.cac ? fmt$(t.cac) : '—'} tooltip={TIP.cac} />
+            <KpiCard label={L.ctr} value={t.ctr ? fmtPct(t.ctr) : '—'} tooltip={TIP.ctr} />
+            <KpiCard label="Rows in table" value={fmtNum((data.rows || []).length)} />
           </div>
 
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, marginBottom:16 }}>
@@ -113,15 +112,15 @@ export default function MetaAdsPage() {
                 <YAxis yAxisId="roas" orientation="right" tick={{ fontSize:11 }} width={48} stroke="var(--border2)" />
                 <Tooltip formatter={(v, n) => n === 'ROAS' ? [`${Number(v || 0).toFixed(2)}x`, n] : [fmt$(v), n]} contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
                 <Legend wrapperStyle={{ fontSize:12 }} />
-                <Bar yAxisId="spend" dataKey="spend" name="Spend" fill="#1877f2" radius={[2,2,0,0]} />
-                <Line yAxisId="roas" dataKey="roas" name="ROAS" stroke="#22c55e" strokeWidth={2} dot={{ r:3 }} />
+                <Bar yAxisId="spend" dataKey="spend" name={L.spend} fill="#1877f2" radius={[2,2,0,0]} />
+                <Line yAxisId="roas" dataKey="roas" name={L.roas} stroke="#22c55e" strokeWidth={2} dot={{ r:3 }} />
               </ComposedChart>
             </ResponsiveContainer>
           </div>
 
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
             <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Meta Ads Detail</div>
-            <SheetTable headers={HEADERS} rows={tableRows} keyField="_key" maxHeight="620px" defaultSortField="Spend" defaultSortDir="desc" />
+            <SheetTable headers={HEADERS} rows={tableRows} keyField="_key" maxHeight="620px" defaultSortField={L.spend} defaultSortDir="desc" />
           </div>
         </>
       )}

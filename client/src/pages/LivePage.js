@@ -382,7 +382,7 @@ export default function LivePage() {
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24, flexWrap:'wrap', gap:12 }}>
         <div>
           <h1 style={{ fontSize:24, fontWeight:900, color:'var(--text)', margin:0, letterSpacing:'-.5px' }}>
-            Live Data
+            Today&apos;s snapshot
             {brand === 'nobl' && (
               <span style={{ marginLeft:10, fontSize:13, fontWeight:600, color:'#818cf8', verticalAlign:'middle',
                 background:'rgba(99,102,241,.12)', border:'1px solid rgba(99,102,241,.25)',
@@ -392,7 +392,7 @@ export default function LivePage() {
             )}
           </h1>
           <div style={{ fontSize:12, color:'var(--text3)', marginTop:4 }}>
-            {brand === 'nobl' ? 'NOBL Travel · all regions combined' : brand === 'flo' ? 'Pilates FLO US' : 'Pilates FLO EU'}
+            {brand === 'nobl' ? 'Latest daily numbers for NOBL Travel (all regions)' : brand === 'flo' ? 'Latest daily numbers for Pilates FLO US' : 'Latest daily numbers for Pilates FLO EU'}
             {availDates?.latest_summary && (
               <span> · Latest: <strong style={{ color:'var(--text2)' }}>{availDates.latest_summary}</strong></span>
             )}
@@ -477,16 +477,16 @@ export default function LivePage() {
           </div>
         ) : sum ? (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12 }}>
-            <KpiCard label="Total Revenue"   value={sum.total_revenue}        format="currency" icon="💰"/>
-            <KpiCard label="Total Spend"     value={sum.total_spend}          format="currency" icon="📣"/>
-            <KpiCard label="MER"             value={sum.mer}                  format="ratio"    icon="⚡" status={sum.mer_status}
+            <KpiCard label="Total sales"   value={sum.total_revenue}        format="currency" icon="💰"/>
+            <KpiCard label="Total ad spend"     value={sum.total_spend}          format="currency" icon="📣"/>
+            <KpiCard label="Sales per ad $"             value={sum.mer}                  format="ratio"    icon="⚡" status={sum.mer_status}
               sub={sum.mer_status==='green'?'✓ On target (≥2.0)':sum.mer_status==='yellow'?'Near target — needs ≥2.0':'⚠ Below target — needs ≥2.0'}/>
-            <KpiCard label="Total Orders"    value={sum.total_orders}         format="num"      icon="🛒"/>
-            <KpiCard label="New Customers"   value={sum.new_customer_orders}  format="num"      icon="✨"
+            <KpiCard label="Total orders"    value={sum.total_orders}         format="num"      icon="🛒"/>
+            <KpiCard label="New customers"   value={sum.new_customer_orders}  format="num"      icon="✨"
               sub={`${fmt.pct(sum.new_customer_rate)} of all orders`}/>
-            <KpiCard label="Returning"       value={sum.returning_orders}     format="num"      icon="🔄"
+            <KpiCard label="Repeat customers"       value={sum.returning_orders}     format="num"      icon="🔄"
               sub={`${fmt.pct(1-sum.new_customer_rate)} of all orders`}/>
-            <KpiCard label="AOV"             value={sum.aov}                  format="currency" icon="🎯"/>
+            <KpiCard label="Avg order size"             value={sum.aov}                  format="currency" icon="🎯"/>
           </div>
         ) : !errL && resolvedDate ? (
           <div style={{ color:'var(--text3)', fontSize:13, padding:'16px 0' }}>No data for {resolvedDate}</div>
@@ -504,10 +504,10 @@ export default function LivePage() {
             </div>
             <div style={{ display:'flex', gap:24, flexWrap:'wrap', flex:1 }}>
               {[
-                { label:'Revenue',  value: fmt.currency(euContrib.revenue) },
-                { label:'Spend',    value: fmt.currency(euContrib.spend)   },
-                { label:'MER',      value: fmt.ratio(euContrib.mer)        },
-                { label:'Rev Share',value: `${euContrib.rev_pct}%`         },
+                { label:'Sales',  value: fmt.currency(euContrib.revenue) },
+                { label:'Ad spend',    value: fmt.currency(euContrib.spend)   },
+                { label:'Sales per ad $',      value: fmt.ratio(euContrib.mer)        },
+                { label:'Share of total sales',value: `${euContrib.rev_pct}%`         },
               ].map(item => (
                 <div key={item.label} style={{ display:'flex', flexDirection:'column', gap:2 }}>
                   <div style={{ fontSize:10, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.04em' }}>{item.label}</div>
@@ -522,10 +522,10 @@ export default function LivePage() {
       {/* ── Regional MER ── */}
       <div style={{ marginBottom:28 }}>
         <SH
-          title={brand==='nobl' ? 'Regional Breakdown — NOBL Travel' : 'Regional MER'}
+          title={brand==='nobl' ? 'Sales by region — NOBL Travel' : 'Sales by region'}
           sub={brand==='nobl'
             ? `All regions incl. EU · Data as of ${geoDateUsed || '—'}`
-            : (geoDateUsed ? `Data as of ${geoDateUsed}` : 'Revenue · Spend · MER per region')}
+            : (geoDateUsed ? `Data as of ${geoDateUsed}` : 'Sales, ad spend, and return per ad $ by region')}
         />
         <GeoCards geo={geo} loading={loadL} brand={brand}/>
       </div>
@@ -534,7 +534,7 @@ export default function LivePage() {
       <div style={{ marginBottom:28 }}>
         <SH
           title={`${trendDays}-Day Trend`}
-          sub={brand==='nobl' ? 'Daily MER · Revenue · Spend · All regions incl. EU' : 'Daily MER · Revenue · Spend'}
+          sub={brand==='nobl' ? 'Daily sales per ad $, sales, and ad spend · All regions incl. EU' : 'Daily sales per ad $, sales, and ad spend'}
           right={
             <div style={{ display:'flex', background:'var(--bg3)', borderRadius:8, padding:2, border:'1px solid var(--border2)' }}>
               {[7,14,30,60].map(d=><SegBtn key={d} active={trendDays===d} onClick={()=>setTrendDays(d)}>{d}d</SegBtn>)}
@@ -545,9 +545,9 @@ export default function LivePage() {
         {!errT && (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14 }}>
             {[
-              { key:'mer',     label:'MER',     color:'#6366f1', fmt:v=>`${Number(v).toFixed(2)}x`, ref:2.0  },
-              { key:'revenue', label:'Revenue', color:'#22c55e', fmt:v=>`$${(v/1000).toFixed(0)}K`         },
-              { key:'spend',   label:'Spend',   color:'#f59e0b', fmt:v=>`$${(v/1000).toFixed(0)}K`         },
+              { key:'mer',     label:'Sales per ad $',     color:'#6366f1', fmt:v=>`${Number(v).toFixed(2)}x`, ref:2.0  },
+              { key:'revenue', label:'Sales', color:'#22c55e', fmt:v=>`$${(v/1000).toFixed(0)}K`         },
+              { key:'spend',   label:'Ad spend',   color:'#f59e0b', fmt:v=>`$${(v/1000).toFixed(0)}K`         },
             ].map(c=>(
               <div key={c.key} style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 16px 12px', overflow:'hidden' }}>
                 <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
@@ -563,17 +563,17 @@ export default function LivePage() {
 
       {/* ── Channels ── */}
       <div style={{ marginBottom:28 }}>
-        <SH title="Channel Breakdown" sub={channelDate ? `Data as of ${channelDate}` : ''}/>
+        <SH title="Ad channels" sub={channelDate ? `Data as of ${channelDate}` : 'Where your ad spend went and what it returned'}/>
         <div style={{ display:'grid', gridTemplateColumns:'300px 1fr', gap:14, marginBottom:14 }}>
           {/* Spend bar */}
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 12px 12px' }}>
-            <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:10, paddingLeft:4 }}>Spend by Channel</div>
+            <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:10, paddingLeft:4 }}>Ad spend by channel</div>
             {loadL ? <Skeleton h={160}/> : <SpendBar channels={channels}/>}
           </div>
 
           {/* ROAS cards */}
           <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px' }}>
-            <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:12 }}>ROAS vs Targets</div>
+            <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:12 }}>Sales per ad $ vs targets</div>
             {loadL ? <Skeleton h={100}/> : (
               <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
                 {channels.map(ch=>{
@@ -590,7 +590,7 @@ export default function LivePage() {
                         <span style={{ fontSize:12, fontWeight:700, color:'var(--text2)' }}>{m.label||ch.channel}</span>
                       </div>
                       <div style={{ fontSize:20, fontWeight:900, color:st.color }}>{fmt.ratio(ch.roas)}</div>
-                      <div style={{ fontSize:11, color:'var(--text3)' }}>{fmt.currency(ch.spend)} spend</div>
+                      <div style={{ fontSize:11, color:'var(--text3)' }}>{fmt.currency(ch.spend)} ad spend</div>
                     </div>
                   );
                 })}

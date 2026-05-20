@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmt$,fmtNum,fmtPct} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Cell} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -34,13 +36,13 @@ export default function ByProductPage(){
   const kpis=[
     {label:'Total Products',   value:fmtNum(dataRows.length),                               color:'var(--accent)'},
     {label:'Total Air Orders', value:fmtNum(totalRow?.['Air Orders']??dataRows.reduce((s,r)=>s+(+r['Air Orders']||0),0)), color:'var(--accent2)'},
-    {label:'Gross Revenue',    value:fmt$(totalRow?.['Gross Revenue']??dataRows.reduce((s,r)=>s+(+r['Gross Revenue']||0),0)), color:'var(--success)'},
+    {label:'Gross sales',    value:fmt$(totalRow?.['Gross Revenue']??dataRows.reduce((s,r)=>s+(+r['Gross Revenue']||0),0)), color:'var(--success)'},
     {label:'Intl Orders',      value:fmtNum(totalRow?.['Intl Orders']??dataRows.reduce((s,r)=>s+(+r['Intl Orders']||0),0)), color:'var(--warn)'},
   ];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="By Product" desc="Air order volume and revenue broken down by product bundle"/>
+      <PageIntro title="By product" desc="Air orders and sales broken down by product bundle." />
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))',gap:14}}>
         {kpis.map(k=>(
@@ -69,7 +71,7 @@ export default function ByProductPage(){
           </div>
         </Section>
 
-        <Section title="Top 10 by Revenue">
+        <Section title="Top 10 by sales">
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={[...chartData].sort((a,b)=>b.rev-a.rev)} layout="vertical" barSize={16}>
@@ -77,7 +79,7 @@ export default function ByProductPage(){
                 <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}k`:`$${v}`}/>
                 <YAxis dataKey="name" type="category" tick={{fontSize:10,fill:'var(--text2)'}} tickLine={false} axisLine={false} width={130}/>
                 <Tooltip formatter={v=>fmt$(v)} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Bar dataKey="rev" name="Revenue" radius={[0,4,4,0]}>
+                <Bar dataKey="rev" name={L.sales} radius={[0,4,4,0]}>
                   {chartData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                 </Bar>
               </BarChart>
@@ -92,7 +94,7 @@ export default function ByProductPage(){
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                  {['#','Product / Bundle','Air Orders','Gross Revenue','Intl Orders'].map((h,i)=>(
+                  {['#','Product / Bundle',L.airOrders,'Gross sales','Intl Orders'].map((h,i)=>(
                     <th key={h} style={{padding:'10px 14px',textAlign:i<=1?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
@@ -126,6 +128,5 @@ export default function ByProductPage(){
 }
 
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

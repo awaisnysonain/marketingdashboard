@@ -7,6 +7,8 @@ import { getFloTopline, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import SheetTable from '../components/SheetTable';
+import PageIntro from '../components/PageIntro';
+import { L, TIP } from '../copy/plainLanguage';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
@@ -93,21 +95,18 @@ export default function FloPage({ showToast }) {
   return (
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
-        <div>
-          <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:'#14b8a6' }}>Pilates FLO</h1>
-          <p style={{ fontSize:13, color:'var(--text3)', margin:'4px 0 0' }}>Analytics dashboard for Pilates FLO brand</p>
-        </div>
+        <PageIntro title="Pilates FLO" desc="Sales, ad spend, channels, regions, and products for Pilates FLO." accent="#14b8a6" />
         <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="flo" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Total Revenue"     value={fmt$(totals.revenue)}          color="flo"  />
-            <KpiCard label="Total Spend"       value={fmt$(totals.spend)}            color="warn" />
-            <KpiCard label="MER"               value={avgMer.toFixed(2) + 'x'}       color="green"/>
-            <KpiCard label="Top Channel"       value={topChannelByRev}               color="blue" />
-            <KpiCard label="Best ROAS Channel" value={bestROASChannel}               color="teal" />
+            <KpiCard label={`Total ${L.sales}`}     value={fmt$(totals.revenue)} tooltip={TIP.revenue} color="flo"  />
+            <KpiCard label={`Total ${L.spend}`}       value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn" />
+            <KpiCard label={L.mer}               value={avgMer.toFixed(2) + 'x'} tooltip={TIP.mer} color="green"/>
+            <KpiCard label="Top channel"       value={topChannelByRev}               color="blue" />
+            <KpiCard label={`Best ${L.roas} channel`} value={bestROASChannel}               color="teal" />
             <KpiCard label="Top Product"       value={productList[0]?.product_line || '—'} color="nobl" />
           </div>
 
@@ -134,21 +133,21 @@ export default function FloPage({ showToast }) {
 }
 
 // ── Topline ──────────────────────────────────────────────────────────────────
-const FLO_TOPLINE_HEADERS = ['Date','Revenue','Spend','MER','Orders','NC Orders','RC Orders'];
+const FLO_TOPLINE_HEADERS = [L.date, L.sales, L.spend, L.mer, L.orders, L.ncOrders, 'Repeat customer orders'];
 function ToplineTab({ summary }) {
   const sheetRows = summary.map(r => ({
-    'Date':      r.date,
-    'Revenue':   r.total_revenue,
-    'Spend':     r.total_spend,
-    'MER':       r.total_spend > 0 ? parseFloat((r.total_revenue / r.total_spend).toFixed(4)) : null,
-    'Orders':    r.total_orders,
-    'NC Orders': r.new_customer_orders,
-    'RC Orders': r.returning_customer_orders,
+    [L.date]:      r.date,
+    [L.sales]:   r.total_revenue,
+    [L.spend]:     r.total_spend,
+    [L.mer]:       r.total_spend > 0 ? parseFloat((r.total_revenue / r.total_spend).toFixed(4)) : null,
+    [L.orders]:    r.total_orders,
+    [L.ncOrders]: r.new_customer_orders,
+    'Repeat customer orders': r.returning_customer_orders,
   }));
   return (
     <div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, marginBottom:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Revenue & Spend Over Time</div>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>{L.sales} & {L.spend.toLowerCase()} over time</div>
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={summary} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <defs>
@@ -163,8 +162,8 @@ function ToplineTab({ summary }) {
             <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtDateLabel}
               contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
             <Legend wrapperStyle={{ fontSize:12 }} />
-            <Area type="monotone" dataKey="total_revenue" name="Revenue" stroke="#14b8a6" fill="url(#gradFloRev)" strokeWidth={2} dot={false} />
-            <Area type="monotone" dataKey="total_spend"   name="Spend"   stroke="#f59e0b" fill="none"             strokeWidth={2} strokeDasharray="4 2" dot={false} />
+            <Area type="monotone" dataKey="total_revenue" name={L.sales} stroke="#14b8a6" fill="url(#gradFloRev)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="total_spend"   name={L.spend}   stroke="#f59e0b" fill="none"             strokeWidth={2} strokeDasharray="4 2" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
@@ -180,19 +179,19 @@ function ToplineTab({ summary }) {
 }
 
 // ── Channels ─────────────────────────────────────────────────────────────────
-const FLO_CH_HEADERS = ['Channel','Spend','Revenue','Avg ROAS','NC Orders'];
+const FLO_CH_HEADERS = ['Channel', L.spend, L.sales, `Avg ${L.roas}`, L.ncOrders];
 function ChannelsTab({ channelList }) {
   const chRows = channelList.map(r => ({
     'Channel':   r.channel,
-    'Spend':     r.spend,
-    'Revenue':   r.revenue,
-    'Avg ROAS':  r.avg_roas,
-    'NC Orders': r.orders,
+    [L.spend]:     r.spend,
+    [L.sales]:   r.revenue,
+    [`Avg ${L.roas}`]:  r.avg_roas,
+    [L.ncOrders]: r.orders,
   }));
   return (
     <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Spend by Channel</div>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>{L.spend} by channel</div>
         <ResponsiveContainer width="100%" height={260}>
           <BarChart data={channelList} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -200,7 +199,7 @@ function ChannelsTab({ channelList }) {
             <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize:11 }} width={70} stroke="var(--border2)" />
             <Tooltip formatter={(v,n) => [fmt$(v),n]}
               contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
-            <Bar dataKey="spend" name="Spend" radius={[3,3,0,0]}>
+            <Bar dataKey="spend" name={L.spend} radius={[3,3,0,0]}>
               {channelList.map((entry, i) => <Cell key={i} fill={CHANNEL_COLORS[entry.channel] || '#14b8a6'} />)}
             </Bar>
           </BarChart>
@@ -208,26 +207,26 @@ function ChannelsTab({ channelList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Channel Performance</div>
-        <SheetTable headers={FLO_CH_HEADERS} rows={chRows} maxHeight="340px" defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <SheetTable headers={FLO_CH_HEADERS} rows={chRows} maxHeight="340px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );
 }
 
 // ── Geography ────────────────────────────────────────────────────────────────
-const FLO_GEO_HEADERS = ['Region','Revenue','Spend','MER'];
+const FLO_GEO_HEADERS = ['Region', L.sales, L.spend, L.mer];
 function GeoTab({ geoList }) {
   const geoSheetRows = geoList.map(r => ({
     'Region':  r.region,
-    'Revenue': r.revenue,
-    'Spend':   r.spend,
-    'MER':     r.spend > 0 ? parseFloat((r.revenue / r.spend).toFixed(4)) : null,
+    [L.sales]: r.revenue,
+    [L.spend]:   r.spend,
+    [L.mer]:     r.spend > 0 ? parseFloat((r.revenue / r.spend).toFixed(4)) : null,
   }));
   return (
     <div>
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, marginBottom:20 }}>
         <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Revenue by Region</div>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>{L.sales} by region</div>
           <ResponsiveContainer width="100%" height={220}>
             <PieChart>
               <Pie data={geoList} dataKey="revenue" nameKey="region" cx="50%" cy="50%" outerRadius={80}
@@ -240,7 +239,7 @@ function GeoTab({ geoList }) {
           </ResponsiveContainer>
         </div>
         <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Spend by Region</div>
+          <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>{L.spend} by region</div>
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={geoList} layout="vertical" margin={{ top:4, right:16, left:40, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -248,7 +247,7 @@ function GeoTab({ geoList }) {
               <YAxis type="category" dataKey="region" tick={{ fontSize:11 }} stroke="var(--border2)" />
               <Tooltip formatter={(v) => fmt$(v)}
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
-              <Bar dataKey="spend" name="Spend" radius={[0,3,3,0]}>
+              <Bar dataKey="spend" name={L.spend} radius={[0,3,3,0]}>
                 {geoList.map((_, i) => <Cell key={i} fill={GEO_COLORS[i % GEO_COLORS.length]} />)}
               </Bar>
             </BarChart>
@@ -257,26 +256,26 @@ function GeoTab({ geoList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Geographic Breakdown</div>
-        <SheetTable headers={FLO_GEO_HEADERS} rows={geoSheetRows} maxHeight="400px" defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <SheetTable headers={FLO_GEO_HEADERS} rows={geoSheetRows} maxHeight="400px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );
 }
 
 // ── Products ─────────────────────────────────────────────────────────────────
-const FLO_PROD_HEADERS = ['Product Line','Revenue','Spend','NC Orders','CAC'];
+const FLO_PROD_HEADERS = ['Product Line', L.sales, L.spend, L.ncOrders, L.cac];
 function ProductsTab({ productList }) {
   const prodRows = productList.map(r => ({
     'Product Line': r.product_line,
-    'Revenue':      r.revenue,
-    'Spend':        r.spend,
-    'NC Orders':    r.orders,
-    'CAC':          r.cac,
+    [L.sales]:      r.revenue,
+    [L.spend]:        r.spend,
+    [L.ncOrders]:    r.orders,
+    [L.cac]:          r.cac,
   }));
   return (
     <div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, marginBottom:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Revenue by Product Line</div>
+        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>{L.sales} by product line</div>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={productList} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -285,10 +284,10 @@ function ProductsTab({ productList }) {
             <Tooltip formatter={(v,n) => [fmt$(v),n]}
               contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
             <Legend wrapperStyle={{ fontSize:12 }} />
-            <Bar dataKey="revenue" name="Revenue" radius={[3,3,0,0]}>
+            <Bar dataKey="revenue" name={L.sales} radius={[3,3,0,0]}>
               {productList.map((e, i) => <Cell key={i} fill={PRODUCT_COLORS[e.product_line] || '#6366f1'} />)}
             </Bar>
-            <Bar dataKey="spend" name="Spend" radius={[3,3,0,0]}>
+            <Bar dataKey="spend" name={L.spend} radius={[3,3,0,0]}>
               {productList.map((e, i) => <Cell key={i} fill={(PRODUCT_COLORS[e.product_line] || '#6366f1') + '99'} />)}
             </Bar>
           </BarChart>
@@ -296,7 +295,7 @@ function ProductsTab({ productList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Product Performance</div>
-        <SheetTable headers={FLO_PROD_HEADERS} rows={prodRows} maxHeight="400px" defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <SheetTable headers={FLO_PROD_HEADERS} rows={prodRows} maxHeight="400px" defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
       </div>
     </div>
   );

@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtNum,fmtPct} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {BarChart,Bar,XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Cell,PieChart,Pie,Legend} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -43,7 +45,7 @@ export default function ProductColorPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Product × Color" desc="Air order distribution by product and color combination"/>
+      <PageIntro title="Product × color" desc="How Air orders split across product bundles and colors." />
 
       <div style={{display:'flex',alignItems:'center',gap:12,flexWrap:'wrap'}}>
         <span style={{fontSize:12,color:'var(--text3)'}}>Filter by product:</span>
@@ -121,7 +123,7 @@ export default function ProductColorPage(){
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead style={{position:'sticky',top:0,zIndex:1}}>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                  {['Product','Color','Air Orders'].map((h,i)=>(
+                  {['Product','Color',L.airOrders].map((h,i)=>(
                     <th key={h} style={{padding:'10px 14px',textAlign:i<2?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12}}>{h}</th>
                   ))}
                 </tr>
@@ -144,6 +146,5 @@ export default function ProductColorPage(){
 }
 
 function Section({title,children}){return <div><div style={{fontSize:13,fontWeight:600,color:'var(--text2)',marginBottom:12,display:'flex',alignItems:'center',gap:8}}><span style={{width:3,height:14,background:'var(--accent)',borderRadius:2,display:'inline-block'}}/>{title}</div>{children}</div>;}
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

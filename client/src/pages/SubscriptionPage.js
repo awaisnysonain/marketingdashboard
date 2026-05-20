@@ -3,6 +3,8 @@ import {BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,CartesianGrid,Legen
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
 import ChartCard from '../components/ChartCard';
 import DataTable from '../components/DataTable';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 
 const TT={background:'#1e2438',border:'1px solid rgba(255,255,255,.12)',borderRadius:8,fontSize:12,color:'#edf0f7'};
 
@@ -53,10 +55,10 @@ export default function SubscriptionPage(){
 
   return(
     <div>
-      <h2 style={{fontFamily:'var(--font-head)',fontSize:18,fontWeight:700,marginBottom:20}}>Subscriptions</h2>
+      <div style={{ marginBottom: 20 }}><PageIntro title="Subscriptions" desc="Trial-to-paid conversion, weekly trends, and cohort performance." /></div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18,marginBottom:18}}>
-        <ChartCard title="Trial-to-Paid by Tier" subtitle="Total · Mature · Converted">
+        <ChartCard title="Trial to paid by tier" subtitle={`Total · ${L.matureSubs} · ${L.converted}`}>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={ttpChart}>
               <CartesianGrid stroke="rgba(255,255,255,.04)" strokeDasharray="3 3"/>
@@ -66,20 +68,20 @@ export default function SubscriptionPage(){
               <Legend wrapperStyle={{fontSize:11,color:'#8892ab'}}/>
               <Bar dataKey="total" fill="#4f8ef7" name="Total" radius={[2,2,0,0]}/>
               <Bar dataKey="mature" fill="#7b5cf5" name="Mature" radius={[2,2,0,0]}/>
-              <Bar dataKey="converted" fill="#22d3b0" name="Converted" radius={[2,2,0,0]}/>
+              <Bar dataKey="converted" fill="#22d3b0" name={L.converted} radius={[2,2,0,0]}/>
               <Bar dataKey="cancelled" fill="#f05252" name="Cancelled" radius={[2,2,0,0]}/>
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Conversion Rate by Tier" subtitle="Conv% of mature subs">
+        <ChartCard title="Trial-to-paid rate by tier" subtitle="Share of finished trials that started paying">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={ttpChart} layout="vertical">
               <CartesianGrid stroke="rgba(255,255,255,.04)" strokeDasharray="3 3"/>
               <XAxis type="number" tick={{fill:'#4e5873',fontSize:10}} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`}/>
               <YAxis dataKey="tier" type="category" tick={{fill:'#8892ab',fontSize:12}} tickLine={false} axisLine={false} width={50}/>
-              <Tooltip contentStyle={TT} formatter={v=>[`${v}%`,'Conv%']}/>
-              <Bar dataKey="convPct" fill="#22d3b0" name="Conv%" radius={[0,3,3,0]}/>
+              <Tooltip contentStyle={TT} formatter={v=>[`${v}%`,L.ttpRate]}/>
+              <Bar dataKey="convPct" fill="#22d3b0" name={L.ttpRate} radius={[0,3,3,0]}/>
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -90,7 +92,7 @@ export default function SubscriptionPage(){
         {ttp && <DataTable tab="Trial to Paid" headers={ttp.headers} rows={ttp.rows} maxHeight="320px" searchable={false}/>}
       </div>
 
-      <ChartCard title="Weekly Trends" subtitle="Orders · New Subs · Combined Net Revenue" style={{marginBottom:18}}>
+      <ChartCard title="Weekly trends" subtitle={`Orders · ${L.newSubs} · ${L.combinedNetRevenue}`} style={{marginBottom:18}}>
         <ResponsiveContainer width="100%" height={240}>
           <LineChart data={weeklyChart}>
             <CartesianGrid stroke="rgba(255,255,255,.04)" strokeDasharray="3 3"/>
@@ -101,19 +103,19 @@ export default function SubscriptionPage(){
             <Legend wrapperStyle={{fontSize:11,color:'#8892ab'}}/>
             <Line yAxisId="l" type="monotone" dataKey="orders" stroke="#4f8ef7" strokeWidth={2} dot={false} name="Orders"/>
             <Line yAxisId="l" type="monotone" dataKey="newSubs" stroke="#22c55e" strokeWidth={2} dot={false} name="New Subs"/>
-            <Line yAxisId="r" type="monotone" dataKey="combinedNetRev" stroke="#7b5cf5" strokeWidth={2} dot={false} name="Combined Net Rev"/>
+            <Line yAxisId="r" type="monotone" dataKey="combinedNetRev" stroke="#7b5cf5" strokeWidth={2} dot={false} name={L.combinedNetRevenue}/>
           </LineChart>
         </ResponsiveContainer>
       </ChartCard>
 
-      <ChartCard title="Cohort Analysis — Weekly TTP Rate" subtitle="Conversion rate by signup week">
+      <ChartCard title="Cohort trial-to-paid rate" subtitle="Trial-to-paid rate by signup week">
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={cohortChart}>
             <CartesianGrid stroke="rgba(255,255,255,.04)" strokeDasharray="3 3"/>
             <XAxis dataKey="week" tick={{fill:'#4e5873',fontSize:10}} tickLine={false} axisLine={false}/>
             <YAxis tick={{fill:'#4e5873',fontSize:10}} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`}/>
-            <Tooltip contentStyle={TT} formatter={v=>[`${v}%`,'TTP Rate']}/>
-            <Bar dataKey="ttpRate" fill="#f59e42" name="TTP Rate %" radius={[2,2,0,0]}/>
+            <Tooltip contentStyle={TT} formatter={v=>[`${v}%`,L.ttpRate]}/>
+            <Bar dataKey="ttpRate" fill="#f59e42" name={L.ttpRate} radius={[2,2,0,0]}/>
           </BarChart>
         </ResponsiveContainer>
       </ChartCard>

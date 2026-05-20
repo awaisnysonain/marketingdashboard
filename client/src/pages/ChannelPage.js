@@ -3,6 +3,8 @@ import {BarChart,Bar,XAxis,YAxis,Tooltip,ResponsiveContainer,CartesianGrid,Refer
 import {getTab,fmt$,fmtPct,fmtNum} from '../utils/api';
 import ChartCard from '../components/ChartCard';
 import DataTable from '../components/DataTable';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 
 const TT={background:'#1e2438',border:'1px solid rgba(255,255,255,.12)',borderRadius:8,fontSize:12,color:'#edf0f7'};
 
@@ -51,7 +53,7 @@ export default function ChannelPage(){
 
   return(
     <div>
-      <h2 style={{fontFamily:'var(--font-head)',fontSize:18,fontWeight:700,marginBottom:20}}>Channel Attribution</h2>
+      <div style={{ marginBottom: 20 }}><PageIntro title="Channel attribution" desc="Which channels drive orders, Air add-ons, and subscription sales." /></div>
 
       <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14,marginBottom:24}}>
         {channelCards.map(r=>{
@@ -67,12 +69,12 @@ export default function ChannelPage(){
                 {belowAvg&&<span style={{fontSize:10,color:'var(--danger)',background:'rgba(240,82,82,.12)',padding:'2px 6px',borderRadius:4}}>▼ Below avg</span>}
               </div>
               <div style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:700,marginBottom:6}}>{fmtPct(attach)}</div>
-              <div style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>attach rate</div>
+              <div style={{fontSize:11,color:'var(--text3)',fontFamily:'var(--font-mono)'}}>Air add-on rate</div>
               <div style={{borderTop:'1px solid var(--border)',marginTop:10,paddingTop:10,display:'grid',gridTemplateColumns:'1fr 1fr',gap:6}}>
                 <div><div style={{fontSize:10,color:'var(--text3)'}}>Orders</div><div style={{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:500}}>{fmtNum(r['Orders'])}</div></div>
                 <div><div style={{fontSize:10,color:'var(--text3)'}}>New Subs</div><div style={{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:500}}>{fmtNum(r['New Subs'])}</div></div>
-                <div><div style={{fontSize:10,color:'var(--text3)'}}>TTP Rate</div><div style={{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:500}}>{fmtPct(r['Sub TTP Rate'])}</div></div>
-                <div><div style={{fontSize:10,color:'var(--text3)'}}>Sub Rev</div><div style={{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:500}}>{fmt$(r['Sub Revenue'])}</div></div>
+                <div><div style={{fontSize:10,color:'var(--text3)'}}>{L.ttpRate}</div><div style={{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:500}}>{fmtPct(r['Sub TTP Rate'])}</div></div>
+                <div><div style={{fontSize:10,color:'var(--text3)'}}>{L.subRevenue}</div><div style={{fontSize:13,fontFamily:'var(--font-mono)',fontWeight:500}}>{fmt$(r['Sub Revenue'])}</div></div>
               </div>
             </div>
           );
@@ -80,17 +82,17 @@ export default function ChannelPage(){
       </div>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:18,marginBottom:18}}>
-        <ChartCard title="Attach Rate by Channel" subtitle={`Overall avg: ${(overallAttach*100).toFixed(2)}%`}>
+        <ChartCard title={`${L.attachRate} by channel`} subtitle={`Overall avg: ${(overallAttach*100).toFixed(2)}%`}>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={chartData} layout="vertical">
               <CartesianGrid stroke="rgba(255,255,255,.04)" strokeDasharray="3 3"/>
               <XAxis type="number" tick={{fill:'#4e5873',fontSize:10}} tickLine={false} axisLine={false} tickFormatter={v=>`${v}%`}/>
               <YAxis dataKey="channel" type="category" tick={{fill:'#8892ab',fontSize:11}} tickLine={false} axisLine={false} width={90}/>
-              <Tooltip contentStyle={TT} formatter={v=>[`${v}%`,'Attach Rate']}/>
+              <Tooltip contentStyle={TT} formatter={v=>[`${v}%`,L.attachRate]}/>
               <ReferenceLine x={(overallAttach*100).toFixed(2)} stroke="#f59e42" strokeDasharray="4 3" label={{value:'avg',fill:'#f59e42',fontSize:10}}/>
               <Bar dataKey="attachRate" radius={[0,3,3,0]}
                 fill="#4f8ef7"
-                name="Attach Rate %"/>
+                name={L.attachRate}/>
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>

@@ -4,10 +4,12 @@ import {
   LineChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getNoblAirPerformance, getNoblAirSubscribers, getNoblAirAttribution, fmt$, fmtNum, fmtPct } from '../utils/api';
+import { getNoblAirPerformance, getNoblAirSubscribers, getNoblAirAttribution, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtPct } from '../utils/api';
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
+import PageIntro from '../components/PageIntro';
+import { L, TIP, PAGE } from '../copy/plainLanguage';
 
 /* ────────────── helpers ────────────── */
 function toISO(d) {
@@ -76,22 +78,22 @@ function forecastSourceLabel(row) {
 }
 
 const KPI_TOOLTIPS = {
-  airOrders: 'Air Orders\nData: SUM air_orders for the selected Performance date range.\nFormula: count of NOBL orders with NOBLAIR + luggage. This matches Forecast Actual Air Orders for the same period.',
-  attachRate: 'Overall Attach Rate\nData: selected Performance date range.\nFormula: SUM(Air Orders) / SUM(Air-Eligible Orders). Air-Eligible Orders are non-rebill NOBL orders. This is the same formula used by Forecast Actual Attach for the same period.',
-  ttpRate: 'Overall TTP Rate\nData: all mature subscribers as of the selected Performance end date.\nFormula: converted mature subscribers / mature subscribers. Mature = created at least 14 days before end date. Converted = Appstle paid billing after creation OR Shopify rebill after creation. This matches Forecast Actual TTP for the same period end date.',
-  activationRate: 'Overall Activation\nFormula: Overall Attach Rate x Overall TTP Rate for the selected Performance date range. Forecast Actual Activation uses this same formula for the same period.\nDaily rows use attach rate from 14 days prior x that day\'s TTP cohort.',
-  combinedNetRevenue: 'Combined Net Revenue\nData: selected date range from NOBL Air daily aggregate.\nFormula: tag_gross + sub_gross - tag_discounts - sub_discounts - tag_refunds - sub_refunds + Appstle rebill revenue.',
-  rebillRevenue: 'Rebill Revenue\nData: selected date range.\nSource: Appstle lastSuccessfulOrder.orderAmount bucketed by billing date.',
-  activeSubscribers: 'Active Subscribers\nData: all NOBL Air subscribers.\nFormula: count where Appstle status = active.',
-  activeArr: 'Active ARR (est.)\nData: all active NOBL Air subscribers.\nFormula: SUM(contract_amount) for active subscriptions. Label is kept as ARR estimate in the dashboard.',
-  eligibleOrders: 'Air-Eligible Orders\nData: selected Performance date range.\nFormula: count of NOBL Shopify orders where is_rebill = false. This is the denominator for Overall Attach Rate and matches Forecast Actual Eligible Orders for the same period.',
-  paidAirOrders: 'Paid Air Orders\nData: selected date range.\nFormula: count of orders with NOBLAIR + luggage + paid NOBLAIR line.',
-  zeroAirOrders: '$0 Air Orders\nData: selected date range.\nFormula: count of orders with NOBLAIR + luggage + zero-price NOBLAIR line.',
-  matureSubs: 'Mature Subs\nData: all subscribers mature as of selected end date.\nFormula: count of NOBL Air subscribers where UTC created_at date <= end date - 14 days.',
-  convertedMature: 'Converted Mature\nData: mature subscriber cohort as of selected end date.\nFormula: count of mature subscribers with Appstle paid billing after creation OR Shopify rebill after creation.',
-  cancels30d: '30-Day Cancels\nData: mature subscribers as of selected end date.\nFormula: count where cancelled_on <= created_at + 30 days.',
-  cancelRate30d: '30-Day Cancel Rate\nData: mature subscribers as of selected end date.\nFormula: 30-day cancels / mature subscribers.',
-  newSubRevenue: 'New Sub Revenue\nData: selected date range.\nFormula: sub_gross - sub_discounts for new non-rebill subscription orders.',
+  airOrders: `${L.airOrders}\n${TIP.airOrders}`,
+  attachRate: `${L.attachRate}\n${TIP.attachRate}`,
+  ttpRate: `${L.ttpRate}\n${TIP.ttpRate}`,
+  activationRate: `${L.activationRate}\n${TIP.activationRate}`,
+  combinedNetRevenue: `${L.combinedNetRevenue}\n${TIP.combinedNetRevenue}`,
+  rebillRevenue: `${L.rebillRevenue}\n${TIP.rebillRevenue}`,
+  activeSubscribers: `${L.activeSubs}\n${TIP.activeSubs}`,
+  activeArr: `Estimated yearly subscription value\n${TIP.activeArr}`,
+  eligibleOrders: `${L.eligibleOrders}\n${TIP.eligibleOrders}`,
+  paidAirOrders: `${L.paidAir}\n${TIP.paidAir}`,
+  zeroAirOrders: `${L.zeroAir}\n${TIP.zeroAir}`,
+  matureSubs: `${L.matureSubs}\n${TIP.matureSubs}`,
+  paidConversions: `${L.paidConversions}\n${TIP.paidConversions}`,
+  cancels30d: `${L.cancels30d}\n${TIP.cancels30d}`,
+  cancelRate30d: `${L.cancelRate30d}\n${TIP.cancelRate30d}`,
+  newSubRevenue: `${L.newSubRevenue}\n${TIP.newSubRevenue}`,
 };
 const REGION_OPTIONS = [
   { value: 'ALL', label: 'All Regions' },
@@ -278,48 +280,49 @@ function RegionMultiSelect({ value, onChange }) {
 
 /* ────────────── headers (full table) ────────────── */
 const HEADERS = [
-  'Date', 'Air-Eligible Orders', 'Air Orders', 'Attach Rate', 'TTP Rate', 'Activation Rate',
-  '$0 Air', 'Paid Air', 'Rebill', 'Same-Day Cancel',
-  'Tag Net Sales', 'Sub Net Sales', 'Rebill Revenue', 'New Sub Revenue', 'Combined Net Revenue',
+  L.date, L.eligibleOrders, L.airOrders, L.attachRate, L.ttpRate, L.activationRate,
+  L.zeroAir, L.paidAir, 'Renewal orders', 'Cancelled same day',
+  'Luggage sales (net)', 'New sub sales (net)', L.rebillRevenue, L.newSubRevenue, L.combinedNetRevenue,
   'New $79', 'New $99', 'New $119', 'New $129', 'New $139', 'New $149',
-  'Rebill $79', 'Rebill $99', 'Rebill $119', 'Rebill $129', 'Rebill $139', 'Rebill $149',
+  'Renewal $79', 'Renewal $99', 'Renewal $119', 'Renewal $129', 'Renewal $139', 'Renewal $149',
 ];
 
 const AIR_ATTR_HEADERS = [
-  'Ad', 'Ad ID', 'Ad Set', 'Campaign', 'Total Attributed Orders', 'Air Orders', 'Attributed Air Orders',
-  'Attach Rate', 'TTP Mature Air Orders', 'TTP Paid Air Orders', 'TTP Rate', 'Activation Rate',
-  'Attributed Air Revenue',
+  'Ad', 'Ad ID', 'Ad set', 'Campaign', L.spend, L.day1Revenue, L.aov,
+  L.totalAttributedOrders, L.airOrders, L.attributedAirOrders,
+  L.attachRate, 'Trial-ended Air orders', 'Trial-ended → paid Air orders', L.ttpRate, L.activationRate,
+  L.attributedAirRevenue,
 ];
 
 function toTableRow(r) {
   return {
-    'Date': r.date,
-    'Air-Eligible Orders': r.total_orders,
-    'Air Orders': r.air_orders,
-    'Attach Rate': r.attach_rate,
-    'TTP Rate': r.ttp_rate,
-    'Activation Rate': r.activation_rate,
-    '$0 Air': r.zero_air_orders,
-    'Paid Air': r.paid_air_orders,
-    'Rebill': r.rebill_orders,
-    'Same-Day Cancel': r.same_day_cancels,
-    'Tag Net Sales': r.tag_net_sales,
-    'Sub Net Sales': r.sub_net_sales,
-    'Rebill Revenue': r.rebill_revenue,
-    'New Sub Revenue': r.new_sub_revenue,
-    'Combined Net Revenue': r.combined_net_revenue,
+    [L.date]: r.date,
+    [L.eligibleOrders]: r.total_orders,
+    [L.airOrders]: r.air_orders,
+    [L.attachRate]: r.attach_rate,
+    [L.ttpRate]: r.ttp_rate,
+    [L.activationRate]: r.activation_rate,
+    [L.zeroAir]: r.zero_air_orders,
+    [L.paidAir]: r.paid_air_orders,
+    'Renewal orders': r.rebill_orders,
+    'Cancelled same day': r.same_day_cancels,
+    'Luggage sales (net)': r.tag_net_sales,
+    'New sub sales (net)': r.sub_net_sales,
+    [L.rebillRevenue]: r.rebill_revenue,
+    [L.newSubRevenue]: r.new_sub_revenue,
+    [L.combinedNetRevenue]: r.combined_net_revenue,
     'New $79':   r.new_79,
     'New $99':   r.new_99,
     'New $119':  r.new_119,
     'New $129':  r.new_129,
     'New $139':  r.new_139,
     'New $149':  r.new_149,
-    'Rebill $79':  r.rebill_79,
-    'Rebill $99':  r.rebill_99,
-    'Rebill $119': r.rebill_119,
-    'Rebill $129': r.rebill_129,
-    'Rebill $139': r.rebill_139,
-    'Rebill $149': r.rebill_149,
+    'Renewal $79':  r.rebill_79,
+    'Renewal $99':  r.rebill_99,
+    'Renewal $119': r.rebill_119,
+    'Renewal $129': r.rebill_129,
+    'Renewal $139': r.rebill_139,
+    'Renewal $149': r.rebill_149,
     _date: r.date,
   };
 }
@@ -333,17 +336,20 @@ function toAirAttributionTableRow(r) {
   return {
     'Ad': r.ad_name || 'Unknown ad',
     'Ad ID': r.ad_id || 'Unknown ad ID',
-    'Ad Set': r.adset_name || 'Unknown ad set',
+    'Ad set': r.adset_name || 'Unknown ad set',
     'Campaign': r.campaign_name,
-    'Total Attributed Orders': r.total_attributed_orders,
-    'Air Orders': r.air_orders,
-    'Attributed Air Orders': r.attributed_air_orders,
-    'Attach Rate': r.attach_rate,
-    'TTP Mature Air Orders': r.ttp_mature_air_orders,
-    'TTP Paid Air Orders': r.ttp_paid_air_orders,
-    'TTP Rate': r.ttp_rate,
-    'Activation Rate': r.activation_rate,
-    'Attributed Air Revenue': r.attributed_air_revenue,
+    [L.spend]: r.spend,
+    [L.day1Revenue]: r.day_1_revenue,
+    [L.aov]: r.aov,
+    [L.totalAttributedOrders]: r.total_attributed_orders,
+    [L.airOrders]: r.air_orders,
+    [L.attributedAirOrders]: r.attributed_air_orders,
+    [L.attachRate]: r.attach_rate,
+    'Trial-ended Air orders': r.ttp_mature_air_orders,
+    'Trial-ended → paid Air orders': r.ttp_paid_air_orders,
+    [L.ttpRate]: r.ttp_rate,
+    [L.activationRate]: r.activation_rate,
+    [L.attributedAirRevenue]: r.attributed_air_revenue,
     _ad: [r.campaign_id, r.adset_id, r.ad_id, r.ad_name].map(v => v || '').join('|'),
   };
 }
@@ -505,14 +511,7 @@ export default function NoblAirPerformancePage() {
     <div>
       {/* ── Header ── */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, gap:12, flexWrap:'wrap' }}>
-        <div>
-          <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:'#6366f1' }}>
-            NOBL Air Performance
-          </h1>
-          <p style={{ margin:'4px 0 0', fontSize:13, color:'var(--text3)' }}>
-            Subscription product launched March 2026 · attach rate, TTP, tier mix, revenue split
-          </p>
-        </div>
+        <PageIntro title={PAGE.noblAir.title} desc={PAGE.noblAir.desc} accent="#6366f1" />
         <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
           <RegionMultiSelect value={regions} onChange={(next) => setRegions(normalizeRegions(next))} />
           <DateRangePicker
@@ -526,7 +525,7 @@ export default function NoblAirPerformancePage() {
 
       <div style={{ display:'flex', gap:8, marginBottom:18, borderBottom:'1px solid var(--border)', paddingBottom:8 }}>
         {[
-          ['performance', 'Performance'],
+          ['performance', 'Results'],
           ['forecast', 'Forecast'],
         ].map(([key, label]) => (
           <button
@@ -555,31 +554,31 @@ export default function NoblAirPerformancePage() {
           <>
           {/* ── Top KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Air Orders"            value={fmtNum(kpi.airOrders)}            color="nobl" tooltip={KPI_TOOLTIPS.airOrders} />
-            <KpiCard label="Overall Attach Rate"   value={fmtPct(kpi.attachRate || 0)}      color="teal" tooltip={KPI_TOOLTIPS.attachRate} />
-            <KpiCard label="Overall TTP Rate"      value={fmtPct(kpi.ttpRate || 0)}         color="purple" tooltip={KPI_TOOLTIPS.ttpRate} />
-            <KpiCard label="Overall Activation"    value={fmtPct(kpi.activationRate || 0)}  color="green" tooltip={KPI_TOOLTIPS.activationRate} />
-            <KpiCard label="Combined Net Revenue"  value={fmt$(kpi.combinedNetRevenue)}     color="blue" tooltip={KPI_TOOLTIPS.combinedNetRevenue} />
-            <KpiCard label="Rebill Revenue"        value={fmt$(kpi.rebillRevenue)}          color="warn" tooltip={KPI_TOOLTIPS.rebillRevenue} />
-            {!regionScoped && <KpiCard label="Active Subscribers" value={fmtNum(kpi.activeSubs)} color="green" tooltip={KPI_TOOLTIPS.activeSubscribers} />}
-            {!regionScoped && <KpiCard label="Active ARR (est.)" value={fmt$(kpi.activeArr)} color="purple" tooltip={KPI_TOOLTIPS.activeArr} />}
+            <KpiCard label={L.airOrders} value={fmtNum(kpi.airOrders)} fullValue={fmtFullNum(kpi.airOrders)} color="nobl" tooltip={KPI_TOOLTIPS.airOrders} />
+            <KpiCard label={L.attachRate} value={fmtPct(kpi.attachRate || 0)} fullValue={fmtPct(kpi.attachRate || 0)} color="teal" tooltip={KPI_TOOLTIPS.attachRate} />
+            <KpiCard label={L.ttpRate} value={fmtPct(kpi.ttpRate || 0)} fullValue={fmtPct(kpi.ttpRate || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRate} />
+            <KpiCard label={L.activationRate} value={fmtPct(kpi.activationRate || 0)} fullValue={fmtPct(kpi.activationRate || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRate} />
+            <KpiCard label={L.combinedNetRevenue} value={fmt$(kpi.combinedNetRevenue)} fullValue={fmtFull$(kpi.combinedNetRevenue)} color="blue" tooltip={KPI_TOOLTIPS.combinedNetRevenue} />
+            <KpiCard label={L.rebillRevenue} value={fmt$(kpi.rebillRevenue)} fullValue={fmtFull$(kpi.rebillRevenue)} color="warn" tooltip={KPI_TOOLTIPS.rebillRevenue} />
+            {!regionScoped && <KpiCard label={L.activeSubs} value={fmtNum(kpi.activeSubs)} fullValue={fmtFullNum(kpi.activeSubs)} color="green" tooltip={KPI_TOOLTIPS.activeSubscribers} />}
+            {!regionScoped && <KpiCard label="Est. yearly sub value" value={fmt$(kpi.activeArr)} fullValue={fmtFull$(kpi.activeArr)} color="purple" tooltip={KPI_TOOLTIPS.activeArr} />}
           </div>
 
           {/* ── Secondary KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Air-Eligible Orders" value={fmtNum(kpi.eligibleOrders)} color="text" tooltip={KPI_TOOLTIPS.eligibleOrders} />
-            <KpiCard label="Paid Air Orders"   value={fmtNum(kpi.paidAirOrders)}    color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
-            <KpiCard label="$0 Air Orders"     value={fmtNum(kpi.zeroAirOrders)}    color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
-            <KpiCard label="Mature Subs"       value={fmtNum(kpi.matureSubs)}       color="purple" tooltip={KPI_TOOLTIPS.matureSubs} />
-            <KpiCard label="Converted Mature"  value={fmtNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.convertedMature} />
-            <KpiCard label="30-Day Cancels"    value={fmtNum(kpi.cancelled30d)}     color="red" tooltip={KPI_TOOLTIPS.cancels30d} />
-            <KpiCard label="30-Day Cancel Rate" value={fmtPct(kpi.cancelRate30d || 0)} color="red" tooltip={KPI_TOOLTIPS.cancelRate30d} />
-            <KpiCard label="New Sub Revenue"   value={fmt$(kpi.newSubRevenue)}      color="blue" tooltip={KPI_TOOLTIPS.newSubRevenue} />
+            <KpiCard label={L.eligibleOrders} value={fmtNum(kpi.eligibleOrders)} fullValue={fmtFullNum(kpi.eligibleOrders)} color="text" tooltip={KPI_TOOLTIPS.eligibleOrders} />
+            <KpiCard label={L.paidAir} value={fmtNum(kpi.paidAirOrders)} fullValue={fmtFullNum(kpi.paidAirOrders)} color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
+            <KpiCard label={L.zeroAir} value={fmtNum(kpi.zeroAirOrders)} fullValue={fmtFullNum(kpi.zeroAirOrders)} color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
+            <KpiCard label={L.matureSubs} value={fmtNum(kpi.matureSubs)} fullValue={fmtFullNum(kpi.matureSubs)} color="purple" tooltip={KPI_TOOLTIPS.matureSubs} />
+            <KpiCard label={L.paidConversions} value={fmtNum(kpi.convertedMatureSubs)} fullValue={fmtFullNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.paidConversions} />
+            <KpiCard label={L.cancels30d} value={fmtNum(kpi.cancelled30d)} fullValue={fmtFullNum(kpi.cancelled30d)} color="red" tooltip={KPI_TOOLTIPS.cancels30d} />
+            <KpiCard label={L.cancelRate30d} value={fmtPct(kpi.cancelRate30d || 0)} fullValue={fmtPct(kpi.cancelRate30d || 0)} color="red" tooltip={KPI_TOOLTIPS.cancelRate30d} />
+            <KpiCard label={L.newSubRevenue} value={fmt$(kpi.newSubRevenue)} fullValue={fmtFull$(kpi.newSubRevenue)} color="blue" tooltip={KPI_TOOLTIPS.newSubRevenue} />
           </div>
 
           {/* ── Row 1: revenue trend + attach/TTP trend ── */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
-            <Card title="Combined Net Revenue Trend">
+            <Card title="Total Air sales trend">
               <ResponsiveContainer width="100%" height={250}>
                 <AreaChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <defs>
@@ -596,12 +595,12 @@ export default function NoblAirPerformancePage() {
                     labelFormatter={fmtDateLabel}
                     contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
                   />
-                  <Area type="monotone" dataKey="combined_net_revenue" name="Combined Net Revenue" stroke="#6366f1" fill="url(#revGradAir)" strokeWidth={2} dot={false} />
+                  <Area type="monotone" dataKey="combined_net_revenue" name={L.combinedNetRevenue} stroke="#6366f1" fill="url(#revGradAir)" strokeWidth={2} dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </Card>
 
-            <Card title="Daily Attach / TTP / Activation" subtitle="Daily TTP uses the cohort that reached day 14 that day; daily activation = attach from 14 days earlier × daily TTP.">
+            <Card title="Daily add-on & trial rates" subtitle="Each day: how many orders added Air, and how many trials turned into paying subscribers.">
               <ResponsiveContainer width="100%" height={250}>
                 <ComposedChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -618,10 +617,10 @@ export default function NoblAirPerformancePage() {
                     contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
                   />
                   <Legend wrapperStyle={{ fontSize:12 }} />
-                  <Bar  yAxisId="orders" dataKey="air_orders"      name="Air Orders"      fill="#6366f1" radius={[2,2,0,0]} />
-                  <Line yAxisId="rates"  dataKey="attach_rate"     name="Attach Rate"     stroke="#14b8a6" strokeWidth={2} dot={false} />
-                  <Line yAxisId="rates"  dataKey="ttp_rate"        name="TTP Rate"        stroke="#f59e0b" strokeWidth={2} dot={false} />
-                  <Line yAxisId="rates"  dataKey="activation_rate" name="Activation Rate" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                  <Bar  yAxisId="orders" dataKey="air_orders"      name={L.airOrders}      fill="#6366f1" radius={[2,2,0,0]} />
+                  <Line yAxisId="rates"  dataKey="attach_rate"     name={L.attachRate}     stroke="#14b8a6" strokeWidth={2} dot={false} />
+                  <Line yAxisId="rates"  dataKey="ttp_rate"        name={L.ttpRate}        stroke="#f59e0b" strokeWidth={2} dot={false} />
+                  <Line yAxisId="rates"  dataKey="activation_rate" name={L.activationRate} stroke="#8b5cf6" strokeWidth={2} dot={false} />
                 </ComposedChart>
               </ResponsiveContainer>
             </Card>
@@ -630,7 +629,7 @@ export default function NoblAirPerformancePage() {
           {/* ── Row 2: tier mix bar + status pie ── */}
           {!regionScoped && (
           <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:16, marginBottom:16 }}>
-            <Card title="Subscriber Tier Mix" subtitle="Active / Cancelled / Paused per tier">
+            <Card title="Subscription price tiers" subtitle="How many subscribers are active, cancelled, or paused at each monthly price.">
               {tierData.length === 0 ? <Empty msg="No tier data" /> : (
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart data={tierData} margin={{ top:4, right:16, left:0, bottom:4 }}>
@@ -668,7 +667,7 @@ export default function NoblAirPerformancePage() {
           )}
 
           {/* ── Row 3: revenue composition stacked bar ── */}
-          <Card title="Revenue Composition (Tag + Sub + Rebill)" style={{ marginBottom:16 }}>
+          <Card title="Where the money comes from (luggage, new subs, renewals)" style={{ marginBottom:16 }}>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -689,7 +688,7 @@ export default function NoblAirPerformancePage() {
 
           {/* ── NOBL Air ad attribution ── */}
           {!regionScoped && (
-          <Card title="NOBL Air Purchases by Meta Ad" subtitle="Only ads with NOBL Air sales. Attach uses selected-range sales; TTP uses cohorts reaching day 14 in the selected range." style={{ marginBottom:16 }}>
+          <Card title="Meta ads driving Air sales" subtitle="Facebook/Instagram ads that led to Air orders in your dates — spend, sales, and trial conversions." style={{ marginBottom:16 }}>
             {airAttrLoading ? (
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
             ) : airAttr?.error ? (
@@ -697,13 +696,17 @@ export default function NoblAirPerformancePage() {
             ) : airAttrRows.length === 0 ? <Empty msg="No NOBL Air ad attribution data yet. Run tw_air_attribution sync for this date range." /> : (
               <>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
-                  <KpiCard label="Air Orders" value={fmtNum(airAttr.totals?.air_orders || 0)} />
-                  <KpiCard label="Total Attributed Orders" value={fmtNum(airAttr.totals?.total_attributed_orders || 0)} />
-                  <KpiCard label="Attributed Air Orders" value={fmtNum(airAttr.totals?.attributed_air_orders || 0)} />
-                  <KpiCard label="Attach Rate" value={fmtPct(airAttr.totals?.attach_rate || 0)} />
-                  <KpiCard label="TTP Rate" value={fmtPct(airAttr.totals?.ttp_rate || 0)} />
-                  <KpiCard label="Activation Rate" value={fmtPct(airAttr.totals?.activation_rate || 0)} />
-                  <KpiCard label="Attributed Air Revenue" value={fmt$(airAttr.totals?.attributed_air_revenue || 0)} />
+                  <KpiCard label={L.spend} value={fmt$(airAttr.totals?.spend || 0)} fullValue={fmtFull$(airAttr.totals?.spend || 0)} tooltip={TIP.spend} />
+                  <KpiCard label={L.day1Revenue} value={fmt$(airAttr.totals?.day_1_revenue || 0)} fullValue={fmtFull$(airAttr.totals?.day_1_revenue || 0)} tooltip={TIP.day1Revenue} />
+                  <KpiCard label={L.aov} value={fmt$(airAttr.totals?.aov || 0)} fullValue={fmtFull$(airAttr.totals?.aov || 0)} tooltip={TIP.aov} />
+                  <KpiCard label={L.airOrders} value={fmtNum(airAttr.totals?.air_orders || 0)} fullValue={fmtFullNum(airAttr.totals?.air_orders || 0)} tooltip={TIP.airOrders} />
+                  <KpiCard label={L.paidConversions} value={fmtNum(airAttr.totals?.ttp_paid_subscribers || 0)} fullValue={fmtFullNum(airAttr.totals?.ttp_paid_subscribers || 0)} tooltip={TIP.paidConversions} />
+                  <KpiCard label={L.totalAttributedOrders} value={fmtNum(airAttr.totals?.total_attributed_orders || 0)} fullValue={fmtFullNum(airAttr.totals?.total_attributed_orders || 0)} />
+                  <KpiCard label={L.attributedAirOrders} value={fmtNum(airAttr.totals?.attributed_air_orders || 0)} fullValue={fmtFullNum(airAttr.totals?.attributed_air_orders || 0)} />
+                  <KpiCard label={L.attachRate} value={fmtPct(airAttr.totals?.attach_rate || 0)} fullValue={fmtPct(airAttr.totals?.attach_rate || 0)} tooltip={TIP.attachRate} />
+                  <KpiCard label={L.ttpRate} value={fmtPct(airAttr.totals?.ttp_rate || 0)} fullValue={fmtPct(airAttr.totals?.ttp_rate || 0)} tooltip={TIP.ttpRate} />
+                  <KpiCard label={L.activationRate} value={fmtPct(airAttr.totals?.activation_rate || 0)} fullValue={fmtPct(airAttr.totals?.activation_rate || 0)} tooltip={TIP.activationRate} />
+                  <KpiCard label={L.attributedAirRevenue} value={fmt$(airAttr.totals?.attributed_air_revenue || 0)} fullValue={fmtFull$(airAttr.totals?.attributed_air_revenue || 0)} />
                 </div>
 
                 <ResponsiveContainer width="100%" height={320}>
@@ -713,12 +716,12 @@ export default function NoblAirPerformancePage() {
                     <YAxis yAxisId="orders" tick={{ fontSize:11 }} width={56} stroke="var(--border2)" />
                     <YAxis yAxisId="revenue" orientation="right" tickFormatter={(v) => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
                     <Tooltip
-                      formatter={(v, n) => n === 'Attributed Air Revenue' ? [fmt$(v), n] : [fmtNum(v), n]}
+                      formatter={(v, n) => n === L.attributedAirRevenue ? [fmt$(v), n] : [fmtNum(v), n]}
                       contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }}
                     />
                     <Legend wrapperStyle={{ fontSize:12 }} />
                     <Bar yAxisId="orders" dataKey="attributed_air_orders" name="Attributed Air Orders" fill="#1877f2" radius={[2,2,0,0]} />
-                    <Line yAxisId="revenue" dataKey="attributed_air_revenue" name="Attributed Air Revenue" stroke="#22c55e" strokeWidth={2} dot={{ r:3 }} />
+                    <Line yAxisId="revenue" dataKey="attributed_air_revenue" name={L.attributedAirRevenue} stroke="#22c55e" strokeWidth={2} dot={{ r:3 }} />
                   </ComposedChart>
                 </ResponsiveContainer>
 
@@ -727,7 +730,7 @@ export default function NoblAirPerformancePage() {
                   rows={airAttrRows}
                   keyField="_ad"
                   maxHeight="520px"
-                  defaultSortField="Attributed Air Orders"
+                  defaultSortField={L.attributedAirOrders}
                   defaultSortDir="desc"
                 />
               </>
@@ -736,13 +739,13 @@ export default function NoblAirPerformancePage() {
           )}
 
           {/* ── Daily detail table ── */}
-          <Card title="Daily Detail" subtitle="Daily TTP uses cohorts reaching day 14 on each date; daily activation uses attach from 14 days earlier.">
+          <Card title="Day-by-day numbers" subtitle="One row per day — orders, add-on rate, trials, and sales breakdown.">
             <SheetTable
               headers={HEADERS}
               rows={tableRows}
               keyField="_date"
               maxHeight="620px"
-              defaultSortField="Date"
+              defaultSortField={L.date}
               defaultSortDir="desc"
             />
           </Card>
@@ -751,26 +754,26 @@ export default function NoblAirPerformancePage() {
 
           {activeTab === 'forecast' && !regionScoped && revenueForecast && (
           <>
-            <Card title="NOBL Air Revenue Forecast — Live Model" subtitle="Forecast assumptions refresh from live database/dashboard data; the sheet was only context for model structure." style={{ marginBottom: 16 }}>
+            <Card title="Air sales forecast" subtitle="Projected Air revenue using your latest results and plan targets." style={{ marginBottom: 16 }}>
               {currentForecastRow && (
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(180px, 1fr))', gap:10, marginBottom:14 }}>
-                  <KpiCard size="sm" label="Current Month Actual Store Rev" value={fmt$(currentForecastRow.actual_store_revenue)} tooltip="Actual NOBL order revenue month-to-date through the latest completed ETL date, including rebills. Formula: Gross Sales - Discounts + Taxes + Shipping." />
-                  <KpiCard size="sm" label="Current Month Actual Orders" value={fmtNum(currentForecastRow.actual_orders)} tooltip="Actual NOBL store orders month-to-date through the latest completed ETL date, including rebills." />
-                  <KpiCard size="sm" label="Current Month Actual Air Rev" value={fmt$(currentForecastRow.actual_air_rev_net)} tooltip="Actual NOBL Air combined net revenue MTD. This matches Performance Combined Net Revenue when Performance is set to the same MTD date range." />
-                  <KpiCard size="sm" label="Current Month Projected Store Rev" value={fmt$(currentForecastRow.store_revenue)} tooltip="Actual MTD store revenue multiplied by days in month / completed days." />
-                  <KpiCard size="sm" label="Current Month Projected Eligible Orders" value={fmtNum(currentForecastRow.orders)} tooltip="Actual MTD Air-eligible orders multiplied by days in month / completed days." />
-                  <KpiCard size="sm" label="Current Month Forecast Air Rev" value={fmt$(currentForecastRow.total_air_rev_net_est)} tooltip="Sheet-style model: forecast air orders × Tag Net/Air Order + forecast activations × Avg Converted Tier." />
-                  <KpiCard size="sm" label="Current Month Eligible Orders" value={fmtNum(currentForecastRow.eligible_orders)} tooltip="Projected non-rebill store orders. Attach rate applies to this eligible order base, not to rebill orders." />
+                  <KpiCard size="sm" label="This month — store sales so far" value={fmt$(currentForecastRow.actual_store_revenue)} tooltip="All NOBL store sales month-to-date (including renewals), after discounts where applicable." />
+                  <KpiCard size="sm" label="This month — orders so far" value={fmtNum(currentForecastRow.actual_orders)} tooltip="All NOBL orders month-to-date through the latest sync." />
+                  <KpiCard size="sm" label="This month — Air sales so far" value={fmt$(currentForecastRow.actual_air_rev_net)} tooltip="Total Air revenue month-to-date. Matches the Results tab when you use the same dates." />
+                  <KpiCard size="sm" label="This month — projected store sales" value={fmt$(currentForecastRow.store_revenue)} tooltip="Extrapolates month-to-date sales to the full month." />
+                  <KpiCard size="sm" label="This month — projected eligible orders" value={fmtNum(currentForecastRow.orders)} tooltip="Orders that could include Air, projected for the full month." />
+                  <KpiCard size="sm" label="This month — forecast Air sales" value={fmt$(currentForecastRow.total_air_rev_net_est)} tooltip="Estimated Air revenue for the full month from the forecast model." />
+                  <KpiCard size="sm" label="This month — eligible orders (forecast)" value={fmtNum(currentForecastRow.eligible_orders)} tooltip="Projected orders that could add Air (excludes rebills)." />
                 </div>
               )}
               <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:10 }}>
-                <KpiCard size="sm" label="Forecast Activation" value={fmtPct(forecastAssumptions.forecast_activation_rate)} tooltip="Sheet-style forecast assumption. Formula: trailing 7-day converted cohorts / trailing 7-day Air orders. This drives forecast activations." />
-                <KpiCard size="sm" label="Performance Activation" value={fmtPct(forecastAssumptions.period_activation_rate)} tooltip="Reference only. Performance formula: Overall Attach Rate × Overall TTP Rate. Actual columns use this logic for matching Performance." />
-                <KpiCard size="sm" label="AOV" value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Formula: selected-period order revenue / selected-period Air-eligible orders. Used to convert target store revenue into projected eligible orders." />
-                <KpiCard size="sm" label="Eligible Order Rate" value={fmtPct(forecastAssumptions.eligible_order_rate)} tooltip="Formula: non-rebill store orders / all store orders. Used to convert total target orders into Air-eligible orders." />
-                <KpiCard size="sm" label="Avg Converted Tier" value={fmt$(forecastAssumptions.avg_tier_price_converted_subs)} tooltip="Formula: average Appstle contract amount for converted subscribers." />
-                <KpiCard size="sm" label="Tag Net / Air Order" value={fmt$(forecastAssumptions.tag_net_sales_per_air_order)} tooltip="Formula: selected-period Tag Net Sales / Air Orders." />
-                <KpiCard size="sm" label="Blended Net / Air Order" value={fmt$(forecastAssumptions.blended_net_rev_per_air_order)} tooltip="Formula: selected-period Combined Net Revenue / Air Orders." />
+                <KpiCard size="sm" label="Forecast success rate" value={fmtPct(forecastAssumptions.forecast_activation_rate)} tooltip="Expected share of Air orders that complete trial and pay (used in the forecast)." />
+                <KpiCard size="sm" label="Actual success rate" value={fmtPct(forecastAssumptions.period_activation_rate)} tooltip="Add-on rate × trial-to-paid rate for your selected dates (from Results tab)." />
+                <KpiCard size="sm" label={L.aov} value={fmt$(forecastAssumptions.avg_revenue_per_store_order)} tooltip="Average sales per eligible order in the selected period." />
+                <KpiCard size="sm" label="Eligible order share" value={fmtPct(forecastAssumptions.eligible_order_rate)} tooltip="Share of all store orders that can include Air (not rebills)." />
+                <KpiCard size="sm" label="Avg paying tier price" value={fmt$(forecastAssumptions.avg_tier_price_converted_subs)} tooltip="Average monthly price for subscribers who started paying." />
+                <KpiCard size="sm" label="Luggage sales per Air order" value={fmt$(forecastAssumptions.tag_net_sales_per_air_order)} tooltip="Net luggage/hardware sales divided by Air orders." />
+                <KpiCard size="sm" label="Total Air sales per order" value={fmt$(forecastAssumptions.blended_net_rev_per_air_order)} tooltip="All Air revenue (luggage + subs + renewals) per Air order." />
               </div>
             </Card>
 

@@ -14,6 +14,7 @@
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { fmt$, fmtCell } from '../utils/api';
+import { COLUMN_TIP } from '../copy/plainLanguage';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function fmtVal(v, header) {
@@ -399,6 +400,7 @@ export default function SheetTable({
                 return (
                   <th
                     key={h}
+                    title={COLUMN_TIP[h] || undefined}
                     onClick={e => selectCol(ci, e)}
                     style={{
                       padding: '6px 10px',

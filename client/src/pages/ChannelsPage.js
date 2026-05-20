@@ -6,6 +6,8 @@ import { getChannels, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import SheetTable from '../components/SheetTable';
+import PageIntro from '../components/PageIntro';
+import { L, TIP, PAGE } from '../copy/plainLanguage';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
@@ -104,26 +106,23 @@ export default function ChannelsPage({ showToast }) {
   const totRev = channelKpis.reduce((s,r) => s + r.total_revenue, 0);
 
   // Prepare rows for SheetTable
-  const CH_HEADERS = ['Date','Brand','Channel','Spend','Revenue','ROAS','7d Spend','New Orders','CAC'];
+  const CH_HEADERS = [L.date, 'Brand', 'Channel', L.spend, L.revenue, L.roas, 'Ad spend (7 days)', L.newOrders, L.cac];
   const sheetRows = sorted.map(r => ({
-    'Date':       r.date,
+    [L.date]:       r.date,
     'Brand':      r.brand,
     'Channel':    r.channel,
-    'Spend':      r.spend_1d,
-    'Revenue':    r.revenue_1d,
-    'ROAS':       r.roas_1d,
-    '7d Spend':   r.spend_7d,
-    'New Orders': r.new_cust_orders,
-    'CAC':        r.cac,
+    [L.spend]:      r.spend_1d,
+    [L.revenue]:    r.revenue_1d,
+    [L.roas]:       r.roas_1d,
+    'Ad spend (7 days)':   r.spend_7d,
+    [L.newOrders]: r.new_cust_orders,
+    [L.cac]:        r.cac,
   }));
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0, fontFamily: 'var(--font-head)' }}>Channels</h1>
-          <p style={{ fontSize: 13, color: 'var(--text3)', margin: '4px 0 0' }}>Cross-brand channel performance comparison</p>
-        </div>
+        <PageIntro title={PAGE.channels.title} desc={PAGE.channels.desc} />
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 4 }}>
             {BRANDS.map(b => (
@@ -152,20 +151,20 @@ export default function ChannelsPage({ showToast }) {
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: CHANNEL_COLORS[ch.channel] || '#888', borderRadius: '2px 2px 0 0' }} />
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>{ch.channel}</div>
                 <div style={{ fontSize: 17, fontWeight: 700 }}>{fmt$(ch.total_spend)}</div>
-                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>Rev: {fmt$(ch.total_revenue)} &middot; ROAS: {ch.avg_roas.toFixed(2)}x</div>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>Sales: {fmt$(ch.total_revenue)} &middot; Return: {ch.avg_roas.toFixed(2)}x per ad $</div>
               </div>
             ))}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
-            <KpiCard label="Total Spend" value={fmt$(totSpend)} color="warn" />
-            <KpiCard label="Total Revenue" value={fmt$(totRev)} color="blue" />
-            <KpiCard label="Blended ROAS" value={totSpend > 0 ? (totRev/totSpend).toFixed(2)+'x' : '—'} color="green" />
+            <KpiCard label="Total ad spend" value={fmt$(totSpend)} tooltip={TIP.spend} color="warn" />
+            <KpiCard label="Total sales" value={fmt$(totRev)} tooltip={TIP.revenue} color="blue" />
+            <KpiCard label={L.blendedMer} value={totSpend > 0 ? (totRev/totSpend).toFixed(2)+'x' : '—'} tooltip={TIP.mer} color="green" />
           </div>
 
           {/* Stacked spend chart */}
           <div style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 12, padding: 20, marginBottom: 20 }}>
-            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Spend by Channel Over Time</div>
+            <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 16 }}>Ad spend by channel over time</div>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -192,7 +191,7 @@ export default function ChannelsPage({ showToast }) {
               headers={CH_HEADERS}
               rows={sheetRows}
               maxHeight="540px"
-              defaultSortField="Date"
+              defaultSortField={L.date}
               defaultSortDir="desc"
               searchable={true}
             />

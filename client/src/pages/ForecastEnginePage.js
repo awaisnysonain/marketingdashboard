@@ -4,6 +4,7 @@ import {
   ComposedChart,
 } from 'recharts';
 import { getForecastEngine, fmt$, fmtNum, fmtPct } from '../utils/api';
+import { L, PAGE } from '../copy/plainLanguage';
 
 const STATUS = {
   green: { label: 'On Track', bg: 'rgba(34,197,94,.12)', color: '#16a34a', border: 'rgba(34,197,94,.26)' },
@@ -91,7 +92,7 @@ function BrandSummaryCard({ brand, selected, onClick }) {
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
         <Metric label="Current P50" value={money(brand.current_month?.projected_revenue)} />
         <Metric label="FY Projection" value={money(brand.full_year?.projected_revenue)} />
-        <Metric label="FY MER" value={mer(brand.full_year?.projected_mer)} />
+        <Metric label={`FY ${L.mer}`} value={mer(brand.full_year?.projected_mer)} />
         <Metric label="Plan Variance" value={brand.full_year?.variance_pct == null ? '—' : pct(brand.full_year.variance_pct)} />
       </div>
     </button>
@@ -156,12 +157,12 @@ export default function ForecastEnginePage() {
         }}>
           <div style={{ position:'absolute', right:-50, top:-60, width:180, height:180, borderRadius:'50%', background:'rgba(99,102,241,.10)' }} />
           <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
-            {['P50 Forecast', 'P25–P75 Range', 'Calendar-aware', 'MER + Revenue'].map(x => (
+            {['P50 Forecast', 'P25–P75 Range', 'Calendar-aware', `${L.mer} + ${L.sales}`].map(x => (
               <span key={x} style={{ padding:'5px 10px', borderRadius:999, background:'rgba(255,255,255,.65)', border:'1px solid var(--border)', fontSize:11, fontWeight:800, color:'var(--text2)' }}>{x}</span>
             ))}
           </div>
-          <h1 style={{ margin:0, fontSize:30, letterSpacing:'-.03em', lineHeight:1.05, fontWeight:950, color:'var(--text)', fontFamily:'var(--font-head)' }}>Forecast Engine</h1>
-          <p style={{ margin:'10px 0 0', maxWidth:760, color:'var(--text2)', fontSize:14, lineHeight:1.65 }}>A dedicated forecast dashboard for NOBL Travel and Pilates FLO. It blends actuals-to-date with day-of-week weighting, sales, drop windows, seasonality, MER targets, regional pacing, and redline guardrails.</p>
+          <h1 style={{ margin:0, fontSize:30, letterSpacing:'-.03em', lineHeight:1.05, fontWeight:950, color:'var(--text)', fontFamily:'var(--font-head)' }}>{PAGE.forecastEngine.title}</h1>
+          <p style={{ margin:'10px 0 0', maxWidth:760, color:'var(--text2)', fontSize:14, lineHeight:1.65 }}>{PAGE.forecastEngine.desc}</p>
         </div>
         <Card title="Controls" subtitle="Choose stores and forecast as-of date." style={{ borderRadius:24 }}>
           <div style={{ display:'grid', gap:10 }}>
@@ -177,10 +178,10 @@ export default function ForecastEnginePage() {
       </header>
 
       <div style={{ display:'grid', gridTemplateColumns:'repeat(5, minmax(150px, 1fr))', gap:12, marginBottom:18 }}>
-        <StatCard label="Combined Actual Revenue" value={money(combined.actual_revenue)} sub={`Through ${data?.as_of || 'latest'}`} tone="green" />
+        <StatCard label={`Combined actual ${L.sales.toLowerCase()}`} value={money(combined.actual_revenue)} sub={`Through ${data?.as_of || 'latest'}`} tone="green" />
         <StatCard label="Combined FY Projection" value={money(combined.projected_revenue)} sub="Actuals + forecast" tone="indigo" />
         <StatCard label="Plan / Target" value={combined.plan_revenue ? money(combined.plan_revenue) : '—'} sub="Configured plan" tone="amber" />
-        <StatCard label="Projected MER" value={mer(combined.projected_mer)} sub="Revenue / spend" tone="teal" />
+        <StatCard label={`Projected ${L.mer}`} value={mer(combined.projected_mer)} sub="Sales / ad spend" tone="teal" />
         <StatCard label="Variance vs Plan" value={combined.variance_pct == null ? '—' : pct(combined.variance_pct)} sub={statusMeta(combined.status).label} tone={combined.status === 'red' ? 'rose' : combined.status === 'amber' ? 'amber' : 'green'} />
       </div>
 
@@ -231,12 +232,12 @@ export default function ForecastEnginePage() {
             <StatCard label="Current P50" value={money(selected.current_month?.projected_revenue)} tone="indigo" />
             <StatCard label="Current Range" value={`${money(selected.current_month?.p25)}–${money(selected.current_month?.p75)}`} tone="teal" />
             <StatCard label="FY Projection" value={money(selected.full_year?.projected_revenue)} tone="indigo" />
-            <StatCard label="FY MER" value={mer(selected.full_year?.projected_mer)} tone="amber" />
+            <StatCard label={`FY ${L.mer}`} value={mer(selected.full_year?.projected_mer)} tone="amber" />
             <StatCard label="FY Status" value={statusMeta(selected.full_year?.status).label} tone={selected.full_year?.status === 'red' ? 'rose' : selected.full_year?.status === 'amber' ? 'amber' : 'green'} />
           </div>
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(390px, 1fr))', gap:16, marginBottom:16 }}>
-            <Card title="Monthly revenue forecast" subtitle="Actuals, plan, and P50 projection by month.">
+            <Card title="Monthly sales forecast" subtitle="Actuals, plan, and P50 projection by month.">
               <ResponsiveContainer width="100%" height={315}>
                 <ComposedChart data={chartRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -250,7 +251,7 @@ export default function ForecastEnginePage() {
                 </ComposedChart>
               </ResponsiveContainer>
             </Card>
-            <Card title="MER forecast" subtitle="Efficiency is tracked alongside top-line revenue.">
+            <Card title={`${L.mer} forecast`} subtitle="Sales per ad dollar tracked alongside top-line sales.">
               <ResponsiveContainer width="100%" height={315}>
                 <LineChart data={chartRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
@@ -258,8 +259,8 @@ export default function ForecastEnginePage() {
                   <YAxis tickFormatter={(v) => `${Number(v || 0).toFixed(1)}x`} tick={{ fontSize:11 }} width={54} stroke="var(--border2)" />
                   <Tooltip formatter={(v, n) => [`${Number(v || 0).toFixed(2)}x`, n]} contentStyle={tooltipStyle} />
                   <Legend wrapperStyle={{ fontSize:12 }} />
-                  <Line dataKey="projected_mer" name="Projected MER" stroke="#14b8a6" strokeWidth={2.5} dot={{ r:3 }} />
-                  <Line dataKey="mer_target" name="MER Target" stroke="#f59e0b" strokeWidth={2.5} dot={false} />
+                  <Line dataKey="projected_mer" name={`Projected ${L.mer}`} stroke="#14b8a6" strokeWidth={2.5} dot={{ r:3 }} />
+                  <Line dataKey="mer_target" name={`${L.mer} target`} stroke="#f59e0b" strokeWidth={2.5} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             </Card>
@@ -269,7 +270,7 @@ export default function ForecastEnginePage() {
             <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:14 }}>
               <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
                 <thead><tr style={{ color:'var(--text3)', background:'var(--bg3)' }}>
-                  {['Month','Status','Plan','Actual Rev','Projected Rev','Variance','Actual MER','Projected MER','MER Target','P25','P75','Reason'].map(h => <th key={h} style={{ textAlign:h === 'Month' || h === 'Reason' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>)}
+                  {['Month','Status',L.planTarget,`Actual ${L.sales}`,`Projected ${L.sales}`,L.variance,`Actual ${L.mer}`,`Projected ${L.mer}`,`${L.mer} target`,'P25','P75','Reason'].map(h => <th key={h} style={{ textAlign:h === 'Month' || h === 'Reason' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>)}
                 </tr></thead>
                 <tbody>{selected.monthly.map(r => <tr key={r.month_key} style={{ color:'var(--text2)' }}>
                   <td style={tdLeft}>{r.month}</td>
@@ -294,7 +295,7 @@ export default function ForecastEnginePage() {
               <div style={{ overflowX:'auto', maxHeight:440, border:'1px solid var(--border)', borderRadius:14 }}>
                 <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
                   <thead><tr style={{ color:'var(--text3)', background:'var(--bg3)' }}>
-                    {['Date','Type','Revenue','DOW','Season','Sale','Drop','Weight'].map(h => <th key={h} style={{ textAlign:h === 'Date' || h === 'Type' || h === 'Sale' || h === 'Drop' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', position:'sticky', top:0, background:'var(--bg3)', zIndex:1 }}>{h}</th>)}
+                    {['Date','Type',L.sales,'DOW','Season','Sale','Drop','Weight'].map(h => <th key={h} style={{ textAlign:h === 'Date' || h === 'Type' || h === 'Sale' || h === 'Drop' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', position:'sticky', top:0, background:'var(--bg3)', zIndex:1 }}>{h}</th>)}
                   </tr></thead>
                   <tbody>{selected.daily_projection.map(r => <tr key={r.date} style={{ color:r.is_actual ? '#16a34a' : 'var(--text2)' }}>
                     <td style={tdLeft}>{r.date}</td>
@@ -309,7 +310,7 @@ export default function ForecastEnginePage() {
                 </table>
               </div>
             </Card>
-            <Card title="Regional pacing" subtitle="YTD actual revenue by region. MER displays when regional spend is available.">
+            <Card title="Regional pacing" subtitle={`Year-to-date actual ${L.sales.toLowerCase()} by region. ${L.mer} shows when regional ad spend is available.`}>
               <div style={{ display:'grid', gap:8 }}>
                 {(selected.regions || []).slice(0, 8).map(r => (
                   <div key={r.region} style={{ padding:12, border:'1px solid var(--border)', borderRadius:14, background:'var(--bg3)' }}>
@@ -317,7 +318,7 @@ export default function ForecastEnginePage() {
                       <div style={{ fontWeight:900 }}>{r.region}</div>
                       <div style={{ fontWeight:950 }}>{money(r.actual_revenue)}</div>
                     </div>
-                    <div style={{ marginTop:5, fontSize:11, color:'var(--text3)' }}>MER {mer(r.actual_mer)} · ratio {r.mer_ratio_vs_usa || '—'}</div>
+                    <div style={{ marginTop:5, fontSize:11, color:'var(--text3)' }}>{L.mer} {mer(r.actual_mer)} · ratio {r.mer_ratio_vs_usa || '—'}</div>
                   </div>
                 ))}
               </div>

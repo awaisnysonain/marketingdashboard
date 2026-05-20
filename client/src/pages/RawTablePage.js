@@ -1,6 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTabs,getTab} from '../utils/api';
 import DataTable from '../components/DataTable';
+import PageIntro from '../components/PageIntro';
 
 export default function RawTablePage(){
   const [tabs,setTabs]=useState([]);
@@ -22,7 +23,7 @@ export default function RawTablePage(){
   return(
     <div>
       <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:20,flexWrap:'wrap'}}>
-        <h2 style={{fontFamily:'var(--font-head)',fontSize:18,fontWeight:700}}>Raw Tables</h2>
+        <PageIntro title="Raw tables" desc="Browse any sheet tab as a searchable table." />
         <select value={selected} onChange={e=>setSelected(e.target.value)}
           style={{background:'var(--bg3)',border:'1px solid var(--border2)',color:'var(--text)',borderRadius:8,padding:'8px 12px',fontSize:13,outline:'none',minWidth:220}}>
           {tabs.map(t=><option key={t} value={t}>{t}</option>)}

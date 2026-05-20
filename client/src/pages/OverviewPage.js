@@ -7,6 +7,8 @@ import { getOverview, getSyncStatus, triggerSync, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import SheetTable from '../components/SheetTable';
+import PageIntro from '../components/PageIntro';
+import { L, TIP, PAGE } from '../copy/plainLanguage';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
 function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
@@ -18,32 +20,32 @@ function fmtDateLabel(s) {
 
 // column definitions for SheetTable
 const OVERVIEW_HEADERS = [
-  'Date',
-  'NOBL Revenue', 'NOBL Spend', 'NOBL MER', 'NOBL Orders', 'NOBL NC Orders',
-  'FLO Revenue',  'FLO Spend',  'FLO MER',  'FLO Orders',  'FLO NC Orders',
-  'Total Revenue', 'Total Spend', 'Blended MER',
-  'Sub Revenue',
+  L.date,
+  'NOBL sales', 'NOBL ad spend', 'NOBL sales per ad $', 'NOBL orders', 'NOBL new customers',
+  'FLO sales', 'FLO ad spend', 'FLO sales per ad $', 'FLO orders', 'FLO new customers',
+  'Total sales', 'Total ad spend', L.blendedMer,
+  L.subRevenue,
 ];
 
 function toTableRow(r) {
   const blendedMer = r.total_spend > 0 ? (r.total_revenue / r.total_spend) : null;
   return {
-    'Date':           r.date,
-    'NOBL Revenue':   r.nobl_revenue,
-    'NOBL Spend':     r.nobl_spend,
-    'NOBL MER':       r.nobl_mer,
-    'NOBL Orders':    r.nobl_orders,
-    'NOBL NC Orders': r.nobl_nc_orders,
-    'FLO Revenue':    r.flo_revenue,
-    'FLO Spend':      r.flo_spend,
-    'FLO MER':        r.flo_mer,
-    'FLO Orders':     r.flo_orders,
-    'FLO NC Orders':  r.flo_nc_orders,
-    'Total Revenue':  r.total_revenue,
-    'Total Spend':    r.total_spend,
-    'Blended MER':    blendedMer,
-    'Sub Revenue':    r.nobl_sub_revenue,
-    _date: r.date, // keep for sorting
+    [L.date]:           r.date,
+    'NOBL sales':   r.nobl_revenue,
+    'NOBL ad spend':     r.nobl_spend,
+    'NOBL sales per ad $':       r.nobl_mer,
+    'NOBL orders':    r.nobl_orders,
+    'NOBL new customers': r.nobl_nc_orders,
+    'FLO sales':    r.flo_revenue,
+    'FLO ad spend':      r.flo_spend,
+    'FLO sales per ad $':        r.flo_mer,
+    'FLO orders':     r.flo_orders,
+    'FLO new customers':  r.flo_nc_orders,
+    'Total sales':  r.total_revenue,
+    'Total ad spend':    r.total_spend,
+    [L.blendedMer]:    blendedMer,
+    [L.subRevenue]:    r.nobl_sub_revenue,
+    _date: r.date,
   };
 }
 
@@ -105,10 +107,7 @@ export default function OverviewPage({ showToast }) {
     <div>
       {/* ── header ── */}
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
-        <div>
-          <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)' }}>Overview</h1>
-          <p style={{ fontSize:13, color:'var(--text3)', margin:'4px 0 0' }}>NOBL Air + Pilates FLO combined performance</p>
-        </div>
+        <PageIntro title={PAGE.overview.title} desc={PAGE.overview.desc} />
         <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
           <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="overview" />
           <div style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -131,20 +130,20 @@ export default function OverviewPage({ showToast }) {
         <>
           {/* ── KPI row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12, marginBottom:24 }}>
-            <KpiCard label="Total Revenue"   value={fmt$(totals.total_revenue   || 0)} color="blue" />
-            <KpiCard label="Total Spend"     value={fmt$(totals.total_spend     || 0)} color="warn" />
-            <KpiCard label="Blended MER"     value={(totals.blended_mer         || 0).toFixed(2)+'x'} color="green" />
-            <KpiCard label="NOBL Revenue"    value={fmt$(totals.nobl_revenue    || 0)} color="nobl" />
-            <KpiCard label="NOBL Orders"     value={(totals.nobl_orders         || 0).toLocaleString()} color="nobl" />
-            <KpiCard label="FLO Revenue"     value={fmt$(totals.flo_revenue     || 0)} color="flo" />
-            <KpiCard label="FLO Orders"      value={(totals.flo_orders          || 0).toLocaleString()} color="flo" />
-            <KpiCard label="NOBL Sub Rev"    value={fmt$(totals.nobl_sub_revenue|| 0)} color="purple" />
+            <KpiCard label="Total sales" value={fmt$(totals.total_revenue || 0)} fullValue={fmt$(totals.total_revenue || 0)} tooltip={TIP.revenue} color="blue" />
+            <KpiCard label="Total ad spend" value={fmt$(totals.total_spend || 0)} fullValue={fmt$(totals.total_spend || 0)} tooltip={TIP.spend} color="warn" />
+            <KpiCard label={L.blendedMer} value={(totals.blended_mer || 0).toFixed(2) + 'x'} tooltip={TIP.mer} color="green" />
+            <KpiCard label="NOBL sales" value={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.revenue} color="nobl" />
+            <KpiCard label="NOBL orders" value={(totals.nobl_orders || 0).toLocaleString()} tooltip={TIP.orders} color="nobl" />
+            <KpiCard label="FLO sales" value={fmt$(totals.flo_revenue || 0)} tooltip={TIP.revenue} color="flo" />
+            <KpiCard label="FLO orders" value={(totals.flo_orders || 0).toLocaleString()} tooltip={TIP.orders} color="flo" />
+            <KpiCard label="NOBL subscription sales" value={fmt$(totals.nobl_sub_revenue || 0)} tooltip={TIP.subRevenue} color="purple" />
           </div>
 
           {/* ── Charts row ── */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:20 }}>
             <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-              <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Revenue Over Time</div>
+              <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Sales over time</div>
               <ResponsiveContainer width="100%" height={240}>
                 <AreaChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <defs>
@@ -163,14 +162,14 @@ export default function OverviewPage({ showToast }) {
                   <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtDateLabel}
                     contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
                   <Legend wrapperStyle={{ fontSize:12 }} />
-                  <Area type="monotone" dataKey="nobl_revenue" name="NOBL Revenue" stroke="#6366f1" fill="url(#gradNobl)" strokeWidth={2} dot={false} />
-                  <Area type="monotone" dataKey="flo_revenue"  name="FLO Revenue"  stroke="#14b8a6" fill="url(#gradFlo)"  strokeWidth={2} dot={false} />
+                  <Area type="monotone" dataKey="nobl_revenue" name="NOBL sales" stroke="#6366f1" fill="url(#gradNobl)" strokeWidth={2} dot={false} />
+                  <Area type="monotone" dataKey="flo_revenue"  name="FLO sales"  stroke="#14b8a6" fill="url(#gradFlo)"  strokeWidth={2} dot={false} />
                 </AreaChart>
               </ResponsiveContainer>
             </div>
 
             <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-              <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Daily Spend Comparison</div>
+              <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Daily ad spend comparison</div>
               <ResponsiveContainer width="100%" height={240}>
                 <BarChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -179,8 +178,8 @@ export default function OverviewPage({ showToast }) {
                   <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtDateLabel}
                     contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
                   <Legend wrapperStyle={{ fontSize:12 }} />
-                  <Bar dataKey="nobl_spend" name="NOBL Spend" fill="#6366f1" radius={[2,2,0,0]} />
-                  <Bar dataKey="flo_spend"  name="FLO Spend"  fill="#14b8a6" radius={[2,2,0,0]} />
+                  <Bar dataKey="nobl_spend" name="NOBL ad spend" fill="#6366f1" radius={[2,2,0,0]} />
+                  <Bar dataKey="flo_spend"  name="FLO ad spend"  fill="#14b8a6" radius={[2,2,0,0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -199,7 +198,7 @@ export default function OverviewPage({ showToast }) {
               rows={tableRows}
               keyField="_date"
               maxHeight="520px"
-              defaultSortField="Date"
+              defaultSortField={L.date}
               defaultSortDir="desc"
               searchable={true}
               stickyFirstCol={false}

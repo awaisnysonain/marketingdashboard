@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmt$,fmtPct,fmtNum,fmtDate} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 import {LineChart,Line,XAxis,YAxis,CartesianGrid,Tooltip,Legend,ResponsiveContainer,AreaChart,Area} from 'recharts';
 
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -32,9 +34,9 @@ export default function DailyTrendPage(){
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Daily Trend" desc="Daily attach rate, orders, and revenue over time"/>
+      <PageIntro title="Daily trend" desc="Day-by-day Air add-on rate, orders, and sales over time." />
 
-      <Section title="Attach Rate Trend">
+      <Section title={`${L.attachRate} trend`}>
         <div style={{...CARD,padding:'16px'}}>
           <ResponsiveContainer width="100%" height={200}>
             <AreaChart data={chartData}>
@@ -48,14 +50,14 @@ export default function DailyTrendPage(){
               <XAxis dataKey="date" tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={interval}/>
               <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
               <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-              <Area type="monotone" dataKey="attach" name="Attach %" stroke="var(--accent)" fill="url(#gAttach)" strokeWidth={2} dot={false}/>
+              <Area type="monotone" dataKey="attach" name={L.attachRate} stroke="var(--accent)" fill="url(#gAttach)" strokeWidth={2} dot={false}/>
             </AreaChart>
           </ResponsiveContainer>
         </div>
       </Section>
 
       <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
-        <Section title="Combined Net Revenue">
+        <Section title={L.combinedNetRevenue}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={180}>
               <AreaChart data={chartData}>
@@ -68,14 +70,14 @@ export default function DailyTrendPage(){
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="date" tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={interval}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}k`:`$${v}`}/>
-                <Tooltip formatter={v=>[fmt$(v),'Net Rev']} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
-                <Area type="monotone" dataKey="combinedRev" name="Combined Net Rev" stroke="var(--success)" fill="url(#gRev)" strokeWidth={2} dot={false}/>
+                <Tooltip formatter={v=>[fmt$(v),L.combinedNetRevenue]} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Area type="monotone" dataKey="combinedRev" name={L.combinedNetRevenue} stroke="var(--success)" fill="url(#gRev)" strokeWidth={2} dot={false}/>
               </AreaChart>
             </ResponsiveContainer>
           </div>
         </Section>
 
-        <Section title="Tag & Rebill Revenue">
+        <Section title="Tag & renewal sales">
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={chartData}>
@@ -84,8 +86,8 @@ export default function DailyTrendPage(){
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}k`:`$${v}`}/>
                 <Tooltip formatter={v=>[fmt$(v)]} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Legend wrapperStyle={{fontSize:11}}/>
-                <Line type="monotone" dataKey="tagRev"    name="Tag Net Rev" stroke="var(--teal)" strokeWidth={2} dot={false}/>
-                <Line type="monotone" dataKey="rebillRev" name="Rebill Rev"  stroke="var(--warn)" strokeWidth={2} dot={false}/>
+                <Line type="monotone" dataKey="tagRev"    name="Tag net sales" stroke="var(--teal)" strokeWidth={2} dot={false}/>
+                <Line type="monotone" dataKey="rebillRev" name={L.rebillRevenue}  stroke="var(--warn)" strokeWidth={2} dot={false}/>
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -115,7 +117,7 @@ export default function DailyTrendPage(){
             <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
               <thead>
                 <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                  {['Date','Orders','Air Orders','Attach Rate','New Subs','Tag Net Rev','Rebill Rev','Combined Net Rev'].map(h=>(
+                  {['Date','Orders',L.airOrders,L.attachRate,L.newSubs,'Tag net sales',L.rebillRevenue,L.combinedNetRevenue].map(h=>(
                     <th key={h} style={{padding:'10px 14px',textAlign:h==='Date'?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
                   ))}
                 </tr>
@@ -153,6 +155,5 @@ function Section({title,children}){
     </div>
   );
 }
-function PageHead({title,desc}){return <div><h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>{desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}</div>;}
 function Loader(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>Loading…</div>;}
 function Empty(){return <div style={{padding:60,textAlign:'center',color:'var(--text3)'}}>No data available</div>;}

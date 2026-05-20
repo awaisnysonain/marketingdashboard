@@ -1,5 +1,7 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmt$,fmtPct,fmtNum} from '../utils/api';
+import PageIntro from '../components/PageIntro';
+import { L } from '../copy/plainLanguage';
 
 const TH={fontFamily:'var(--font-head)'};
 const CARD={background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,padding:'18px 20px'};
@@ -23,19 +25,19 @@ export default function SummaryPage(){
   const kpis=[
     {label:'Total Orders',       value:fmtNum(get('Total Orders (Shopify GQL)')),     sub:'All Shopify orders',         color:'blue'},
     {label:'Air Orders',         value:fmtNum(get('Orders with Nobl Air')),            sub:'Orders with NOBLAIR SKU',    color:'purple'},
-    {label:'Attach Rate',        value:fmtPct(get('Overall Attach Rate')),             sub:'Air ÷ Total orders',         color:'teal'},
-    {label:'TTP Rate',           value:fmtPct(get('TTP Rate (wt avg)')),               sub:'14-day weighted avg',        color:'green'},
-    {label:'Activation Rate',    value:fmtPct(get('Activation Rate (Attach × TTP)')), sub:'Attach × TTP',               color:'warn'},
-    {label:'7d Activation',      value:fmtPct(get('Rolling 7d Activation')),           sub:'Rolling 7-day window',       color:'blue'},
+    {label:L.attachRate,        value:fmtPct(get('Overall Attach Rate')),             sub:'Air ÷ total orders',         color:'teal'},
+    {label:L.ttpRate,           value:fmtPct(get('TTP Rate (wt avg)')),               sub:'14-day weighted avg',        color:'green'},
+    {label:L.activationRate,    value:fmtPct(get('Activation Rate (Attach × TTP)')), sub:'Add-on × trial-to-paid',               color:'warn'},
+    {label:'7-day success rate',      value:fmtPct(get('Rolling 7d Activation')),           sub:'Rolling 7-day window',       color:'blue'},
   ];
 
   // Revenue
   const rev=[
-    {label:'Tag Net Revenue',       value:fmt$(get('Tag Net Revenue'))},
-    {label:'Subscription Revenue',  value:fmt$(get('Subscription Net Revenue'))},
-    {label:'Combined Net Revenue',  value:fmt$(get('Combined NOBL Air Net Revenue'))},
-    {label:'Rev per Air Order',     value:fmt$(get('Blended Rev per Air Order'))},
-    {label:'Rebills',               value:fmt$(get('→ Rebills (Appstle, recurring)'))},
+    {label:'Tag net sales',       value:fmt$(get('Tag Net Revenue'))},
+    {label:L.subRevenue,  value:fmt$(get('Subscription Net Revenue'))},
+    {label:L.combinedNetRevenue,  value:fmt$(get('Combined NOBL Air Net Revenue'))},
+    {label:'Sales per Air order',     value:fmt$(get('Blended Rev per Air Order'))},
+    {label:'Renewals',               value:fmt$(get('→ Rebills (Appstle, recurring)'))},
     {label:'Tag Gross',             value:fmt$(get('Tag Gross (NOBL Air™ hardware)'))},
     {label:'Tag Net Sales',         value:fmt$(get('Tag Net Sales'))},
     {label:'Sub Gross',             value:fmt$(get('Sub Gross (NOBL Air™ Subscription)'))},
@@ -61,14 +63,14 @@ export default function SummaryPage(){
   const intl=[
     {label:'International Orders', value:fmtNum(get('International Orders'))},
     {label:'Intl w/ Nobl Air',     value:fmtNum(get('Intl Orders w/ Nobl Air'))},
-    {label:'Intl Attach Rate',     value:fmtPct(get('International Attach Rate'))},
+    {label:'Intl Air add-on rate',     value:fmtPct(get('International Attach Rate'))},
   ];
 
   const COLORS={blue:'var(--accent)',purple:'var(--accent2)',teal:'var(--teal)',green:'var(--success)',warn:'var(--warn)'};
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
-      <PageHead title="Summary" desc="Key performance metrics across the full reporting period"/>
+      <PageIntro title="Summary" desc="Headline Air metrics for the full reporting period: orders, add-ons, trials, and sales." />
 
       {/* Core KPIs */}
       <Section title="Core Metrics">
@@ -85,7 +87,7 @@ export default function SummaryPage(){
       </Section>
 
       {/* Revenue */}
-      <Section title="Revenue Breakdown">
+      <Section title="Sales breakdown">
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:14}}>
           {rev.map((r,i)=>(
             <div key={i} style={{...CARD,display:'flex',flexDirection:'column',gap:4}}>
@@ -104,7 +106,7 @@ export default function SummaryPage(){
               <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
                 <thead>
                   <tr style={{background:'var(--bg4)',borderBottom:'1px solid var(--border2)'}}>
-                    {['Tier','Total Subs','TTP%','Revenue'].map(h=>(
+                    {['Tier','Total Subs',L.ttpRate,L.sales].map(h=>(
                       <th key={h} style={{padding:'10px 14px',textAlign:h==='Tier'?'left':'right',color:'var(--text2)',fontWeight:500,fontSize:12}}>{h}</th>
                     ))}
                   </tr>
@@ -129,7 +131,7 @@ export default function SummaryPage(){
 
         {highlights.length>0 && (
           <div style={{display:'flex',flexDirection:'column',gap:0}}>
-            <Section title="Attach Rate Highlights">
+            <Section title="Air add-on highlights">
               <div style={{...CARD,display:'flex',flexDirection:'column',gap:0,padding:0,overflow:'hidden'}}>
                 {highlights.map((h,i)=>{
                   const isGood=h.label.startsWith('Best');
@@ -167,15 +169,6 @@ function Section({title,children,style={}}){
         {title}
       </div>
       {children}
-    </div>
-  );
-}
-
-function PageHead({title,desc}){
-  return(
-    <div>
-      <h1 style={{fontFamily:'var(--font-head)',fontSize:22,fontWeight:800,marginBottom:4}}>{title}</h1>
-      {desc&&<p style={{color:'var(--text3)',fontSize:13}}>{desc}</p>}
     </div>
   );
 }

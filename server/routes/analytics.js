@@ -92,7 +92,7 @@ function fmtRows(rows) {
   });
 }
 
-async function loadNoblAirOverallTtp(end, countryCodes = null) {
+async function loadNoblAirOverallTtp(start, end, countryCodes = null) {
   if (!countryCodes) {
     const r = await pgQuery(`
       SELECT
@@ -100,8 +100,8 @@ async function loadNoblAirOverallTtp(end, countryCodes = null) {
         COALESCE(SUM(converted_count), 0)::int AS converted,
         COALESCE(SUM(cancelled_30d_count), 0)::int AS cancelled_30d
       FROM nobl_air_daily
-      WHERE date <= $1::date
-    `, [end]);
+      WHERE date BETWEEN $1::date AND $2::date
+    `, [start, end]);
     const row = r.rows[0] || {};
     const mature = Number(row.mature || 0);
     const converted = Number(row.converted || 0);
@@ -115,12 +115,12 @@ async function loadNoblAirOverallTtp(end, countryCodes = null) {
     };
   }
 
-  const params = countryCodes ? [end, countryCodes] : [end];
+  const params = countryCodes ? [start, end, countryCodes] : [start, end];
   const regionJoin = countryCodes ? `
     JOIN shopify_orders_raw o ON o.brand = 'NOBL'
       AND o.has_air
       AND o.has_luggage
-      AND o.shipping_country = ANY($2::text[])
+      AND o.shipping_country = ANY($3::text[])
       AND (
         o.order_name = s.order_name
         OR o.order_id = s.graph_order_id
@@ -146,7 +146,7 @@ async function loadNoblAirOverallTtp(end, countryCodes = null) {
         ) AS paid_billing_date
       FROM nobl_air_subscribers s
       ${regionJoin}
-      WHERE (s.created_at AT TIME ZONE 'UTC')::date <= $1::date - INTERVAL '14 days'
+      WHERE (s.created_at AT TIME ZONE 'UTC')::date + 14 BETWEEN $1::date AND $2::date
     ), subscriber_rebills AS (
       SELECT DISTINCT s.appstle_id
       FROM mature_subscribers s
@@ -420,7 +420,7 @@ async function loadNoblAirRegionalCachedDaily(start, end, regionKey) {
   return fmtRows(r.rows);
 }
 
-async function loadNoblAirRegionalCachedTtp(end, regionKey) {
+async function loadNoblAirRegionalCachedTtp(start, end, regionKey) {
   const r = await pgQuery(`
     SELECT
       COALESCE(SUM(mature_count), 0)::int AS mature,
@@ -428,8 +428,8 @@ async function loadNoblAirRegionalCachedTtp(end, regionKey) {
       COALESCE(SUM(cancelled_30d_count), 0)::int AS cancelled_30d
     FROM nobl_air_region_daily
     WHERE region_key = $1
-      AND date <= $2::date
-  `, [regionKey, end]);
+      AND date BETWEEN $2::date AND $3::date
+  `, [regionKey, start, end]);
   const row = r.rows[0] || {};
   const mature = Number(row.mature || 0);
   const converted = Number(row.converted || 0);
@@ -840,7 +840,7 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   const ttpAsOfEntries = await Promise.all(forecastMonths.map(async ([key]) => {
     const monthEnd = monthEndFromKey(key);
     const asOfDate = monthEnd < forecastAsOf ? monthEnd : forecastAsOf;
-    return [key, await loadNoblAirOverallTtp(asOfDate, null)];
+    return [key, await loadNoblAirOverallTtp(`${key}-01`, asOfDate, null)];
   }));
   const ttpAsOfByMonth = Object.fromEntries(ttpAsOfEntries);
 
@@ -1799,11 +1799,13 @@ router.get('/nobl/air-performance', async (req, res) => {
           [effectiveStart, effectiveEnd]
         ).then(r => fmtRows(r.rows)),
       regionKey
-        ? loadNoblAirRegionalCachedTtp(effectiveEnd, regionKey)
-        : loadNoblAirOverallTtp(effectiveEnd, countryCodes),
+        ? loadNoblAirRegionalCachedTtp(effectiveStart, effectiveEnd, regionKey)
+        : loadNoblAirOverallTtp(effectiveStart, effectiveEnd, countryCodes),
     ]);
     const latestForecastEnd = await capNoblAirEndDate(new Date().toISOString().slice(0, 10));
-    const forecastTtpCohort = !regionKey ? await loadNoblAirOverallTtp(latestForecastEnd, null) : null;
+    const forecastTtpCohort = !regionKey
+      ? await loadNoblAirOverallTtp(effectiveStart, latestForecastEnd, null)
+      : null;
     const forecastModel = !regionKey
       ? await loadNoblAirRevenueForecast('2026-03-01', latestForecastEnd, [], forecastTtpCohort)
       : null;
@@ -2171,7 +2173,13 @@ router.get('/nobl/air-attribution', async (req, res) => {
       total AS (
         SELECT
           ${groupCols},
-          SUM(purchases)::numeric(14,2) AS total_attributed_orders
+          SUM(spend)::numeric(14,2) AS spend,
+          SUM(revenue)::numeric(14,2) AS day_1_revenue,
+          SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+          CASE
+            WHEN SUM(purchases) > 0 THEN ROUND(SUM(revenue) / SUM(purchases), 2)
+            ELSE NULL
+          END AS aov
         FROM tw_ads_daily
         WHERE brand = 'NOBL'
           AND platform = 'META'
@@ -2180,6 +2188,9 @@ router.get('/nobl/air-attribution', async (req, res) => {
       )
       SELECT
         ${groupFields.map(field => `air.${field}`).join(', ')},
+        COALESCE(total.spend, 0)::numeric(14,2) AS spend,
+        COALESCE(total.day_1_revenue, 0)::numeric(14,2) AS day_1_revenue,
+        total.aov,
         COALESCE(total.total_attributed_orders, 0)::numeric(14,2) AS total_attributed_orders,
         air.air_orders,
         air.attributed_air_orders,
@@ -2211,6 +2222,8 @@ router.get('/nobl/air-attribution', async (req, res) => {
     `, [start, end]);
 
     const totals = r.rows.reduce((acc, row) => ({
+      spend: acc.spend + Number(row.spend || 0),
+      day_1_revenue: acc.day_1_revenue + Number(row.day_1_revenue || 0),
       total_attributed_orders: acc.total_attributed_orders + Number(row.total_attributed_orders || 0),
       air_orders: acc.air_orders + Number(row.air_orders || 0),
       attributed_air_orders: acc.attributed_air_orders + Number(row.attributed_air_orders || 0),
@@ -2220,6 +2233,8 @@ router.get('/nobl/air-attribution', async (req, res) => {
       ttp_mature_subscribers: acc.ttp_mature_subscribers + Number(row.ttp_mature_subscribers || 0),
       ttp_paid_subscribers: acc.ttp_paid_subscribers + Number(row.ttp_paid_subscribers || 0),
     }), {
+      spend: 0,
+      day_1_revenue: 0,
       total_attributed_orders: 0,
       air_orders: 0,
       attributed_air_orders: 0,
@@ -2229,6 +2244,9 @@ router.get('/nobl/air-attribution', async (req, res) => {
       ttp_mature_subscribers: 0,
       ttp_paid_subscribers: 0,
     });
+    totals.aov = totals.total_attributed_orders > 0
+      ? Number((totals.day_1_revenue / totals.total_attributed_orders).toFixed(2))
+      : null;
     totals.attach_rate = totals.total_attributed_orders > 0
       ? Number((totals.attributed_air_orders / totals.total_attributed_orders).toFixed(4))
       : null;
