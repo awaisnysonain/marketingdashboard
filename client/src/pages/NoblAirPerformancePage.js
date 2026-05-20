@@ -389,7 +389,13 @@ export default function NoblAirPerformancePage() {
       getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message })),
     ]).then(([subs, attr]) => {
       setSubData(subs || null);
-      setAirAttr(attr || { rows: [], totals: {}, error: null });
+      setAirAttr({
+        rows: attr?.rows || [],
+        totals: attr?.totals || {},
+        error: attr?.error || null,
+        cache_hint: attr?.cache_hint || null,
+        source: attr?.source || null,
+      });
     }).finally(() => setAirAttrLoading(false));
   }, [range, regionScoped]);
 
@@ -746,8 +752,15 @@ export default function NoblAirPerformancePage() {
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
             ) : airAttr?.error ? (
               <div style={{ color:'var(--danger)', fontSize:13 }}>NOBL Air ad attribution unavailable: {airAttr.error}</div>
-            ) : airAttrRows.length === 0 ? <Empty msg="No Meta ad data for this range yet. Run a sync (tw_air_attribution + meta ad aggregate) or wait for the nightly job." /> : (
+            ) : airAttrRows.length === 0 ? (
+              <Empty msg={airAttr?.cache_hint || 'No Meta ad data for this range yet. Run tw_air_attribution sync or wait for the nightly job.'} />
+            ) : (
               <>
+                {airAttr?.cache_hint ? (
+                  <div style={{ fontSize:12, color:'var(--text3)', marginBottom:12, padding:'8px 12px', borderRadius:8, background:'var(--bg3)', border:'1px solid var(--border)' }}>
+                    {airAttr.cache_hint}
+                  </div>
+                ) : null}
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
                   <KpiCard label={L.spend} value={fmt$(airAttr.totals?.spend || 0)} fullValue={fmtFull$(airAttr.totals?.spend || 0)} tooltip={TIP.spend} />
                   <KpiCard label={L.day1Revenue} value={fmt$(airAttr.totals?.day_1_revenue || 0)} fullValue={fmtFull$(airAttr.totals?.day_1_revenue || 0)} tooltip={TIP.day1Revenue} />

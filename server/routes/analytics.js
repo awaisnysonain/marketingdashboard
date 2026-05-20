@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { pgQuery } = require('../db/postgres');
+const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
 
 /*
  * ══════════════════════════════════════════════════════════════
@@ -2226,6 +2227,58 @@ router.get('/meta/ads', async (req, res) => {
   }
 });
 
+async function queryMetaAirAttributionGrouped(start, end, groupCols) {
+  return pgQuery(`
+    SELECT
+      ${groupCols},
+      SUM(spend)::numeric(14,2) AS spend,
+      SUM(day_1_revenue)::numeric(14,2) AS day_1_revenue,
+      SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+      CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(day_1_revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
+      SUM(air_orders)::int AS air_orders,
+      SUM(attributed_air_orders)::numeric(14,2) AS attributed_air_orders,
+      SUM(attributed_air_revenue)::numeric(14,2) AS attributed_air_revenue,
+      SUM(ttp_mature_air_orders)::numeric(14,2) AS ttp_mature_air_orders,
+      SUM(ttp_paid_air_orders)::numeric(14,2) AS ttp_paid_air_orders,
+      SUM(ttp_mature_subscribers)::int AS ttp_mature_subscribers,
+      SUM(ttp_paid_subscribers)::int AS ttp_paid_subscribers
+    FROM nobl_air_meta_ad_daily
+    WHERE brand = 'NOBL'
+      AND date BETWEEN $1::date AND $2::date
+    GROUP BY ${groupCols}
+    HAVING SUM(spend) > 0 OR SUM(air_orders) > 0 OR SUM(attributed_air_orders) > 0
+    ORDER BY SUM(attributed_air_orders) DESC, SUM(attributed_air_revenue) DESC
+    LIMIT 500
+  `, [start, end]);
+}
+
+async function queryMetaAirAttributionAdsOnly(start, end, groupCols) {
+  return pgQuery(`
+    SELECT
+      ${groupCols},
+      SUM(spend)::numeric(14,2) AS spend,
+      SUM(revenue)::numeric(14,2) AS day_1_revenue,
+      SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+      CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
+      0::int AS air_orders,
+      0::numeric(14,2) AS attributed_air_orders,
+      0::numeric(14,2) AS attributed_air_revenue,
+      0::numeric(14,2) AS ttp_mature_air_orders,
+      0::numeric(14,2) AS ttp_paid_air_orders,
+      0::int AS ttp_mature_subscribers,
+      0::int AS ttp_paid_subscribers
+    FROM tw_ads_daily
+    WHERE brand = 'NOBL'
+      AND platform = 'META'
+      AND date BETWEEN $1::date AND $2::date
+      AND COALESCE(ad_id, '') <> ''
+    GROUP BY ${groupCols}
+    HAVING SUM(spend) > 0 OR SUM(purchases) > 0
+    ORDER BY SUM(spend) DESC
+    LIMIT 500
+  `, [start, end]);
+}
+
 // GET /nobl/air-attribution — exact NOBL Air purchases from TW order-level attribution
 router.get('/nobl/air-attribution', async (req, res) => {
   const { start, end } = getDefaultDates(req);
@@ -2239,28 +2292,42 @@ router.get('/nobl/air-attribution', async (req, res) => {
   const groupCols = groupFields.join(', ');
 
   try {
-    const cached = await pgQuery(`
-      SELECT
-        ${groupCols},
-        SUM(spend)::numeric(14,2) AS spend,
-        SUM(day_1_revenue)::numeric(14,2) AS day_1_revenue,
-        SUM(purchases)::numeric(14,2) AS total_attributed_orders,
-        CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(day_1_revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
-        SUM(air_orders)::int AS air_orders,
-        SUM(attributed_air_orders)::numeric(14,2) AS attributed_air_orders,
-        SUM(attributed_air_revenue)::numeric(14,2) AS attributed_air_revenue,
-        SUM(ttp_mature_air_orders)::numeric(14,2) AS ttp_mature_air_orders,
-        SUM(ttp_paid_air_orders)::numeric(14,2) AS ttp_paid_air_orders,
-        SUM(ttp_mature_subscribers)::int AS ttp_mature_subscribers,
-        SUM(ttp_paid_subscribers)::int AS ttp_paid_subscribers
-      FROM nobl_air_meta_ad_daily
-      WHERE brand = 'NOBL'
-        AND date BETWEEN $1::date AND $2::date
-      GROUP BY ${groupCols}
-      HAVING SUM(spend) > 0 OR SUM(air_orders) > 0 OR SUM(attributed_air_orders) > 0
-      ORDER BY SUM(attributed_air_orders) DESC, SUM(attributed_air_revenue) DESC
-      LIMIT 500
-    `, [start, end]);
+    let source = 'cache';
+    let cacheHint = null;
+    let cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
+
+    if (!cached.rows.length) {
+      const src = await pgQuery(`
+        SELECT
+          (SELECT COUNT(*)::int FROM tw_air_order_attribution
+           WHERE brand = 'NOBL' AND channel = 'facebook-ads'
+             AND date BETWEEN $1::date AND $2::date) AS fb_attr,
+          (SELECT COUNT(*)::int FROM nobl_air_meta_ad_daily
+           WHERE brand = 'NOBL') AS cache_total
+      `, [start, end]);
+      const fbAttr = Number(src.rows[0]?.fb_attr || 0);
+
+      if (fbAttr > 0) {
+        console.log(`[Analytics /nobl/air-attribution] warming cache ${start}..${end} (${fbAttr} fb attr rows)`);
+        await refreshNoblAirMetaAdDaily(start, end);
+        cached = await queryMetaAirAttributionGrouped(start, end, groupCols);
+        source = cached.rows.length ? 'cache_warmed' : 'empty_after_warm';
+      }
+
+      if (!cached.rows.length) {
+        const adsOnly = await queryMetaAirAttributionAdsOnly(start, end, groupCols);
+        if (adsOnly.rows.length) {
+          cached = adsOnly;
+          source = 'meta_ads_only';
+          cacheHint = 'Meta spend loaded from ad reports. Air order attribution is still syncing — Air columns show 0 until tw_air_attribution cache is built.';
+        } else {
+          source = 'empty';
+          cacheHint = fbAttr === 0
+            ? 'No Facebook-attributed Air orders in this date range. Run tw_air_attribution sync from Triple Whale.'
+            : 'Cache build returned no rows for this range. Try widening dates or re-run nobl_air_meta_ad_daily sync.';
+        }
+      }
+    }
 
     let r = cached;
     const allowLive = ['1', 'true', 'yes'].includes(String(req.query.live || '').toLowerCase());
@@ -2403,6 +2470,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
       LIMIT 500
     `, [start, end]);
       r = live;
+      source = 'live';
     }
 
     const rowsWithRates = r.rows.map(row => {
@@ -2462,10 +2530,8 @@ router.get('/nobl/air-attribution', async (req, res) => {
       level,
       start,
       end,
-      source: cached.rows.length ? 'cache' : (allowLive ? 'live' : 'empty'),
-      cache_hint: !cached.rows.length && !allowLive
-        ? 'No cached Meta ad data for this range. Run sync task nobl_air_meta_ad_daily or tw_air_attribution.'
-        : null,
+      source,
+      cache_hint: cacheHint,
     });
   } catch (e) {
     console.error('[Analytics /nobl/air-attribution]', e.message);
