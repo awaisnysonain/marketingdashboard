@@ -17,11 +17,10 @@ export function useClientPagination(items, pageSize = TABLE_PAGE_SIZE, resetDeps
     [list, safePage, pageSize],
   );
 
-  const deps = resetDeps == null ? [list] : resetDeps;
+  const resetKey = resetDeps == null ? totalRows : JSON.stringify(resetDeps);
   useEffect(() => {
     setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, deps);
+  }, [resetKey]);
 
   useEffect(() => {
     if (page > totalPages) setPage(totalPages);
