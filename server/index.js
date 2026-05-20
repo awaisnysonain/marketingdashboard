@@ -25,6 +25,7 @@ const { router: dashRouter, SCHEMA_CONTEXT, getClarifyPrompt } = require('./rout
 const syncStatusRouter = require('./routes/syncStatus');
 const syncEngine = require('./etl/syncEngine');
 const { ensureNoblAirRegionDailyTable } = require('./etl/noblAirAggregate');
+const { ensureNoblAirMetaAdDailyTable } = require('./etl/noblAirMetaAdDaily');
 const twRouter    = require('./routes/triplewhale');
 const storeRouter = require('./routes/store');
 
@@ -267,7 +268,11 @@ async function initPostgresTables() {
     `);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_order_name ON nobl_air_subscribers (order_name)`).catch(() => {});
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_graph_order_id ON nobl_air_subscribers (graph_order_id)`).catch(() => {});
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_created_at ON nobl_air_subscribers (created_at)`).catch(() => {});
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_air_sub_status ON nobl_air_subscribers (LOWER(TRIM(status)))`).catch(() => {});
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_nobl_air_daily_date ON nobl_air_daily (date DESC)`).catch(() => {});
     await ensureNoblAirRegionDailyTable();
+    await ensureNoblAirMetaAdDailyTable();
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_orders_detail (

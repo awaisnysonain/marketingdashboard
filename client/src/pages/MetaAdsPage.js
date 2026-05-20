@@ -59,7 +59,7 @@ export default function MetaAdsPage() {
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const res = await getMetaAds(range.start, range.end, level, brand, 5000);
+      const res = await getMetaAds(range.start, range.end, level, brand, 300);
       setData({ rows: res.rows || [], totals: res.totals || {} });
     } catch (e) {
       setError(e.message || 'Failed to load Meta ads');

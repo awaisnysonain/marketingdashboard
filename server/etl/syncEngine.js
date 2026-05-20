@@ -6,6 +6,7 @@ const { syncNoblAirSubs } = require('./noblAirSubs'); // legacy — kept for bac
 const { syncShopifyOrders } = require('./shopifyOrders');
 const { syncAppstleContracts, syncFloAppstleContracts } = require('./appstleContracts');
 const { aggregateNoblAir, aggregateProductDaily } = require('./noblAirAggregate');
+const { refreshNoblAirMetaAdDaily } = require('./noblAirMetaAdDaily');
 // Use the new SQL-based TW ETL (matches Brad's queries — Triple Attribution + Amazon + EU)
 const { refreshSummary } = require('./tripleWhaleSQL');
 const {
@@ -319,6 +320,14 @@ async function runSync(options = {}) {
         await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
         results.push({ task: 'tw_air_attribution', brand: 'NOBL', chunk, rows: r.rows });
         if (r.errors.length) errors.push(...r.errors);
+        try {
+          const agg = await refreshNoblAirMetaAdDaily(chunk.start, chunk.end);
+          results.push({ task: 'nobl_air_meta_ad_daily', brand: 'NOBL', chunk, rows: agg.rows });
+        } catch (aggErr) {
+          const aggMsg = `nobl_air_meta_ad_daily NOBL ${chunk.start}-${chunk.end}: ${aggErr.message}`;
+          console.error('[SyncEngine]', aggMsg);
+          errors.push(aggMsg);
+        }
       } catch (e) {
         const msg = `tw_air_attribution NOBL ${chunk.start}-${chunk.end}: ${e.message}`;
         console.error('[SyncEngine]', msg);
@@ -526,6 +535,24 @@ async function runSync(options = {}) {
         if (r.errors.length) errors.push(...r.errors);
       } catch (e) {
         const msg = `appstle_contracts ${cfg.brand}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
+      }
+    }
+  }
+
+  // ── NOBL Air Meta ad daily cache (reads tw_air_order_attribution + tw_ads_daily) ──
+  if (tasks.includes('nobl_air_meta_ad_daily')) {
+    const chunks = weeklyChunks(startDate, endDate);
+    for (const chunk of chunks) {
+      const logId = await logStart(runId, 'NOBL', 'nobl_air_meta_ad_daily', chunk.start, chunk.end);
+      try {
+        const r = await refreshNoblAirMetaAdDaily(chunk.start, chunk.end);
+        await logFinish(logId, 'success', r.rows);
+        results.push({ task: 'nobl_air_meta_ad_daily', brand: 'NOBL', chunk, rows: r.rows });
+      } catch (e) {
+        const msg = `nobl_air_meta_ad_daily NOBL ${chunk.start}-${chunk.end}: ${e.message}`;
         console.error('[SyncEngine]', msg);
         errors.push(msg);
         await logFinish(logId, 'error', 0, e.message);

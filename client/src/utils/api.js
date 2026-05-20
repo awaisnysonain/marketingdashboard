@@ -184,6 +184,13 @@ export const getNoblAirPerformance = async (start, end, rollingDays = 14, foreca
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
 };
+
+export const getNoblAirForecast = (asOf) =>
+  fetch(`${B}/api/analytics/nobl/air-forecast?asOf=${encodeURIComponent(asOf || '')}`).then(r => {
+    if (!r.ok) throw new Error(r.status);
+    return r.json();
+  });
+
 export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
   const res = await fetch(`${B}/api/analytics/nobl/air-meta-adsets?start=${start}&end=${end}&limit=${limit}`);
   const contentType = res.headers.get('content-type') || '';
@@ -200,7 +207,7 @@ export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
 };
-export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', limit = 5000) =>
+export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', limit = 300) =>
   fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${encodeURIComponent(brand)}&limit=${limit}`).then(r => {
     if (!r.ok) throw new Error(r.status);
     return r.json();

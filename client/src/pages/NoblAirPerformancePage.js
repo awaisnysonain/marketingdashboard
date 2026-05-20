@@ -4,7 +4,7 @@ import {
   LineChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getNoblAirPerformance, getNoblAirSubscribers, getNoblAirAttribution, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtPct } from '../utils/api';
+import { getNoblAirPerformance, getNoblAirSubscribers, getNoblAirAttribution, getNoblAirForecast, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtPct } from '../utils/api';
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
@@ -89,8 +89,8 @@ const KPI_TOOLTIPS = {
   eligibleOrders: `${L.eligibleOrders}\n${TIP.eligibleOrders}`,
   paidAirOrders: `${L.paidAir}\n${TIP.paidAir}`,
   zeroAirOrders: `${L.zeroAir}\n${TIP.zeroAir}`,
-  matureSubs: `${L.matureSubs}\n${TIP.matureSubs}`,
-  paidConversions: `${L.paidConversions}\n${TIP.paidConversions}`,
+  matureSubs: `${L.matureSubsAsOf}\n${TIP.matureSubs}`,
+  paidConversions: `${L.paidConversions}\n${TIP.paidConversions}\nCount in selected date range (trial ended in range and started paying).`,
   cancels30d: `${L.cancels30d}\n${TIP.cancels30d}`,
   cancelRate30d: `${L.cancelRate30d}\n${TIP.cancelRate30d}`,
   newSubRevenue: `${L.newSubRevenue}\n${TIP.newSubRevenue}`,
@@ -364,6 +364,8 @@ export default function NoblAirPerformancePage() {
   const [subData, setSubData] = useState(null);
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, error: null });
   const [airAttrLoading, setAirAttrLoading] = useState(false);
+  const [forecastLoading, setForecastLoading] = useState(false);
+  const [revenueForecast, setRevenueForecast] = useState(null);
   const [regions, setRegions] = useState(['ALL']);
   const [activeTab, setActiveTab] = useState('performance');
 
@@ -371,30 +373,28 @@ export default function NoblAirPerformancePage() {
   const regionScoped = regionParam !== 'ALL';
 
   const load = useCallback(async () => {
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     setAirAttrLoading(true);
     setAirAttr({ rows: [], totals: {}, error: null });
+    setRevenueForecast(null);
     try {
-      const attrPromise = regionScoped
-        ? Promise.resolve({ rows: [], totals: {}, error: null })
-        : getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message }));
+      const perfPromise = getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
       const subsPromise = regionScoped
         ? Promise.resolve(null)
         : getNoblAirSubscribers(range.start, range.end).catch(() => null);
-      const perf = await getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
+      const attrPromise = regionScoped
+        ? Promise.resolve({ rows: [], totals: {}, error: null })
+        : getNoblAirAttribution(range.start, range.end, 'ad').catch(e => ({ rows: [], totals: {}, error: e.message }));
+
+      const [perf, subs, attr] = await Promise.all([perfPromise, subsPromise, attrPromise]);
+
       setData({
         rows: perf?.rows || [],
         totals: perf?.totals || {},
         ttpCohort: perf?.ttp_cohort || {},
-        revenueForecast: perf?.revenue_forecast || null,
       });
-      setSubData(null);
-      setLoading(false);
-
-      const subs = await subsPromise;
       setSubData(subs || null);
-
-      const attr = await attrPromise;
       setAirAttr(attr || { rows: [], totals: {}, error: null });
     } catch (e) {
       setError(e.message || 'Failed to load');
@@ -403,6 +403,23 @@ export default function NoblAirPerformancePage() {
       setAirAttrLoading(false);
     }
   }, [range, regionParam, regionScoped]);
+
+  const loadForecast = useCallback(async () => {
+    if (regionScoped) return;
+    setForecastLoading(true);
+    try {
+      const res = await getNoblAirForecast(range.end);
+      setRevenueForecast(res?.revenue_forecast || null);
+    } catch {
+      setRevenueForecast(null);
+    } finally {
+      setForecastLoading(false);
+    }
+  }, [range.end, regionScoped]);
+
+  useEffect(() => {
+    if (activeTab === 'forecast' && !regionScoped) loadForecast();
+  }, [activeTab, range.end, regionScoped, loadForecast]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -437,15 +454,15 @@ export default function NoblAirPerformancePage() {
       eligibleOrders: t.total_orders || 0,
       airOrders: t.air_orders || 0,
       attachRate: attach,
-      ttpRate: ttp,                 // ← from nobl_air_subscribers cohort
+      ttpRate: ttpCohort.ttp_rate ?? ttp,
       activationRate: activation,
       matureSubs: ttpCohort.mature || 0,
-      convertedMatureSubs: ttpCohort.converted || 0,
+      convertedMatureSubs: ttpCohort.paid_conversions_in_period ?? ttpCohort.converted ?? 0,
       cancelled30d: ttpCohort.cancelled_30d || 0,
       cancelRate30d: ttpCohort.cancel_rate_30d,
       paidAirOrders: t.paid_air_orders || 0,
       zeroAirOrders: t.zero_air_orders || 0,
-      sameDayCancels: !regionScoped ? (subData?.ttp_cohort?.same_day_cancels || t.same_day_cancels || 0) : (t.same_day_cancels || 0),
+      sameDayCancels: t.same_day_cancels || 0,
       combinedNetRevenue: t.combined_net_revenue || 0,
       rebillRevenue: t.rebill_revenue || 0,
       newSubRevenue: t.new_sub_revenue || 0,
@@ -462,7 +479,6 @@ export default function NoblAirPerformancePage() {
     })),
     [subData]
   );
-  const revenueForecast = data.revenueForecast;
   const forecastAssumptions = revenueForecast?.assumptions || {};
   const forecastRows = revenueForecast?.rows || [];
   const forecastFullYear = revenueForecast?.full_year || null;
@@ -569,8 +585,8 @@ export default function NoblAirPerformancePage() {
             <KpiCard label={L.eligibleOrders} value={fmtNum(kpi.eligibleOrders)} fullValue={fmtFullNum(kpi.eligibleOrders)} color="text" tooltip={KPI_TOOLTIPS.eligibleOrders} />
             <KpiCard label={L.paidAir} value={fmtNum(kpi.paidAirOrders)} fullValue={fmtFullNum(kpi.paidAirOrders)} color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
             <KpiCard label={L.zeroAir} value={fmtNum(kpi.zeroAirOrders)} fullValue={fmtFullNum(kpi.zeroAirOrders)} color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
-            <KpiCard label={L.matureSubs} value={fmtNum(kpi.matureSubs)} fullValue={fmtFullNum(kpi.matureSubs)} color="purple" tooltip={KPI_TOOLTIPS.matureSubs} />
-            <KpiCard label={L.paidConversions} value={fmtNum(kpi.convertedMatureSubs)} fullValue={fmtFullNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.paidConversions} />
+            <KpiCard label={L.matureSubsAsOf} value={fmtNum(kpi.matureSubs)} fullValue={fmtFullNum(kpi.matureSubs)} color="purple" tooltip={KPI_TOOLTIPS.matureSubs} />
+            <KpiCard label={L.paidConversions} value={fmtNum(kpi.convertedMatureSubs)} fullValue={fmtFullNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.paidConversions} sub="in date range" />
             <KpiCard label={L.cancels30d} value={fmtNum(kpi.cancelled30d)} fullValue={fmtFullNum(kpi.cancelled30d)} color="red" tooltip={KPI_TOOLTIPS.cancels30d} />
             <KpiCard label={L.cancelRate30d} value={fmtPct(kpi.cancelRate30d || 0)} fullValue={fmtPct(kpi.cancelRate30d || 0)} color="red" tooltip={KPI_TOOLTIPS.cancelRate30d} />
             <KpiCard label={L.newSubRevenue} value={fmt$(kpi.newSubRevenue)} fullValue={fmtFull$(kpi.newSubRevenue)} color="blue" tooltip={KPI_TOOLTIPS.newSubRevenue} />
@@ -693,7 +709,7 @@ export default function NoblAirPerformancePage() {
               <div style={{ height:260, borderRadius:12, background:'var(--bg3)', animation:'pulse 1.5s ease-in-out infinite' }} />
             ) : airAttr?.error ? (
               <div style={{ color:'var(--danger)', fontSize:13 }}>NOBL Air ad attribution unavailable: {airAttr.error}</div>
-            ) : airAttrRows.length === 0 ? <Empty msg="No NOBL Air ad attribution data yet. Run tw_air_attribution sync for this date range." /> : (
+            ) : airAttrRows.length === 0 ? <Empty msg="No Meta ad data for this range yet. Run a sync (tw_air_attribution + meta ad aggregate) or wait for the nightly job." /> : (
               <>
                 <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:16 }}>
                   <KpiCard label={L.spend} value={fmt$(airAttr.totals?.spend || 0)} fullValue={fmtFull$(airAttr.totals?.spend || 0)} tooltip={TIP.spend} />
@@ -752,7 +768,10 @@ export default function NoblAirPerformancePage() {
           </>
           )}
 
-          {activeTab === 'forecast' && !regionScoped && revenueForecast && (
+          {activeTab === 'forecast' && !regionScoped && forecastLoading && (
+            <div style={{ height:260, borderRadius:12, background:'var(--bg2)', animation:'pulse 1.5s ease-in-out infinite' }} />
+          )}
+          {activeTab === 'forecast' && !regionScoped && !forecastLoading && revenueForecast && (
           <>
             <Card title="Air sales forecast" subtitle="Projected Air revenue using your latest results and plan targets." style={{ marginBottom: 16 }}>
               {currentForecastRow && (
@@ -889,6 +908,12 @@ export default function NoblAirPerformancePage() {
               </div>
             </Card>
           </>
+          )}
+
+          {activeTab === 'forecast' && !regionScoped && !forecastLoading && !revenueForecast && (
+            <Card title="Forecast" subtitle="Could not load forecast data.">
+              <Empty msg="Forecast failed to load. Try again or check the server logs." />
+            </Card>
           )}
 
           {activeTab === 'forecast' && regionScoped && (

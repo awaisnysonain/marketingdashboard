@@ -92,44 +92,10 @@ function fmtRows(rows) {
   });
 }
 
-async function loadNoblAirOverallTtp(start, end, countryCodes = null) {
-  if (!countryCodes) {
-    const r = await pgQuery(`
+function buildNoblAirSubscriberTtpSql(regionJoin, matureWhereSql) {
+  return `
+    WITH subscribers AS (
       SELECT
-        COALESCE(SUM(mature_count), 0)::int AS mature,
-        COALESCE(SUM(converted_count), 0)::int AS converted,
-        COALESCE(SUM(cancelled_30d_count), 0)::int AS cancelled_30d
-      FROM nobl_air_daily
-      WHERE date BETWEEN $1::date AND $2::date
-    `, [start, end]);
-    const row = r.rows[0] || {};
-    const mature = Number(row.mature || 0);
-    const converted = Number(row.converted || 0);
-    const cancelled30d = Number(row.cancelled_30d || 0);
-    return {
-      mature,
-      converted,
-      cancelled_30d: cancelled30d,
-      ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
-      cancel_rate_30d: mature > 0 ? Number((cancelled30d / mature).toFixed(4)) : null,
-    };
-  }
-
-  const params = countryCodes ? [start, end, countryCodes] : [start, end];
-  const regionJoin = countryCodes ? `
-    JOIN shopify_orders_raw o ON o.brand = 'NOBL'
-      AND o.has_air
-      AND o.has_luggage
-      AND o.shipping_country = ANY($3::text[])
-      AND (
-        o.order_name = s.order_name
-        OR o.order_id = s.graph_order_id
-        OR o.order_id = CONCAT('gid://shopify/Order/', s.graph_order_id)
-        OR CONCAT('gid://shopify/Order/', o.order_id) = s.graph_order_id
-      )` : '';
-  const r = await pgQuery(`
-    WITH mature_subscribers AS (
-      SELECT DISTINCT
         s.appstle_id,
         s.customer_id,
         s.created_at,
@@ -146,10 +112,10 @@ async function loadNoblAirOverallTtp(start, end, countryCodes = null) {
         ) AS paid_billing_date
       FROM nobl_air_subscribers s
       ${regionJoin}
-      WHERE (s.created_at AT TIME ZONE 'UTC')::date + 14 BETWEEN $1::date AND $2::date
+      WHERE ${matureWhereSql}
     ), subscriber_rebills AS (
       SELECT DISTINCT s.appstle_id
-      FROM mature_subscribers s
+      FROM subscribers s
       JOIN shopify_orders_raw o ON o.brand = 'NOBL'
         AND o.is_rebill
         AND (
@@ -165,19 +131,89 @@ async function loadNoblAirOverallTtp(start, end, countryCodes = null) {
         s.cancelled_on IS NOT NULL
         AND s.cancelled_on <= s.created_at + INTERVAL '30 days'
       )::int AS cancelled_30d
-    FROM mature_subscribers s
+    FROM subscribers s
     LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id
-  `, params);
+  `;
+}
+
+async function loadNoblAirTtpAsOfEnd(end, countryCodes = null) {
+  const regionJoin = countryCodes ? `
+    JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+      AND o.has_air
+      AND o.has_luggage
+      AND o.shipping_country = ANY($2::text[])
+      AND (
+        o.order_name = s.order_name
+        OR o.order_id = s.graph_order_id
+        OR o.order_id = CONCAT('gid://shopify/Order/', s.graph_order_id)
+        OR CONCAT('gid://shopify/Order/', o.order_id) = s.graph_order_id
+      )` : '';
+  const matureWhere = `(s.created_at AT TIME ZONE 'UTC')::date <= ($1::date - INTERVAL '14 days')::date`;
+  const params = countryCodes ? [end, countryCodes] : [end];
+  const r = await pgQuery(buildNoblAirSubscriberTtpSql(regionJoin, matureWhere), params);
   const row = r.rows[0] || {};
   const mature = Number(row.mature || 0);
   const converted = Number(row.converted || 0);
+  const cancelled30d = Number(row.cancelled_30d || 0);
   return {
     mature,
     converted,
-    cancelled_30d: Number(row.cancelled_30d || 0),
+    cancelled_30d: cancelled30d,
     ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
-    cancel_rate_30d: mature > 0 ? Number((Number(row.cancelled_30d || 0) / mature).toFixed(4)) : null,
+    cancel_rate_30d: mature > 0 ? Number((cancelled30d / mature).toFixed(4)) : null,
   };
+}
+
+async function loadNoblAirTtpPeriod(start, end, countryCodes = null) {
+  if (!countryCodes) {
+    const r = await pgQuery(`
+      SELECT
+        COALESCE(SUM(mature_count), 0)::int AS mature,
+        COALESCE(SUM(converted_count), 0)::int AS converted
+      FROM nobl_air_daily
+      WHERE date BETWEEN $1::date AND $2::date
+    `, [start, end]);
+    const row = r.rows[0] || {};
+    return {
+      mature: Number(row.mature || 0),
+      converted: Number(row.converted || 0),
+    };
+  }
+  const regionJoin = countryCodes ? `
+    JOIN shopify_orders_raw o ON o.brand = 'NOBL'
+      AND o.has_air
+      AND o.has_luggage
+      AND o.shipping_country = ANY($3::text[])
+      AND (
+        o.order_name = s.order_name
+        OR o.order_id = s.graph_order_id
+        OR o.order_id = CONCAT('gid://shopify/Order/', s.graph_order_id)
+        OR CONCAT('gid://shopify/Order/', o.order_id) = s.graph_order_id
+      )` : '';
+  const matureWhere = `(s.created_at AT TIME ZONE 'UTC')::date + 14 BETWEEN $1::date AND $2::date`;
+  const r = await pgQuery(buildNoblAirSubscriberTtpSql(regionJoin, matureWhere), [start, end, countryCodes]);
+  const row = r.rows[0] || {};
+  return {
+    mature: Number(row.mature || 0),
+    converted: Number(row.converted || 0),
+  };
+}
+
+async function loadNoblAirTtpCohort(start, end, countryCodes = null) {
+  const [asOf, period] = await Promise.all([
+    loadNoblAirTtpAsOfEnd(end, countryCodes),
+    loadNoblAirTtpPeriod(start, end, countryCodes),
+  ]);
+  return {
+    ...asOf,
+    paid_conversions_in_period: period.converted,
+    mature_in_period: period.mature,
+  };
+}
+
+/** @deprecated use loadNoblAirTtpCohort */
+async function loadNoblAirOverallTtp(start, end, countryCodes = null) {
+  return loadNoblAirTtpCohort(start, end, countryCodes);
 }
 
 async function loadNoblAirRegionalDaily(start, end, countryCodes) {
@@ -421,25 +457,38 @@ async function loadNoblAirRegionalCachedDaily(start, end, regionKey) {
 }
 
 async function loadNoblAirRegionalCachedTtp(start, end, regionKey) {
-  const r = await pgQuery(`
-    SELECT
-      COALESCE(SUM(mature_count), 0)::int AS mature,
-      COALESCE(SUM(converted_count), 0)::int AS converted,
-      COALESCE(SUM(cancelled_30d_count), 0)::int AS cancelled_30d
-    FROM nobl_air_region_daily
-    WHERE region_key = $1
-      AND date BETWEEN $2::date AND $3::date
-  `, [regionKey, start, end]);
-  const row = r.rows[0] || {};
-  const mature = Number(row.mature || 0);
-  const converted = Number(row.converted || 0);
-  const cancelled30d = Number(row.cancelled_30d || 0);
+  const [asOfRes, periodRes] = await Promise.all([
+    pgQuery(`
+      SELECT
+        COALESCE(SUM(mature_count), 0)::int AS mature,
+        COALESCE(SUM(converted_count), 0)::int AS converted,
+        COALESCE(SUM(cancelled_30d_count), 0)::int AS cancelled_30d
+      FROM nobl_air_region_daily
+      WHERE region_key = $1
+        AND date <= $2::date
+    `, [regionKey, end]),
+    pgQuery(`
+      SELECT
+        COALESCE(SUM(mature_count), 0)::int AS mature,
+        COALESCE(SUM(converted_count), 0)::int AS converted
+      FROM nobl_air_region_daily
+      WHERE region_key = $1
+        AND date BETWEEN $2::date AND $3::date
+    `, [regionKey, start, end]),
+  ]);
+  const asOf = asOfRes.rows[0] || {};
+  const period = periodRes.rows[0] || {};
+  const mature = Number(asOf.mature || 0);
+  const converted = Number(asOf.converted || 0);
+  const cancelled30d = Number(asOf.cancelled_30d || 0);
   return {
     mature,
     converted,
     cancelled_30d: cancelled30d,
     ttp_rate: mature > 0 ? Number((converted / mature).toFixed(4)) : null,
     cancel_rate_30d: mature > 0 ? Number((cancelled30d / mature).toFixed(4)) : null,
+    paid_conversions_in_period: Number(period.converted || 0),
+    mature_in_period: Number(period.mature || 0),
   };
 }
 
@@ -835,14 +884,31 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
     }];
   }));
 
-  // Use the exact same helper as the Performance KPI for TTP. That keeps Forecast
-  // actual/MTD TTP 1:1 with Performance for the same selected period end date.
-  const ttpAsOfEntries = await Promise.all(forecastMonths.map(async ([key]) => {
-    const monthEnd = monthEndFromKey(key);
-    const asOfDate = monthEnd < forecastAsOf ? monthEnd : forecastAsOf;
-    return [key, await loadNoblAirOverallTtp(`${key}-01`, asOfDate, null)];
-  }));
-  const ttpAsOfByMonth = Object.fromEntries(ttpAsOfEntries);
+  // Month-end TTP from pre-aggregated nobl_air_daily (avoids 10× full subscriber scans).
+  const monthKeys = forecastMonths.map(([key]) => key);
+  const ttpMonthRes = await pgQuery(`
+    SELECT DISTINCT ON (month_key)
+      TO_CHAR(date_trunc('month', date), 'YYYY-MM') AS month_key,
+      ttp_rate,
+      mature_count,
+      converted_count
+    FROM nobl_air_daily
+    WHERE date <= $1::date
+      AND TO_CHAR(date_trunc('month', date), 'YYYY-MM') = ANY($2::text[])
+    ORDER BY month_key, date DESC
+  `, [forecastAsOf, monthKeys]);
+  const ttpAsOfByMonth = Object.fromEntries(ttpMonthRes.rows.map((row) => [
+    row.month_key,
+    {
+      ttp_rate: row.ttp_rate != null ? Number(row.ttp_rate) : null,
+      mature: Number(row.mature_count || 0),
+      converted: Number(row.converted_count || 0),
+    },
+  ]));
+  // Current month may need live cohort if daily row not written yet.
+  if (!ttpAsOfByMonth[currentMonth]) {
+    ttpAsOfByMonth[currentMonth] = await loadNoblAirTtpAsOfEnd(forecastAsOf, null);
+  }
 
   const selectedStoreRes = await pgQuery(`
     SELECT
@@ -1756,9 +1822,13 @@ router.get('/nobl/air-performance', async (req, res) => {
     INTL: [],
   };
 
+  const includeForecast = ['1', 'true', 'yes'].includes(String(req.query.includeForecast || '').toLowerCase());
+
   try {
-    const effectiveEnd = await capNoblAirEndDate(end);
-    const effectiveStart = await clampNoblAirStartDate(start);
+    const [effectiveEnd, effectiveStart] = await Promise.all([
+      capNoblAirEndDate(end),
+      clampNoblAirStartDate(start),
+    ]);
     // Support multi-region like "US,CA". "ALL" means no region filter.
     let countryCodes = null;
     let regionKey = null;
@@ -1800,15 +1870,13 @@ router.get('/nobl/air-performance', async (req, res) => {
         ).then(r => fmtRows(r.rows)),
       regionKey
         ? loadNoblAirRegionalCachedTtp(effectiveStart, effectiveEnd, regionKey)
-        : loadNoblAirOverallTtp(effectiveStart, effectiveEnd, countryCodes),
+        : loadNoblAirTtpCohort(effectiveStart, effectiveEnd, countryCodes),
     ]);
-    const latestForecastEnd = await capNoblAirEndDate(new Date().toISOString().slice(0, 10));
-    const forecastTtpCohort = !regionKey
-      ? await loadNoblAirOverallTtp(effectiveStart, latestForecastEnd, null)
-      : null;
-    const forecastModel = !regionKey
-      ? await loadNoblAirRevenueForecast('2026-03-01', latestForecastEnd, [], forecastTtpCohort)
-      : null;
+    let forecastModel = null;
+    if (includeForecast && !regionKey) {
+      const forecastTtpCohort = await loadNoblAirTtpAsOfEnd(effectiveEnd, null);
+      forecastModel = await loadNoblAirRevenueForecast('2026-03-01', effectiveEnd, [], forecastTtpCohort);
+    }
     const rowsDesc = [...daily].reverse();
 
     const totals = daily.reduce((acc, r) => ({
@@ -1821,6 +1889,7 @@ router.get('/nobl/air-performance', async (req, res) => {
       tag_net_sales: (acc.tag_net_sales || 0) + (r.tag_net_sales || 0),
       sub_net_sales: (acc.sub_net_sales || 0) + (r.sub_net_sales || 0),
       rebill_revenue: (acc.rebill_revenue || 0) + (r.rebill_revenue || 0),
+      new_sub_revenue: (acc.new_sub_revenue || 0) + (r.new_sub_revenue || 0),
       combined_net_revenue: (acc.combined_net_revenue || 0) + (r.combined_net_revenue || 0),
     }), {});
 
@@ -1916,6 +1985,21 @@ router.get('/nobl/air-performance', async (req, res) => {
   }
 });
 
+// GET /nobl/air-forecast — revenue forecast tab (heavy; load on demand, not with performance KPIs)
+router.get('/nobl/air-forecast', async (req, res) => {
+  try {
+    const effectiveEnd = await capNoblAirEndDate(
+      req.query.asOf ? String(req.query.asOf).slice(0, 10) : new Date().toISOString().slice(0, 10)
+    );
+    const ttpCohort = await loadNoblAirTtpAsOfEnd(effectiveEnd, null);
+    const forecastModel = await loadNoblAirRevenueForecast('2026-03-01', effectiveEnd, [], ttpCohort);
+    res.json({ revenue_forecast: forecastModel, as_of: effectiveEnd });
+  } catch (e) {
+    console.error('[Analytics /nobl/air-forecast]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /nobl/air-meta-adsets — live Meta ad set performance for the selected date range
 router.get('/nobl/air-meta-adsets', async (req, res) => {
   const { start, end } = getDefaultDates(req);
@@ -2000,7 +2084,7 @@ router.get('/meta/ads', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const brand = (req.query.brand || 'NOBL').toUpperCase();
   const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'adset';
-  const rowLimit = Math.max(100, Math.min(parseInt(req.query.limit || '5000', 10), 10000));
+  const rowLimit = Math.max(50, Math.min(parseInt(req.query.limit || '300', 10), 2000));
   const sortBy = String(req.query.sortBy || '').trim();
   const sortDir = (String(req.query.dir || 'desc').toLowerCase() === 'asc') ? 'asc' : 'desc';
 
@@ -2011,6 +2095,21 @@ router.get('/meta/ads', async (req, res) => {
   }[level];
 
   try {
+    const totalsRes = await pgQuery(`
+      SELECT
+        SUM(spend)::numeric(14,2) AS spend,
+        SUM(revenue)::numeric(14,2) AS revenue,
+        SUM(purchases)::int AS purchases,
+        SUM(impressions)::bigint AS impressions,
+        SUM(clicks)::bigint AS clicks,
+        SUM(link_clicks)::bigint AS link_clicks
+      FROM tw_ads_daily
+      WHERE ($1 = 'ALL' OR brand = $1)
+        AND platform = 'META'
+        AND date BETWEEN $2::date AND $3::date
+    `, [brand, start, end]);
+    const totalsRow = totalsRes.rows[0] || {};
+
     const r = await pgQuery(`
       SELECT
         ${groupFields.join(', ')},
@@ -2037,14 +2136,14 @@ router.get('/meta/ads', async (req, res) => {
       LIMIT $4
     `, [brand, start, end, rowLimit]);
 
-    const totals = r.rows.reduce((acc, row) => ({
-      spend: acc.spend + Number(row.spend || 0),
-      revenue: acc.revenue + Number(row.revenue || 0),
-      purchases: acc.purchases + Number(row.purchases || 0),
-      impressions: acc.impressions + Number(row.impressions || 0),
-      clicks: acc.clicks + Number(row.clicks || 0),
-      link_clicks: acc.link_clicks + Number(row.link_clicks || 0),
-    }), { spend: 0, revenue: 0, purchases: 0, impressions: 0, clicks: 0, link_clicks: 0 });
+    const totals = {
+      spend: Number(totalsRow.spend || 0),
+      revenue: Number(totalsRow.revenue || 0),
+      purchases: Number(totalsRow.purchases || 0),
+      impressions: Number(totalsRow.impressions || 0),
+      clicks: Number(totalsRow.clicks || 0),
+      link_clicks: Number(totalsRow.link_clicks || 0),
+    };
 
     totals.roas = totals.spend > 0 ? totals.revenue / totals.spend : null;
     totals.cac = totals.purchases > 0 ? totals.spend / totals.purchases : null;
@@ -2081,12 +2180,38 @@ router.get('/nobl/air-attribution', async (req, res) => {
     ad: ['campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
   }[level];
   const groupCols = groupFields.join(', ');
-  const totalJoin = groupFields
-    .map(field => `COALESCE(air.${field}, '') = COALESCE(total.${field}, '')`)
-    .join(' AND ');
 
   try {
-    const r = await pgQuery(`
+    const cached = await pgQuery(`
+      SELECT
+        ${groupCols},
+        SUM(spend)::numeric(14,2) AS spend,
+        SUM(day_1_revenue)::numeric(14,2) AS day_1_revenue,
+        SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+        CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(day_1_revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
+        SUM(air_orders)::int AS air_orders,
+        SUM(attributed_air_orders)::numeric(14,2) AS attributed_air_orders,
+        SUM(attributed_air_revenue)::numeric(14,2) AS attributed_air_revenue,
+        SUM(ttp_mature_air_orders)::numeric(14,2) AS ttp_mature_air_orders,
+        SUM(ttp_paid_air_orders)::numeric(14,2) AS ttp_paid_air_orders,
+        SUM(ttp_mature_subscribers)::int AS ttp_mature_subscribers,
+        SUM(ttp_paid_subscribers)::int AS ttp_paid_subscribers
+      FROM nobl_air_meta_ad_daily
+      WHERE brand = 'NOBL'
+        AND date BETWEEN $1::date AND $2::date
+      GROUP BY ${groupCols}
+      HAVING SUM(spend) > 0 OR SUM(air_orders) > 0 OR SUM(attributed_air_orders) > 0
+      ORDER BY SUM(attributed_air_orders) DESC, SUM(attributed_air_revenue) DESC
+      LIMIT 500
+    `, [start, end]);
+
+    let r = cached;
+    const allowLive = ['1', 'true', 'yes'].includes(String(req.query.live || '').toLowerCase());
+    if (!cached.rows.length && allowLive) {
+      const totalJoin = groupFields
+        .map(field => `COALESCE(air.${field}, '') = COALESCE(total.${field}, '')`)
+        .join(' AND ');
+      const live = await pgQuery(`
       WITH attr AS (
         SELECT *
         FROM tw_air_order_attribution
@@ -2220,8 +2345,25 @@ router.get('/nobl/air-attribution', async (req, res) => {
       ORDER BY attributed_air_orders DESC, attributed_air_revenue DESC
       LIMIT 500
     `, [start, end]);
+      r = live;
+    }
 
-    const totals = r.rows.reduce((acc, row) => ({
+    const rowsWithRates = r.rows.map(row => {
+      const totalOrders = Number(row.total_attributed_orders || 0);
+      const attrAir = Number(row.attributed_air_orders || 0);
+      const matureAir = Number(row.ttp_mature_air_orders || 0);
+      const paidAir = Number(row.ttp_paid_air_orders || 0);
+      const attach = totalOrders > 0 ? Number((attrAir / totalOrders).toFixed(4)) : null;
+      const ttp = matureAir > 0 ? Number((paidAir / matureAir).toFixed(4)) : null;
+      return {
+        ...row,
+        attach_rate: row.attach_rate ?? attach,
+        ttp_rate: row.ttp_rate ?? ttp,
+        activation_rate: row.activation_rate ?? (attach != null && ttp != null ? Number((attach * ttp).toFixed(4)) : null),
+      };
+    });
+
+    const totals = rowsWithRates.reduce((acc, row) => ({
       spend: acc.spend + Number(row.spend || 0),
       day_1_revenue: acc.day_1_revenue + Number(row.day_1_revenue || 0),
       total_attributed_orders: acc.total_attributed_orders + Number(row.total_attributed_orders || 0),
@@ -2257,7 +2399,17 @@ router.get('/nobl/air-attribution', async (req, res) => {
       ? Number((totals.attach_rate * totals.ttp_rate).toFixed(4))
       : null;
 
-    res.json({ rows: fmtRows(r.rows), totals, level, start, end });
+    res.json({
+      rows: fmtRows(rowsWithRates),
+      totals,
+      level,
+      start,
+      end,
+      source: cached.rows.length ? 'cache' : (allowLive ? 'live' : 'empty'),
+      cache_hint: !cached.rows.length && !allowLive
+        ? 'No cached Meta ad data for this range. Run sync task nobl_air_meta_ad_daily or tw_air_attribution.'
+        : null,
+    });
   } catch (e) {
     console.error('[Analytics /nobl/air-attribution]', e.message);
     res.status(500).json({ error: e.message });
@@ -2274,164 +2426,30 @@ router.get('/nobl/air-subscribers', async (req, res) => {
       FROM nobl_air_subscribers
       GROUP BY status ORDER BY n DESC`);
 
-    // Tier mix (the main 10 tiers)
     const tierRes = await pgQuery(`
-      WITH subscribers AS (
-        SELECT
-          appstle_id,
-          customer_id,
-          status,
-          contract_amount,
-          created_at,
-          is_same_day_cancel,
-          COALESCE(
-            last_billing_date,
-            (CASE
-              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
-                THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
-              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
-                THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
-              ELSE NULL
-            END)
-          ) AS paid_billing_date
-        FROM nobl_air_subscribers
-      ), subscriber_rebills AS (
-        SELECT DISTINCT s.appstle_id
-        FROM subscribers s
-        JOIN shopify_orders_raw o ON o.brand = 'NOBL'
-          AND o.is_rebill
-          AND (
-            s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
-            OR s.customer_id = o.customer_id
-          )
-        WHERE o.created_at > s.created_at
-      )
       SELECT
         ROUND(contract_amount)::int AS tier,
         COUNT(*)::int AS total,
-        COUNT(*) FILTER (WHERE status = 'active')::int    AS active,
-        COUNT(*) FILTER (WHERE status = 'cancelled')::int AS cancelled,
-        COUNT(*) FILTER (WHERE status = 'paused')::int    AS paused,
-        COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'UTC')::date <= ($1::date - INTERVAL '14 days')::date)::int AS mature,
-        COUNT(*) FILTER (WHERE (created_at AT TIME ZONE 'UTC')::date <= ($1::date - INTERVAL '14 days')::date AND (paid_billing_date > created_at OR rb.appstle_id IS NOT NULL))::int AS converted
-      FROM subscribers s
-      LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'active')::int AS active,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'cancelled')::int AS cancelled,
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'paused')::int AS paused
+      FROM nobl_air_subscribers
       WHERE ROUND(contract_amount) IN (49, 79, 89, 99, 109, 119, 129, 139, 149, 159)
-      GROUP BY tier ORDER BY tier`, [end]);
-
-    // TTP is a mature cohort metric. Do not restrict it to the selected MTD
-    // range, because recent subscribers are still inside the 14-day trial window.
-    const ttpRes = await pgQuery(`
-      WITH subscribers AS (
-        SELECT
-          appstle_id,
-          customer_id,
-          created_at,
-          is_same_day_cancel,
-          COALESCE(
-            last_billing_date,
-            (CASE
-              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
-                THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
-              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
-                THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
-              ELSE NULL
-            END)
-          ) AS paid_billing_date
-        FROM nobl_air_subscribers
-      ), subscriber_rebills AS (
-        SELECT DISTINCT s.appstle_id
-        FROM subscribers s
-        JOIN shopify_orders_raw o ON o.brand = 'NOBL'
-          AND o.is_rebill
-          AND (
-            s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
-            OR s.customer_id = o.customer_id
-          )
-        WHERE o.created_at > s.created_at
-      )
-      SELECT
-        (SELECT COUNT(*)::int
-         FROM subscribers
-         WHERE (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date)         AS total_in_range,
-        COUNT(*) FILTER (WHERE (s.created_at AT TIME ZONE 'UTC')::date <= ($2::date - INTERVAL '14 days')::date)::int AS mature,
-        COUNT(*) FILTER (WHERE (s.created_at AT TIME ZONE 'UTC')::date <= ($2::date - INTERVAL '14 days')::date AND (s.paid_billing_date > s.created_at OR rb.appstle_id IS NOT NULL))::int AS converted,
-        (SELECT COUNT(*)::int
-         FROM subscribers
-         WHERE (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
-            AND is_same_day_cancel)                                     AS same_day_cancels
-      FROM subscribers s
-      LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id`, [start, end]);
-
-    // New subs per day (created_at)
-    const dailyRes = await pgQuery(`
-      WITH subscribers AS (
-        SELECT
-          appstle_id,
-          customer_id,
-          created_at,
-          is_same_day_cancel,
-          COALESCE(
-            last_billing_date,
-            (CASE
-              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'object'
-                THEN (raw_json->'lastSuccessfulOrder'->>'orderDate')::timestamptz
-              WHEN jsonb_typeof(raw_json->'lastSuccessfulOrder') = 'string'
-                THEN ((raw_json->>'lastSuccessfulOrder')::jsonb->>'orderDate')::timestamptz
-              ELSE NULL
-            END)
-          ) AS paid_billing_date
-        FROM nobl_air_subscribers
-      ), subscriber_rebills AS (
-        SELECT DISTINCT s.appstle_id
-        FROM subscribers s
-        JOIN shopify_orders_raw o ON o.brand = 'NOBL'
-          AND o.is_rebill
-          AND (
-            s.customer_id = REPLACE(o.customer_id, 'gid://shopify/Customer/', '')
-            OR s.customer_id = o.customer_id
-          )
-        WHERE o.created_at > s.created_at
-      )
-      SELECT
-        TO_CHAR((s.created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
-        COUNT(*)::int                                                  AS new_subs,
-        COUNT(*) FILTER (WHERE (s.created_at AT TIME ZONE 'UTC')::date <= ($2::date - INTERVAL '14 days')::date AND (s.paid_billing_date > s.created_at OR rb.appstle_id IS NOT NULL))::int AS converted,
-        COUNT(*) FILTER (WHERE is_same_day_cancel)::int                AS same_day_cancels
-      FROM subscribers s
-      LEFT JOIN subscriber_rebills rb ON rb.appstle_id = s.appstle_id
-      WHERE (s.created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
-      GROUP BY (s.created_at AT TIME ZONE 'UTC')::date ORDER BY (s.created_at AT TIME ZONE 'UTC')::date`, [start, end]);
+      GROUP BY tier ORDER BY tier`);
 
     // Estimated MRR — sum of contract_amount for active subs (assumes monthly billing)
     const mrrRes = await pgQuery(`
       SELECT
         COALESCE(SUM(contract_amount), 0)::numeric(14,2) AS active_arr,
-        COUNT(*) FILTER (WHERE status = 'active')::int     AS active_count
+        COUNT(*) FILTER (WHERE LOWER(TRIM(status)) = 'active')::int AS active_count
       FROM nobl_air_subscribers
-      WHERE status = 'active'`);
-
-    const ttp = ttpRes.rows[0] || {};
-    const ttpRate = ttp.mature > 0 ? Number((ttp.converted / ttp.mature).toFixed(4)) : null;
+      WHERE LOWER(TRIM(status)) = 'active'`);
 
     res.json({
-      status:         statusRes.rows,
-      tiers:          tierRes.rows,
-      ttp_cohort: {
-        total_in_range:    ttp.total_in_range || 0,
-        mature:            ttp.mature || 0,
-        converted:         ttp.converted || 0,
-        same_day_cancels:  ttp.same_day_cancels || 0,
-        ttp_rate:          ttpRate,
-      },
-      daily:          dailyRes.rows.map(r => ({
-        date:             r.date instanceof Date ? r.date.toISOString().slice(0, 10) : String(r.date).slice(0,10),
-        new_subs:         r.new_subs,
-        converted:        r.converted,
-        same_day_cancels: r.same_day_cancels,
-      })),
-      active_arr:     Number(mrrRes.rows[0]?.active_arr || 0),
-      active_count:   mrrRes.rows[0]?.active_count || 0,
+      status:       statusRes.rows,
+      tiers:        tierRes.rows,
+      active_arr:   Number(mrrRes.rows[0]?.active_arr || 0),
+      active_count: mrrRes.rows[0]?.active_count || 0,
     });
   } catch (e) {
     console.error('[Analytics /nobl/air-subscribers]', e.message);
