@@ -25,25 +25,12 @@ const CHANNEL_COLORS = {
 
 const BRANDS = ['Both', 'NOBL', 'FLO'];
 
-function SortTh({ label, field, sortBy, sortDir, onSort }) {
-  return (
-    <th onClick={() => onSort(field)} style={{ cursor: 'pointer', padding: '8px 12px', textAlign: 'right',
-      fontSize: 11, fontWeight: 600, color: sortBy === field ? 'var(--accent)' : 'var(--text3)', whiteSpace: 'nowrap', userSelect: 'none' }}>
-      {label} {sortBy === field ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-    </th>
-  );
-}
-
 export default function ChannelsPage({ showToast }) {
   const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
   const [brandFilter, setBrandFilter] = useState('Both');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [sortBy, setSortBy] = useState('date');
-  const [sortDir, setSortDir] = useState('desc');
-  const [search, setSearch] = useState('');
-
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
@@ -55,11 +42,6 @@ export default function ChannelsPage({ showToast }) {
   }, [range, brandFilter]);
 
   useEffect(() => { load(); }, [load]);
-
-  function handleSort(field) {
-    if (sortBy === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortBy(field); setSortDir('desc'); }
-  }
 
   // Aggregate KPIs by channel
   const channelAgg = {};
@@ -88,26 +70,12 @@ export default function ChannelsPage({ showToast }) {
   const chartData = Object.values(dateMap).sort((a,b) => String(a.date).localeCompare(String(b.date)));
   const channels = [...new Set(rows.map(r => r.channel))];
 
-  // Filter + sort table
-  const filtered = rows.filter(r => {
-    if (!search) return true;
-    return String(r.channel).toLowerCase().includes(search.toLowerCase()) ||
-           String(r.brand || '').toLowerCase().includes(search.toLowerCase()) ||
-           String(r.date).includes(search);
-  });
-  const sorted = [...filtered].sort((a, b) => {
-    const va = a[sortBy]; const vb = b[sortBy];
-    if (va == null) return 1; if (vb == null) return -1;
-    if (typeof va === 'string') return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-    return sortDir === 'asc' ? va - vb : vb - va;
-  });
-
   const totSpend = channelKpis.reduce((s,r) => s + r.total_spend, 0);
   const totRev = channelKpis.reduce((s,r) => s + r.total_revenue, 0);
 
   // Prepare rows for SheetTable
   const CH_HEADERS = [L.date, 'Brand', 'Channel', L.spend, L.revenue, L.roas, 'Ad spend (7 days)', L.newOrders, L.cac];
-  const sheetRows = sorted.map(r => ({
+  const sheetRows = rows.map(r => ({
     [L.date]:       r.date,
     'Brand':      r.brand,
     'Channel':    r.channel,

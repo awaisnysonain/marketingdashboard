@@ -58,10 +58,6 @@ export default function SubsPage({ showToast }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState('activated_on');
-  const [sortDir, setSortDir] = useState('desc');
-
   function toggleBrand(b) {
     setBrands(prev => {
       const has = prev.includes(b);

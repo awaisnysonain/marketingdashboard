@@ -2181,6 +2181,30 @@ function buildPagination(page, pageSize, totalRows) {
   return { page, page_size: pageSize, total_rows: totalRows, total_pages: totalPages };
 }
 
+function parseTableSearch(req) {
+  const q = String(req.query.search || req.query.q || '').trim();
+  return q.length ? `%${q}%` : null;
+}
+
+/** ILIKE filter on grouped Meta / Air ad name columns (applied outside GROUP BY). */
+function buildAdGroupSearchFilter(pattern, paramIndex, { includeBrand = true } = {}) {
+  if (!pattern) return { clause: '', params: [] };
+  const p = `$${paramIndex}`;
+  const parts = [
+    `COALESCE(grouped.campaign_name, '') ILIKE ${p}`,
+    `COALESCE(grouped.adset_name, '') ILIKE ${p}`,
+    `COALESCE(grouped.ad_name, '') ILIKE ${p}`,
+    `COALESCE(grouped.campaign_id::text, '') ILIKE ${p}`,
+    `COALESCE(grouped.adset_id::text, '') ILIKE ${p}`,
+    `COALESCE(grouped.ad_id::text, '') ILIKE ${p}`,
+  ];
+  if (includeBrand) parts.push(`COALESCE(grouped.brand, '') ILIKE ${p}`);
+  return {
+    clause: ` WHERE (${parts.join(' OR ')})`,
+    params: [pattern],
+  };
+}
+
 // GET /meta/ads — saved TW ad performance, grouped by campaign/adset/ad
 router.get('/meta/ads', async (req, res) => {
   const { start, end } = getDefaultDates(req);
@@ -2189,6 +2213,7 @@ router.get('/meta/ads', async (req, res) => {
   const { page, pageSize, offset } = parseTablePagination(req);
   const sortBy = String(req.query.sortBy || '').trim();
   const sortDir = (String(req.query.dir || 'desc').toLowerCase() === 'asc') ? 'asc' : 'desc';
+  const searchPattern = parseTableSearch(req);
 
   const groupFields = {
     campaign: ['brand', 'campaign_id', 'campaign_name'],
@@ -2213,6 +2238,7 @@ router.get('/meta/ads', async (req, res) => {
     `, [brand, start, end]);
     const totalsRow = totalsRes.rows[0] || {};
 
+    const searchFilter = buildAdGroupSearchFilter(searchPattern, 4);
     const countRes = await pgQuery(`
       SELECT COUNT(*)::int AS n FROM (
         SELECT 1
@@ -2221,7 +2247,8 @@ router.get('/meta/ads', async (req, res) => {
         GROUP BY ${groupFields.join(', ')}
         HAVING ${groupHaving}
       ) grouped
-    `, [brand, start, end]);
+      ${searchFilter.clause}
+    `, [brand, start, end, ...searchFilter.params]);
     const totalRows = Number(countRes.rows[0]?.n || 0);
 
     const metricsSelect = `
@@ -2239,16 +2266,21 @@ router.get('/meta/ads', async (req, res) => {
         CASE WHEN SUM(clicks) > 0 THEN SUM(spend) / SUM(clicks) ELSE NULL END AS cpc,
         CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm`;
 
+    const pageSearch = buildAdGroupSearchFilter(searchPattern, 6);
     const [r, chartRes] = await Promise.all([
       pgQuery(`
-      SELECT ${groupFields.join(', ')}, ${metricsSelect}
-      FROM tw_ads_daily
-      WHERE ${metaWhere}
-      GROUP BY ${groupFields.join(', ')}
-      HAVING ${groupHaving}
-      ORDER BY spend DESC
+      SELECT grouped.*
+      FROM (
+        SELECT ${groupFields.join(', ')}, ${metricsSelect}
+        FROM tw_ads_daily
+        WHERE ${metaWhere}
+        GROUP BY ${groupFields.join(', ')}
+        HAVING ${groupHaving}
+      ) grouped
+      ${pageSearch.clause}
+      ORDER BY grouped.spend DESC
       LIMIT $4 OFFSET $5
-    `, [brand, start, end, pageSize, offset]),
+    `, [brand, start, end, pageSize, offset, ...pageSearch.params]),
       pgQuery(`
       SELECT ${groupFields.join(', ')}, ${metricsSelect}
       FROM tw_ads_daily
@@ -2291,6 +2323,7 @@ router.get('/meta/ads', async (req, res) => {
       chart_rows: fmtRows(chartRes.rows),
       totals,
       pagination: buildPagination(page, pageSize, totalRows),
+      search: searchPattern ? String(req.query.search || req.query.q || '').trim() : '',
       level,
       brand,
       start,
@@ -2363,8 +2396,10 @@ function buildAirAttributionTotals(row = {}) {
   return totals;
 }
 
-async function queryMetaAirAttributionGrouped(start, end, groupCols, limit, offset) {
+async function queryMetaAirAttributionGrouped(start, end, groupCols, limit, offset, searchPattern = null) {
   const params = [start, end];
+  const search = buildAdGroupSearchFilter(searchPattern, params.length + 1, { includeBrand: false });
+  params.push(...search.params);
   let limitSql = '';
   if (limit != null) {
     params.push(limit);
@@ -2375,18 +2410,25 @@ async function queryMetaAirAttributionGrouped(start, end, groupCols, limit, offs
     }
   }
   return pgQuery(`
-    SELECT ${groupCols}, ${AIR_ATTR_GROUP_METRICS}
-    FROM nobl_air_meta_ad_daily
-    WHERE brand = 'NOBL'
-      AND date BETWEEN $1::date AND $2::date
-    GROUP BY ${groupCols}
-    HAVING ${AIR_ATTR_CACHE_HAVING}
-    ORDER BY SUM(attributed_air_orders) DESC, SUM(attributed_air_revenue) DESC
+    SELECT grouped.*
+    FROM (
+      SELECT ${groupCols}, ${AIR_ATTR_GROUP_METRICS}
+      FROM nobl_air_meta_ad_daily
+      WHERE brand = 'NOBL'
+        AND date BETWEEN $1::date AND $2::date
+      GROUP BY ${groupCols}
+      HAVING ${AIR_ATTR_CACHE_HAVING}
+    ) grouped
+    ${search.clause}
+    ORDER BY grouped.attributed_air_orders DESC, grouped.attributed_air_revenue DESC
     ${limitSql}
   `, params);
 }
 
-async function queryMetaAirAttributionGroupedCount(start, end, groupCols) {
+async function queryMetaAirAttributionGroupedCount(start, end, groupCols, searchPattern = null) {
+  const params = [start, end];
+  const search = buildAdGroupSearchFilter(searchPattern, params.length + 1, { includeBrand: false });
+  params.push(...search.params);
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
       SELECT 1
@@ -2396,7 +2438,8 @@ async function queryMetaAirAttributionGroupedCount(start, end, groupCols) {
       GROUP BY ${groupCols}
       HAVING ${AIR_ATTR_CACHE_HAVING}
     ) grouped
-  `, [start, end]);
+    ${search.clause}
+  `, params);
   return Number(res.rows[0]?.n || 0);
 }
 
@@ -2420,8 +2463,10 @@ async function queryMetaAirAttributionTotalsDaily(start, end) {
   return buildAirAttributionTotals(res.rows[0] || {});
 }
 
-async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offset) {
+async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offset, searchPattern = null) {
   const params = [start, end];
+  const search = buildAdGroupSearchFilter(searchPattern, params.length + 1);
+  params.push(...search.params);
   let limitSql = '';
   if (limit != null) {
     params.push(limit);
@@ -2432,32 +2477,39 @@ async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offs
     }
   }
   return pgQuery(`
-    SELECT
-      ${groupCols},
-      SUM(spend)::numeric(14,2) AS spend,
-      SUM(revenue)::numeric(14,2) AS day_1_revenue,
-      SUM(purchases)::numeric(14,2) AS total_attributed_orders,
-      CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
-      0::int AS air_orders,
-      0::numeric(14,2) AS attributed_air_orders,
-      0::numeric(14,2) AS attributed_air_revenue,
-      0::numeric(14,2) AS ttp_mature_air_orders,
-      0::numeric(14,2) AS ttp_paid_air_orders,
-      0::int AS ttp_mature_subscribers,
-      0::int AS ttp_paid_subscribers
-    FROM tw_ads_daily
-    WHERE brand = 'NOBL'
-      AND platform = 'META'
-      AND date BETWEEN $1::date AND $2::date
-      AND COALESCE(ad_id, '') <> ''
-    GROUP BY ${groupCols}
-    HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
-    ORDER BY SUM(spend) DESC
+    SELECT grouped.*
+    FROM (
+      SELECT
+        ${groupCols},
+        SUM(spend)::numeric(14,2) AS spend,
+        SUM(revenue)::numeric(14,2) AS day_1_revenue,
+        SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+        CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
+        0::int AS air_orders,
+        0::numeric(14,2) AS attributed_air_orders,
+        0::numeric(14,2) AS attributed_air_revenue,
+        0::numeric(14,2) AS ttp_mature_air_orders,
+        0::numeric(14,2) AS ttp_paid_air_orders,
+        0::int AS ttp_mature_subscribers,
+        0::int AS ttp_paid_subscribers
+      FROM tw_ads_daily
+      WHERE brand = 'NOBL'
+        AND platform = 'META'
+        AND date BETWEEN $1::date AND $2::date
+        AND COALESCE(ad_id, '') <> ''
+      GROUP BY ${groupCols}
+      HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
+    ) grouped
+    ${search.clause}
+    ORDER BY grouped.spend DESC
     ${limitSql}
   `, params);
 }
 
-async function queryMetaAirAttributionAdsOnlyCount(start, end, groupCols) {
+async function queryMetaAirAttributionAdsOnlyCount(start, end, groupCols, searchPattern = null) {
+  const params = [start, end];
+  const search = buildAdGroupSearchFilter(searchPattern, params.length + 1);
+  params.push(...search.params);
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
       SELECT 1
@@ -2469,7 +2521,8 @@ async function queryMetaAirAttributionAdsOnlyCount(start, end, groupCols) {
       GROUP BY ${groupCols}
       HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
     ) grouped
-  `, [start, end]);
+    ${search.clause}
+  `, params);
   return Number(res.rows[0]?.n || 0);
 }
 
@@ -2495,13 +2548,13 @@ async function queryMetaAirAttributionAdsOnlyTotals(start, end) {
   return buildAirAttributionTotals(res.rows[0] || {});
 }
 
-async function fetchAirAttributionPage(dataSource, start, end, groupCols, pageSize, offset) {
+async function fetchAirAttributionPage(dataSource, start, end, groupCols, pageSize, offset, searchPattern = null) {
   if (dataSource === 'cache') {
-    const r = await queryMetaAirAttributionGrouped(start, end, groupCols, pageSize, offset);
+    const r = await queryMetaAirAttributionGrouped(start, end, groupCols, pageSize, offset, searchPattern);
     return fmtRows(mapAirAttributionRates(r.rows));
   }
   if (dataSource === 'meta_ads_only') {
-    const r = await queryMetaAirAttributionAdsOnly(start, end, groupCols, pageSize, offset);
+    const r = await queryMetaAirAttributionAdsOnly(start, end, groupCols, pageSize, offset, searchPattern);
     return fmtRows(mapAirAttributionRates(r.rows));
   }
   return [];
@@ -2512,6 +2565,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'ad';
   const { page, pageSize, offset } = parseTablePagination(req);
+  const searchPattern = parseTableSearch(req);
   const allowLive = ['1', 'true', 'yes'].includes(String(req.query.live || '').toLowerCase());
 
   const groupFields = {
@@ -2766,10 +2820,31 @@ router.get('/nobl/air-attribution', async (req, res) => {
     });
 
     let rows = [];
+    let tableTotalRows = meta.total_rows || 0;
     if (meta.data_source === 'live' && meta.live_rows) {
-      rows = meta.live_rows.slice(offset, offset + pageSize);
+      let liveRows = meta.live_rows;
+      if (searchPattern) {
+        const needle = searchPattern.replace(/%/g, '').toLowerCase();
+        liveRows = liveRows.filter((r) => (
+          String(r.campaign_name || '').toLowerCase().includes(needle)
+          || String(r.adset_name || '').toLowerCase().includes(needle)
+          || String(r.ad_name || '').toLowerCase().includes(needle)
+          || String(r.campaign_id || '').toLowerCase().includes(needle)
+          || String(r.adset_id || '').toLowerCase().includes(needle)
+          || String(r.ad_id || '').toLowerCase().includes(needle)
+        ));
+      }
+      tableTotalRows = liveRows.length;
+      rows = liveRows.slice(offset, offset + pageSize);
     } else if (meta.data_source !== 'empty') {
-      rows = await fetchAirAttributionPage(meta.data_source, start, end, groupCols, pageSize, offset);
+      if (searchPattern) {
+        if (meta.data_source === 'cache') {
+          tableTotalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols, searchPattern);
+        } else if (meta.data_source === 'meta_ads_only') {
+          tableTotalRows = await queryMetaAirAttributionAdsOnlyCount(start, end, groupCols, searchPattern);
+        }
+      }
+      rows = await fetchAirAttributionPage(meta.data_source, start, end, groupCols, pageSize, offset, searchPattern);
     }
 
     res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
@@ -2777,7 +2852,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
       rows,
       chart_rows: meta.chart_rows || [],
       totals: meta.totals || {},
-      pagination: buildPagination(page, pageSize, meta.total_rows || 0),
+      pagination: buildPagination(page, pageSize, tableTotalRows),
       level,
       start,
       end,

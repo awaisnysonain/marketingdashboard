@@ -24,6 +24,8 @@ import {
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
+import ServerPaginatedSheetTable from '../components/ServerPaginatedSheetTable';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import TablePagination from '../components/TablePagination';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
@@ -386,6 +388,8 @@ export default function NoblAirPerformancePage() {
   const [subData, setSubData] = useState(null);
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: null });
   const [airAttrPage, setAirAttrPage] = useState(1);
+  const [airAttrSearch, setAirAttrSearch] = useState('');
+  const debouncedAirAttrSearch = useDebouncedValue(airAttrSearch, 350);
   const [airAttrLoading, setAirAttrLoading] = useState(false);
   const [airAttrTableLoading, setAirAttrTableLoading] = useState(false);
   const [forecastLoading, setForecastLoading] = useState(false);
@@ -425,7 +429,7 @@ export default function NoblAirPerformancePage() {
     else setAirAttrTableLoading(true);
     try {
       await getNoblAirDataVersion();
-      const attr = await getNoblAirAttribution(range.start, range.end, 'ad', pageNum, TABLE_PAGE_SIZE);
+      const attr = await getNoblAirAttribution(range.start, range.end, 'ad', pageNum, TABLE_PAGE_SIZE, debouncedAirAttrSearch);
       applyAirAttr(attr, pageNum);
     } catch (e) {
       applyAirAttr({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message }, pageNum);
@@ -433,7 +437,13 @@ export default function NoblAirPerformancePage() {
       setAirAttrLoading(false);
       setAirAttrTableLoading(false);
     }
-  }, [range, regionScoped, applyAirAttr]);
+  }, [range, regionScoped, applyAirAttr, debouncedAirAttrSearch]);
+
+  useEffect(() => {
+    if (regionScoped || activeTab !== 'performance') return;
+    setAirAttrPage(1);
+    loadAirAttrPage(1, { full: true });
+  }, [debouncedAirAttrSearch, regionScoped, activeTab, loadAirAttrPage]);
 
   const loadSecondary = useCallback(async (background = false) => {
     if (regionScoped) {
@@ -453,7 +463,7 @@ export default function NoblAirPerformancePage() {
       await getNoblAirDataVersion();
       const [subs, attr] = await Promise.all([
         cachedSubs ? Promise.resolve(cachedSubs) : getNoblAirSubscribers(range.start, range.end).catch(() => null),
-        getNoblAirAttribution(range.start, range.end, 'ad', 1, TABLE_PAGE_SIZE).catch((e) => ({
+        getNoblAirAttribution(range.start, range.end, 'ad', 1, TABLE_PAGE_SIZE, debouncedAirAttrSearch).catch((e) => ({
           rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message,
         })),
       ]);
@@ -463,7 +473,7 @@ export default function NoblAirPerformancePage() {
     } finally {
       setAirAttrLoading(false);
     }
-  }, [range, regionScoped, applyAirAttr]);
+  }, [range, regionScoped, applyAirAttr, debouncedAirAttrSearch]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -890,23 +900,19 @@ export default function NoblAirPerformancePage() {
                   </ComposedChart>
                 </ResponsiveContainer>
 
-                <div style={{ border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' }}>
-                  <PaginatedSheetTable
-                    headers={AIR_ATTR_HEADERS}
-                    rows={airAttrRows}
-                    keyField="_ad"
-                    showPagination={false}
-                    defaultSortField={L.attributedAirOrders}
-                    defaultSortDir="desc"
-                  />
-                  <TablePagination
-                    page={airAttrPage}
-                    pageSize={TABLE_PAGE_SIZE}
-                    totalRows={airAttrTotalRows}
-                    onPageChange={(p) => loadAirAttrPage(p)}
-                    loading={airAttrTableLoading}
-                  />
-                </div>
+                <ServerPaginatedSheetTable
+                  headers={AIR_ATTR_HEADERS}
+                  rows={airAttrRows}
+                  keyField="_ad"
+                  page={airAttrPage}
+                  totalRows={airAttrTotalRows}
+                  onPageChange={(p) => loadAirAttrPage(p)}
+                  search={airAttrSearch}
+                  onSearchChange={(v) => { setAirAttrSearch(v); setAirAttrPage(1); }}
+                  loading={airAttrTableLoading}
+                  defaultSortField={L.attributedAirOrders}
+                  defaultSortDir="desc"
+                />
               </>
             )}
           </Card>

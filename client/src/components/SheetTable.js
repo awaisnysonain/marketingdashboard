@@ -67,16 +67,23 @@ export default function SheetTable({
   maxHeight = '480px',
   scrollable = true,
   searchable = true,
+  hideRowCount = false,
   defaultSortField = null,
   defaultSortDir = 'desc',
+  sortBy: controlledSortBy = null,
+  sortDir: controlledSortDir = null,
+  onSort: controlledOnSort = null,
   onRowClick = null,       // (row) => void — optional row click handler
   stickyFirstCol = false,  // freeze first column
   compact = false,
 }) {
   // ── search & sort
   const [search, setSearch] = useState('');
-  const [sortBy, setSortBy] = useState(defaultSortField || null);
-  const [sortDir, setSortDir] = useState(defaultSortDir);
+  const [internalSortBy, setInternalSortBy] = useState(defaultSortField || null);
+  const [internalSortDir, setInternalSortDir] = useState(defaultSortDir);
+  const sortControlled = controlledOnSort != null;
+  const sortBy = sortControlled ? controlledSortBy : internalSortBy;
+  const sortDir = sortControlled ? (controlledSortDir || 'desc') : internalSortDir;
 
   // ── cell selection state
   const [sel, setSel] = useState(new Set());        // Set of "r:c" keys
@@ -114,27 +121,33 @@ export default function SheetTable({
     };
   }, []);
 
-  // ── filter
-  const filtered = search
+  // ── filter (skipped when parent pre-filters, e.g. PaginatedSheetTable)
+  const filtered = searchable && search
     ? rows.filter(row => headers.some(h => String(row[h] ?? '').toLowerCase().includes(search.toLowerCase())))
     : rows;
 
-  // ── sort
-  const sorted = sortBy
-    ? [...filtered].sort((a, b) => {
-        const va = a[sortBy], vb = b[sortBy];
-        if (va == null) return 1; if (vb == null) return -1;
-        const textColumn = ['brand', 'campaign', 'ad set', 'ad'].includes(String(sortBy).toLowerCase()) || /(^|\s)id($|\s)/.test(String(sortBy).toLowerCase());
-        const na = typeof va === 'number' ? va : Number(String(va).trim());
-        const nb = typeof vb === 'number' ? vb : Number(String(vb).trim());
-        if (!textColumn && Number.isFinite(na) && Number.isFinite(nb)) return sortDir === 'asc' ? na - nb : nb - na;
-        return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
-      })
-    : filtered;
+  // ── sort (skipped when parent pre-sorts)
+  const sorted = sortControlled
+    ? filtered
+    : sortBy
+      ? [...filtered].sort((a, b) => {
+          const va = a[sortBy], vb = b[sortBy];
+          if (va == null) return 1; if (vb == null) return -1;
+          const textColumn = ['brand', 'campaign', 'ad set', 'ad'].includes(String(sortBy).toLowerCase()) || /(^|\s)id($|\s)/.test(String(sortBy).toLowerCase());
+          const na = typeof va === 'number' ? va : Number(String(va).trim());
+          const nb = typeof vb === 'number' ? vb : Number(String(vb).trim());
+          if (!textColumn && Number.isFinite(na) && Number.isFinite(nb)) return sortDir === 'asc' ? na - nb : nb - na;
+          return sortDir === 'asc' ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+        })
+      : filtered;
 
   function handleSort(h) {
-    if (sortBy === h) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortBy(h); setSortDir('asc'); }
+    if (sortControlled) {
+      controlledOnSort(h);
+      return;
+    }
+    if (sortBy === h) setInternalSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setInternalSortBy(h); setInternalSortDir('asc'); }
   }
 
   // ── selection helpers
@@ -332,9 +345,11 @@ export default function SheetTable({
         )}
 
         {/* row count */}
-        <span style={{ fontSize: 11, color: 'var(--text4)', marginLeft: searchable ? 'auto' : 0 }}>
-          {sorted.length.toLocaleString()} row{sorted.length !== 1 ? 's' : ''}
-        </span>
+        {!hideRowCount && (
+          <span style={{ fontSize: 11, color: 'var(--text4)', marginLeft: searchable ? 'auto' : 0 }}>
+            {sorted.length.toLocaleString()} row{sorted.length !== 1 ? 's' : ''}
+          </span>
+        )}
 
         {/* selection summary */}
         {sel.size > 0 && (

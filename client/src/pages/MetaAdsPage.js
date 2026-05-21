@@ -2,10 +2,10 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Line, ComposedChart } from 'recharts';
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
-import PaginatedSheetTable from '../components/PaginatedSheetTable';
-import TablePagination from '../components/TablePagination';
+import ServerPaginatedSheetTable from '../components/ServerPaginatedSheetTable';
 import { getMetaAds, fmt$, fmtNum, fmtPct } from '../utils/api';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 
@@ -55,6 +55,8 @@ export default function MetaAdsPage() {
   const [brand, setBrand] = useState('ALL');
   const [brandOpen, setBrandOpen] = useState(false);
   const [page, setPage] = useState(1);
+  const [tableSearch, setTableSearch] = useState('');
+  const debouncedSearch = useDebouncedValue(tableSearch, 350);
   const [loading, setLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -68,7 +70,7 @@ export default function MetaAdsPage() {
       setTableLoading(true);
     }
     try {
-      const res = await getMetaAds(range.start, range.end, level, brand, targetPage, TABLE_PAGE_SIZE);
+      const res = await getMetaAds(range.start, range.end, level, brand, targetPage, TABLE_PAGE_SIZE, debouncedSearch);
       setData({
         rows: res.rows || [],
         totals: res.totals || {},
@@ -82,12 +84,12 @@ export default function MetaAdsPage() {
       setLoading(false);
       setTableLoading(false);
     }
-  }, [range, level, brand]);
+  }, [range, level, brand, debouncedSearch]);
 
   useEffect(() => {
     setPage(1);
     load(1, { full: true });
-  }, [range, level, brand, load]);
+  }, [range, level, brand, debouncedSearch, load]);
 
   const handlePageChange = (nextPage) => {
     if (nextPage === page) return;
@@ -144,24 +146,20 @@ export default function MetaAdsPage() {
             </ResponsiveContainer>
           </div>
 
-          <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, overflow:'hidden' }}>
-            <div style={{ fontSize:14, fontWeight:700, padding:'20px 20px 14px' }}>Meta Ads Detail</div>
-            <PaginatedSheetTable
-              headers={HEADERS}
-              rows={tableRows}
-              keyField="_key"
-              showPagination={false}
-              defaultSortField={L.spend}
-              defaultSortDir="desc"
-            />
-            <TablePagination
-              page={page}
-              pageSize={TABLE_PAGE_SIZE}
-              totalRows={totalRows}
-              onPageChange={handlePageChange}
-              loading={tableLoading}
-            />
-          </div>
+          <ServerPaginatedSheetTable
+            title="Meta Ads Detail"
+            headers={HEADERS}
+            rows={tableRows}
+            keyField="_key"
+            page={page}
+            totalRows={totalRows}
+            onPageChange={handlePageChange}
+            search={tableSearch}
+            onSearchChange={(v) => { setTableSearch(v); setPage(1); }}
+            loading={tableLoading}
+            defaultSortField={L.spend}
+            defaultSortDir="desc"
+          />
         </>
       )}
     </div>
