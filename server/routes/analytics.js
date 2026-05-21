@@ -2329,7 +2329,7 @@ router.get('/meta/ads', async (req, res) => {
     });
     const countRes = await pgQuery(`
       SELECT COUNT(*)::int AS n FROM (
-        SELECT 1
+        SELECT ${groupFields.join(', ')}
         FROM tw_ads_daily
         WHERE ${metaWhere}
         GROUP BY ${groupFields.join(', ')}
@@ -2537,7 +2537,7 @@ async function queryMetaAirAttributionGroupedCount(start, end, groupCols, search
   params.push(...search.params);
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
-      SELECT 1
+      SELECT ${groupCols}
       FROM nobl_air_meta_ad_daily
       WHERE brand = 'NOBL'
         AND date BETWEEN $1::date AND $2::date
@@ -2630,7 +2630,7 @@ async function queryMetaAirAttributionAdsOnlyCount(start, end, groupCols, search
   params.push(...search.params);
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
-      SELECT 1
+      SELECT ${groupCols}
       FROM tw_ads_daily
       WHERE brand = 'NOBL'
         AND platform = 'META'
