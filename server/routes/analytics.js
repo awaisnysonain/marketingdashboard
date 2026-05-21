@@ -2305,6 +2305,20 @@ router.get('/meta/ads', async (req, res) => {
 
   const metaWhere = `($1 = 'ALL' OR brand = $1) AND platform = 'META' AND date BETWEEN $2::date AND $3::date`;
   const groupHaving = 'SUM(spend) > 0 OR SUM(purchases) > 0';
+  const metricsSelect = `
+        SUM(spend)::numeric(14,2) AS spend,
+        SUM(revenue)::numeric(14,2) AS revenue,
+        SUM(purchases)::int AS purchases,
+        SUM(impressions)::bigint AS impressions,
+        SUM(clicks)::bigint AS clicks,
+        SUM(link_clicks)::bigint AS link_clicks,
+        SUM(add_to_cart)::bigint AS add_to_cart,
+        SUM(initiate_checkout)::bigint AS initiate_checkout,
+        CASE WHEN SUM(spend) > 0 THEN SUM(revenue) / SUM(spend) ELSE NULL END AS roas,
+        CASE WHEN SUM(purchases) > 0 THEN SUM(spend) / SUM(purchases) ELSE NULL END AS cac,
+        CASE WHEN SUM(impressions) > 0 THEN SUM(clicks)::numeric / SUM(impressions) ELSE NULL END AS ctr,
+        CASE WHEN SUM(clicks) > 0 THEN SUM(spend) / SUM(clicks) ELSE NULL END AS cpc,
+        CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm`;
 
   try {
     const totalsRes = await pgQuery(`
@@ -2329,7 +2343,7 @@ router.get('/meta/ads', async (req, res) => {
     });
     const countRes = await pgQuery(`
       SELECT COUNT(*)::int AS n FROM (
-        SELECT ${groupFields.join(', ')}
+        SELECT ${groupFields.join(', ')}, ${metricsSelect}
         FROM tw_ads_daily
         WHERE ${metaWhere}
         GROUP BY ${groupFields.join(', ')}
@@ -2338,21 +2352,6 @@ router.get('/meta/ads', async (req, res) => {
       ${searchFilter.clause}
     `, [brand, start, end, ...searchFilter.params]);
     const totalRows = Number(countRes.rows[0]?.n || 0);
-
-    const metricsSelect = `
-        SUM(spend)::numeric(14,2) AS spend,
-        SUM(revenue)::numeric(14,2) AS revenue,
-        SUM(purchases)::int AS purchases,
-        SUM(impressions)::bigint AS impressions,
-        SUM(clicks)::bigint AS clicks,
-        SUM(link_clicks)::bigint AS link_clicks,
-        SUM(add_to_cart)::bigint AS add_to_cart,
-        SUM(initiate_checkout)::bigint AS initiate_checkout,
-        CASE WHEN SUM(spend) > 0 THEN SUM(revenue) / SUM(spend) ELSE NULL END AS roas,
-        CASE WHEN SUM(purchases) > 0 THEN SUM(spend) / SUM(purchases) ELSE NULL END AS cac,
-        CASE WHEN SUM(impressions) > 0 THEN SUM(clicks)::numeric / SUM(impressions) ELSE NULL END AS ctr,
-        CASE WHEN SUM(clicks) > 0 THEN SUM(spend) / SUM(clicks) ELSE NULL END AS cpc,
-        CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm`;
 
     const pageSearch = buildGroupedTableSearchFilter(searchPattern, 6, {
       groupCols: groupFields.join(', '),
@@ -2444,6 +2443,19 @@ const AIR_ATTR_GROUP_METRICS = `
 
 const AIR_ATTR_CACHE_HAVING = 'SUM(spend) > 0 OR SUM(air_orders) > 0 OR SUM(attributed_air_orders) > 0';
 const AIR_ATTR_ADS_ONLY_HAVING = 'SUM(spend) > 0 OR SUM(purchases) > 0';
+
+const AIR_ATTR_ADS_ONLY_METRICS = `
+      SUM(spend)::numeric(14,2) AS spend,
+      SUM(revenue)::numeric(14,2) AS day_1_revenue,
+      SUM(purchases)::numeric(14,2) AS total_attributed_orders,
+      CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
+      0::int AS air_orders,
+      0::numeric(14,2) AS attributed_air_orders,
+      0::numeric(14,2) AS attributed_air_revenue,
+      0::numeric(14,2) AS ttp_mature_air_orders,
+      0::numeric(14,2) AS ttp_paid_air_orders,
+      0::int AS ttp_mature_subscribers,
+      0::int AS ttp_paid_subscribers`;
 
 function mapAirAttributionRates(rows) {
   return rows.map((row) => {
@@ -2537,7 +2549,7 @@ async function queryMetaAirAttributionGroupedCount(start, end, groupCols, search
   params.push(...search.params);
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
-      SELECT ${groupCols}
+      SELECT ${groupCols}, ${AIR_ATTR_GROUP_METRICS}
       FROM nobl_air_meta_ad_daily
       WHERE brand = 'NOBL'
         AND date BETWEEN $1::date AND $2::date
@@ -2593,17 +2605,7 @@ async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offs
     FROM (
       SELECT
         ${groupCols},
-        SUM(spend)::numeric(14,2) AS spend,
-        SUM(revenue)::numeric(14,2) AS day_1_revenue,
-        SUM(purchases)::numeric(14,2) AS total_attributed_orders,
-        CASE WHEN SUM(purchases) > 0 THEN ROUND(SUM(revenue) / SUM(purchases), 2) ELSE NULL END AS aov,
-        0::int AS air_orders,
-        0::numeric(14,2) AS attributed_air_orders,
-        0::numeric(14,2) AS attributed_air_revenue,
-        0::numeric(14,2) AS ttp_mature_air_orders,
-        0::numeric(14,2) AS ttp_paid_air_orders,
-        0::int AS ttp_mature_subscribers,
-        0::int AS ttp_paid_subscribers
+        ${AIR_ATTR_ADS_ONLY_METRICS}
       FROM tw_ads_daily
       WHERE brand = 'NOBL'
         AND platform = 'META'
@@ -2630,7 +2632,7 @@ async function queryMetaAirAttributionAdsOnlyCount(start, end, groupCols, search
   params.push(...search.params);
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
-      SELECT ${groupCols}
+      SELECT ${groupCols}, ${AIR_ATTR_ADS_ONLY_METRICS}
       FROM tw_ads_daily
       WHERE brand = 'NOBL'
         AND platform = 'META'

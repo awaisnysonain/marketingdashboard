@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Line, ComposedChart } from 'recharts';
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
@@ -65,7 +65,7 @@ export default function MetaAdsPage() {
   const [error, setError] = useState(null);
   const [data, setData] = useState({ rows: [], totals: {}, pagination: {}, chart_rows: [] });
 
-  const load = useCallback(async (targetPage = 1, opts = { full: true }) => {
+  const load = useCallback(async (targetPage = 1, opts = { full: false }) => {
     if (opts.full) {
       setLoading(true);
       setError(null);
@@ -84,17 +84,30 @@ export default function MetaAdsPage() {
       });
       setPage(targetPage);
     } catch (e) {
-      setError(e.message || 'Failed to load Meta ads');
+      if (opts.full) setError(e.message || 'Failed to load Meta ads');
     } finally {
       setLoading(false);
       setTableLoading(false);
     }
   }, [range, level, brand, debouncedSearch, debouncedSearchColumn]);
 
+  const loadRef = useRef(load);
+  loadRef.current = load;
+  const filterMounted = useRef(false);
+
   useEffect(() => {
     setPage(1);
-    load(1, { full: true });
-  }, [range, level, brand, debouncedSearch, debouncedSearchColumn, load]);
+    loadRef.current(1, { full: true });
+  }, [range.start, range.end]);
+
+  useEffect(() => {
+    if (!filterMounted.current) {
+      filterMounted.current = true;
+      return;
+    }
+    setPage(1);
+    loadRef.current(1, { full: false });
+  }, [level, brand, debouncedSearch, debouncedSearchColumn]);
 
   const handlePageChange = (nextPage) => {
     if (nextPage === page) return;
@@ -109,6 +122,13 @@ export default function MetaAdsPage() {
   const t = data.totals || {};
   const pagination = data.pagination || {};
   const totalRows = pagination.total_rows ?? 0;
+  const hasContent = Boolean(
+    (data.rows || []).length
+    || (data.chart_rows || []).length
+    || Number(t.spend || 0) > 0
+    || totalRows > 0,
+  );
+  const showPageSkeleton = loading && !hasContent;
 
   return (
     <div>
@@ -121,10 +141,15 @@ export default function MetaAdsPage() {
         </div>
       </div>
 
-      {loading ? <div style={{ height:260, borderRadius:12, background:'var(--bg2)', animation:'pulse 1.5s ease-in-out infinite' }} /> : error ? (
+      {showPageSkeleton ? <div style={{ height:260, borderRadius:12, background:'var(--bg2)', animation:'pulse 1.5s ease-in-out infinite' }} /> : error ? (
         <div style={{ color:'var(--danger)', fontSize:13 }}>Failed to load Meta Ads: {error}</div>
       ) : (
         <>
+          <div style={{
+            opacity: loading ? 0.55 : 1,
+            transition: 'opacity .15s',
+            pointerEvents: loading ? 'none' : 'auto',
+          }}>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
             <KpiCard label={L.spend} value={fmt$(t.spend || 0)} tooltip={TIP.spend} />
             <KpiCard label={L.revenue} value={fmt$(t.revenue || 0)} tooltip={TIP.revenue} />
@@ -150,6 +175,7 @@ export default function MetaAdsPage() {
               </ComposedChart>
             </ResponsiveContainer>
           </div>
+          </div>
 
           <ServerPaginatedSheetTable
             title="Meta Ads Detail"
@@ -163,7 +189,7 @@ export default function MetaAdsPage() {
             onSearchChange={(v) => { setTableSearch(v); setPage(1); }}
             searchColumn={tableSearchColumn}
             onSearchColumnChange={(col) => { setTableSearchColumn(col); setPage(1); }}
-            loading={tableLoading}
+            loading={tableLoading || loading}
             defaultSortField={L.spend}
             defaultSortDir="desc"
           />

@@ -46,6 +46,7 @@ export default function DateRangePicker({ start, end, onChange }) {
           const isActive = activeLabel === btn.label;
           return (
             <button
+              type="button"
               key={btn.label}
               onClick={() => handleQuick(btn)}
               style={{
