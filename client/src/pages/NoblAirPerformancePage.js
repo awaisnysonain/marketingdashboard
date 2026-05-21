@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import {
   AreaChart, Area, ComposedChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   LineChart,
@@ -26,6 +26,7 @@ import KpiCard from '../components/KpiCard';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import ServerPaginatedSheetTable from '../components/ServerPaginatedSheetTable';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
 import TablePagination from '../components/TablePagination';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
@@ -389,7 +390,9 @@ export default function NoblAirPerformancePage() {
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: null });
   const [airAttrPage, setAirAttrPage] = useState(1);
   const [airAttrSearch, setAirAttrSearch] = useState('');
+  const [airAttrSearchColumn, setAirAttrSearchColumn] = useState(SEARCH_ALL_COLUMNS);
   const debouncedAirAttrSearch = useDebouncedValue(airAttrSearch, 350);
+  const debouncedAirAttrSearchColumn = useDebouncedValue(airAttrSearchColumn, 0);
   const [airAttrLoading, setAirAttrLoading] = useState(false);
   const [airAttrTableLoading, setAirAttrTableLoading] = useState(false);
   const [forecastLoading, setForecastLoading] = useState(false);
@@ -429,7 +432,9 @@ export default function NoblAirPerformancePage() {
     else setAirAttrTableLoading(true);
     try {
       await getNoblAirDataVersion();
-      const attr = await getNoblAirAttribution(range.start, range.end, 'ad', pageNum, TABLE_PAGE_SIZE, debouncedAirAttrSearch);
+      const attr = await getNoblAirAttribution(
+        range.start, range.end, 'ad', pageNum, TABLE_PAGE_SIZE, debouncedAirAttrSearch, debouncedAirAttrSearchColumn,
+      );
       applyAirAttr(attr, pageNum);
     } catch (e) {
       applyAirAttr({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message }, pageNum);
@@ -437,13 +442,17 @@ export default function NoblAirPerformancePage() {
       setAirAttrLoading(false);
       setAirAttrTableLoading(false);
     }
-  }, [range, regionScoped, applyAirAttr, debouncedAirAttrSearch]);
+  }, [range, regionScoped, applyAirAttr, debouncedAirAttrSearch, debouncedAirAttrSearchColumn]);
 
+  const prevAirAttrFilter = useRef({ q: debouncedAirAttrSearch, col: debouncedAirAttrSearchColumn });
   useEffect(() => {
     if (regionScoped || activeTab !== 'performance') return;
+    const prev = prevAirAttrFilter.current;
+    if (prev.q === debouncedAirAttrSearch && prev.col === debouncedAirAttrSearchColumn) return;
+    prevAirAttrFilter.current = { q: debouncedAirAttrSearch, col: debouncedAirAttrSearchColumn };
     setAirAttrPage(1);
-    loadAirAttrPage(1, { full: true });
-  }, [debouncedAirAttrSearch, regionScoped, activeTab, loadAirAttrPage]);
+    loadAirAttrPage(1, { full: false });
+  }, [debouncedAirAttrSearch, debouncedAirAttrSearchColumn, regionScoped, activeTab, loadAirAttrPage]);
 
   const loadSecondary = useCallback(async (background = false) => {
     if (regionScoped) {
@@ -463,7 +472,7 @@ export default function NoblAirPerformancePage() {
       await getNoblAirDataVersion();
       const [subs, attr] = await Promise.all([
         cachedSubs ? Promise.resolve(cachedSubs) : getNoblAirSubscribers(range.start, range.end).catch(() => null),
-        getNoblAirAttribution(range.start, range.end, 'ad', 1, TABLE_PAGE_SIZE, debouncedAirAttrSearch).catch((e) => ({
+        getNoblAirAttribution(range.start, range.end, 'ad', 1, TABLE_PAGE_SIZE, debouncedAirAttrSearch, debouncedAirAttrSearchColumn).catch((e) => ({
           rows: [], totals: {}, pagination: {}, chart_rows: [], error: e.message,
         })),
       ]);
@@ -473,7 +482,7 @@ export default function NoblAirPerformancePage() {
     } finally {
       setAirAttrLoading(false);
     }
-  }, [range, regionScoped, applyAirAttr, debouncedAirAttrSearch]);
+  }, [range, regionScoped, applyAirAttr, debouncedAirAttrSearch, debouncedAirAttrSearchColumn]);
 
   const load = useCallback(async () => {
     setError(null);
@@ -909,6 +918,8 @@ export default function NoblAirPerformancePage() {
                   onPageChange={(p) => loadAirAttrPage(p)}
                   search={airAttrSearch}
                   onSearchChange={(v) => { setAirAttrSearch(v); setAirAttrPage(1); }}
+                  searchColumn={airAttrSearchColumn}
+                  onSearchColumnChange={(col) => { setAirAttrSearchColumn(col); setAirAttrPage(1); }}
                   loading={airAttrTableLoading}
                   defaultSortField={L.attributedAirOrders}
                   defaultSortDir="desc"

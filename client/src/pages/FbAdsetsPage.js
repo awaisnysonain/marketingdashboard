@@ -1,6 +1,9 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
 import TablePagination from '../components/TablePagination';
+import TableFilterBar from '../components/TableFilterBar';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
+import { filterTableRows } from '../utils/tableFilterSort';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L, plainHeader } from '../copy/plainLanguage';
@@ -16,6 +19,7 @@ export default function FbAdsetsPage(){
   const [sortCol,setSortCol]=useState('Orders');
   const [sortDir,setSortDir]=useState(-1);
   const [search,setSearch]=useState('');
+  const [searchColumn,setSearchColumn]=useState(SEARCH_ALL_COLUMNS);
   const [campaign,setCampaign]=useState('All');
   const [page,setPage]=useState(1);
 
@@ -29,9 +33,10 @@ export default function FbAdsetsPage(){
   const totalRow=rows.find(r=>String(r['Adset Name']||'').toUpperCase().includes('TOTAL'));
   const dataRows=rows.filter(r=>!String(r['Adset Name']||'').toUpperCase().includes('TOTAL')&&r['Adset Name']);
 
+  const COLS=['Adset Name','Campaign Name','Orders','Air Orders','Attach Rate','New Subs','Sub TTP%','Order Revenue'];
   const campaigns=['All',...new Set(dataRows.map(r=>String(r['Campaign Name']||'')).filter(Boolean))];
   const byCampaign=campaign==='All'?dataRows:dataRows.filter(r=>String(r['Campaign Name']||'')===campaign);
-  const filtered=byCampaign.filter(r=>!search||String(r['Adset Name']||'').toLowerCase().includes(search.toLowerCase())||String(r['Campaign Name']||'').toLowerCase().includes(search.toLowerCase()));
+  const filtered=filterTableRows(byCampaign, COLS, search, searchColumn);
   const sorted=[...filtered].sort((a,b)=>((+b[sortCol]||0)-(+a[sortCol]||0))*sortDir);
   const totalPages=Math.max(1,Math.ceil(sorted.length/TABLE_PAGE_SIZE));
   const safePage=Math.min(page,totalPages);
@@ -58,8 +63,6 @@ export default function FbAdsetsPage(){
     if(sortCol===col) setSortDir(d=>-d);
     else{setSortCol(col);setSortDir(-1);}
   }
-
-  const COLS=['Adset Name','Campaign Name','Orders','Air Orders','Attach Rate','New Subs','Sub TTP%','Order Revenue'];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
@@ -113,8 +116,13 @@ export default function FbAdsetsPage(){
 
       <Section title={`All Adsets (${dataRows.length})`}>
         <div style={{display:'flex',gap:10,marginBottom:10,flexWrap:'wrap',alignItems:'center'}}>
-          <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search adsets…"
-            style={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'7px 14px',color:'var(--text)',fontSize:13,width:220,outline:'none'}}/>
+          <TableFilterBar
+            headers={COLS}
+            searchColumn={searchColumn}
+            onSearchColumnChange={(col)=>{setSearchColumn(col);setPage(1);}}
+            search={search}
+            onSearchChange={(v)=>{setSearch(v);setPage(1);}}
+          />
           <select value={campaign} onChange={e=>{setCampaign(e.target.value);setPage(1);}}
             style={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'7px 12px',color:'var(--text)',fontSize:12,outline:'none',maxWidth:260}}>
             {campaigns.map(c=><option key={c} value={c}>{c==='All'?'All Campaigns':c.slice(0,40)}</option>)}

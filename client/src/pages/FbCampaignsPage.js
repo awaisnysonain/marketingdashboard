@@ -1,6 +1,9 @@
 import React,{useState,useEffect} from 'react';
 import {getTab,fmtPct,fmtNum,fmt$} from '../utils/api';
 import TablePagination from '../components/TablePagination';
+import TableFilterBar from '../components/TableFilterBar';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
+import { filterTableRows } from '../utils/tableFilterSort';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
 import { L, plainHeader } from '../copy/plainLanguage';
@@ -16,6 +19,7 @@ export default function FbCampaignsPage(){
   const [sortCol,setSortCol]=useState('Orders');
   const [sortDir,setSortDir]=useState(-1);
   const [search,setSearch]=useState('');
+  const [searchColumn,setSearchColumn]=useState(SEARCH_ALL_COLUMNS);
   const [page,setPage]=useState(1);
 
   useEffect(()=>{
@@ -25,10 +29,11 @@ export default function FbCampaignsPage(){
   if(loading) return <Loader/>;
   if(!rows.length) return <Empty/>;
 
+  const COLS=['Campaign Name','Orders','Air Orders','Attach Rate','New Subs','Sub TTP%','Order Revenue','Adsets','Unique Ads'];
   const totalRow=rows.find(r=>String(r['Campaign Name']||'').toUpperCase().includes('TOTAL'));
   const dataRows=rows.filter(r=>!String(r['Campaign Name']||'').toUpperCase().includes('TOTAL'));
 
-  const filtered=dataRows.filter(r=>!search||String(r['Campaign Name']||'').toLowerCase().includes(search.toLowerCase()));
+  const filtered=filterTableRows(dataRows, COLS, search, searchColumn);
   const sorted=[...filtered].sort((a,b)=>sortDir*((+b[sortCol]||0)-(+a[sortCol]||0)));
   const totalPages=Math.max(1,Math.ceil(sorted.length/TABLE_PAGE_SIZE));
   const safePage=Math.min(page,totalPages);
@@ -57,8 +62,6 @@ export default function FbCampaignsPage(){
     if(sortCol===col) setSortDir(d=>-d);
     else{setSortCol(col);setSortDir(-1);}
   }
-
-  const COLS=['Campaign Name','Orders','Air Orders','Attach Rate','New Subs','Sub TTP%','Order Revenue','Adsets','Unique Ads'];
 
   return(
     <div style={{display:'flex',flexDirection:'column',gap:28}}>
@@ -114,8 +117,13 @@ export default function FbCampaignsPage(){
 
       <Section title={`All Campaigns (${dataRows.length})`}>
         <div style={{marginBottom:10}}>
-          <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1);}} placeholder="Search campaigns…"
-            style={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'8px 14px',color:'var(--text)',fontSize:13,width:280,outline:'none'}}/>
+          <TableFilterBar
+            headers={COLS}
+            searchColumn={searchColumn}
+            onSearchColumnChange={(col)=>{setSearchColumn(col);setPage(1);}}
+            search={search}
+            onSearchChange={(v)=>{setSearch(v);setPage(1);}}
+          />
         </div>
         <div style={{background:'var(--bg3)',border:'1px solid var(--border)',borderRadius:14,overflow:'hidden'}}>
           <div style={{overflowX:'auto'}}>

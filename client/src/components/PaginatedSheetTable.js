@@ -1,9 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import SheetTable from './SheetTable';
 import TablePagination from './TablePagination';
-import TableSearchBar from './TableSearchBar';
+import TableFilterBar from './TableFilterBar';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
 import { filterTableRows, sortTableRows } from '../utils/tableFilterSort';
 
 /**
@@ -23,24 +24,29 @@ export default function PaginatedSheetTable({
   ...sheetProps
 }) {
   const [search, setSearch] = useState('');
+  const [searchColumn, setSearchColumn] = useState(SEARCH_ALL_COLUMNS);
   const [sortBy, setSortBy] = useState(defaultSortField || null);
   const [sortDir, setSortDir] = useState(defaultSortDir);
 
   const filtered = useMemo(
-    () => filterTableRows(rows, headers, search),
-    [rows, headers, search],
+    () => filterTableRows(rows, headers, search, searchColumn),
+    [rows, headers, search, searchColumn],
   );
   const sorted = useMemo(
     () => sortTableRows(filtered, sortBy, sortDir),
     [filtered, sortBy, sortDir],
   );
 
-  const paginationReset = resetDeps ?? [rows, search, sortBy, sortDir];
+  const paginationReset = resetDeps ?? [rows, search, searchColumn, sortBy, sortDir];
   const { page, setPage, pageItems, totalRows, pageSize: ps } = useClientPagination(
     sorted,
     pageSize,
     paginationReset,
   );
+
+  function resetFilters() {
+    setPage(1);
+  }
 
   function handleSort(field) {
     if (sortBy === field) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -63,11 +69,17 @@ export default function PaginatedSheetTable({
             padding: '10px 12px 0',
           }}
         >
-          <TableSearchBar
-            value={search}
-            onChange={(v) => {
+          <TableFilterBar
+            headers={headers}
+            searchColumn={searchColumn}
+            onSearchColumnChange={(col) => {
+              setSearchColumn(col);
+              resetFilters();
+            }}
+            search={search}
+            onSearchChange={(v) => {
               setSearch(v);
-              setPage(1);
+              resetFilters();
             }}
             placeholder={searchPlaceholder}
           />

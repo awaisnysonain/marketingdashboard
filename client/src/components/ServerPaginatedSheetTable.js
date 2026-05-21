@@ -1,12 +1,12 @@
 import React from 'react';
 import SheetTable from './SheetTable';
 import TablePagination from './TablePagination';
-import TableSearchBar from './TableSearchBar';
+import TableFilterBar from './TableFilterBar';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
 
 /**
- * Sheet table backed by server pagination. Search is sent to the API by the parent;
- * this component only renders the search input and current page rows.
+ * Sheet table backed by server pagination. Parent sends search + column to the API.
  */
 export default function ServerPaginatedSheetTable({
   headers = [],
@@ -18,6 +18,8 @@ export default function ServerPaginatedSheetTable({
   onPageChange,
   search = '',
   onSearchChange,
+  searchColumn = SEARCH_ALL_COLUMNS,
+  onSearchColumnChange,
   loading = false,
   title,
   defaultSortField = null,
@@ -38,10 +40,12 @@ export default function ServerPaginatedSheetTable({
           padding: title ? '14px 20px 0' : '14px 20px 0',
         }}
       >
-        <TableSearchBar
-          value={search}
-          onChange={onSearchChange}
-          placeholder="Search campaigns, ad sets, ads…"
+        <TableFilterBar
+          headers={headers}
+          searchColumn={searchColumn}
+          onSearchColumnChange={onSearchColumnChange}
+          search={search}
+          onSearchChange={onSearchChange}
         />
         <span style={{ fontSize: 11, color: 'var(--text4)', marginLeft: 'auto' }}>
           {Number(totalRows).toLocaleString()} row{totalRows !== 1 ? 's' : ''}

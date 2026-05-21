@@ -43,15 +43,6 @@ function isZeroDay(r) {
   );
 }
 
-function SortTh({ label, field, sortBy, sortDir, onSort }) {
-  return (
-    <th onClick={() => onSort(field)} style={{ cursor: 'pointer', padding: '8px 12px', textAlign: 'right',
-      fontSize: 11, fontWeight: 600, color: sortBy === field ? 'var(--accent)' : 'var(--text3)', whiteSpace: 'nowrap', userSelect: 'none' }}>
-      {label} {sortBy === field ? (sortDir === 'asc' ? '▲' : '▼') : ''}
-    </th>
-  );
-}
-
 export default function SubsPage({ showToast }) {
   const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
   const [brands, setBrands] = useState(['NOBL']);
@@ -81,11 +72,6 @@ export default function SubsPage({ showToast }) {
   }, [range, brandParam]);
 
   useEffect(() => { load(); }, [load]);
-
-  function handleSort(field) {
-    if (sortBy === field) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
-    else { setSortBy(field); setSortDir('desc'); }
-  }
 
   const rawDaily = data?.daily || [];
   // Drop trailing zero-only rows (today's pending data before cron runs)

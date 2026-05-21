@@ -224,16 +224,26 @@ export const getNoblAirMetaAdsets = async (start, end, limit = 50) => {
   if (!res.ok) throw new Error(data?.error || `Request failed (${res.status})`);
   return data;
 };
-export const getMetaAds = (start, end, level = 'adset', brand = 'NOBL', page = 1, pageSize = 20, search = '') => {
+export const getMetaAds = (
+  start, end, level = 'adset', brand = 'NOBL', page = 1, pageSize = 20, search = '', searchColumn = '',
+) => {
   const q = search ? `&search=${encodeURIComponent(search)}` : '';
-  return fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${encodeURIComponent(brand)}&page=${page}&page_size=${pageSize}${q}`).then(r => {
+  const col = searchColumn && searchColumn !== '__all__'
+    ? `&search_column=${encodeURIComponent(searchColumn)}`
+    : '';
+  return fetch(`${B}/api/analytics/meta/ads?start=${start}&end=${end}&level=${level}&brand=${encodeURIComponent(brand)}&page=${page}&page_size=${pageSize}${q}${col}`).then(r => {
     if (!r.ok) throw new Error(r.status);
     return r.json();
   });
 };
-export const getNoblAirAttribution = (start, end, level = 'ad', page = 1, pageSize = 20, search = '') => {
+export const getNoblAirAttribution = (
+  start, end, level = 'ad', page = 1, pageSize = 20, search = '', searchColumn = '',
+) => {
   const q = search ? `&search=${encodeURIComponent(search)}` : '';
-  return fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}&page=${page}&page_size=${pageSize}${q}`).then((r) => {
+  const col = searchColumn && searchColumn !== '__all__'
+    ? `&search_column=${encodeURIComponent(searchColumn)}`
+    : '';
+  return fetch(`${B}/api/analytics/nobl/air-attribution?start=${start}&end=${end}&level=${level}&page=${page}&page_size=${pageSize}${q}${col}`).then((r) => {
     if (!r.ok) throw new Error(r.status);
     return r.json();
   });

@@ -2,6 +2,9 @@ import React,{useState,useEffect,useMemo,useCallback} from 'react';
 import {getTab,fmt$,fmtPct,fmtNum,fmtDate} from '../utils/api';
 import AiInsights from '../components/AiInsights';
 import SelectionBar from '../components/SelectionBar';
+import TableFilterBar from '../components/TableFilterBar';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
+import { filterTableRows } from '../utils/tableFilterSort';
 import {
   AreaChart,Area,BarChart,Bar,LineChart,Line,
   XAxis,YAxis,CartesianGrid,Tooltip,Legend,
@@ -128,6 +131,7 @@ export default function GenericSheetPage({tabName}){
   const [rawData,setRawData]=useState(null);
   const [loading,setLoading]=useState(true);
   const [search,setSearch]=useState('');
+  const [searchColumn,setSearchColumn]=useState(SEARCH_ALL_COLUMNS);
   const [page,setPage]=useState(0);
   const [selCols,setSelCols]=useState(null);
   const [selectedRows,setSelectedRows]=useState([]);
@@ -135,7 +139,7 @@ export default function GenericSheetPage({tabName}){
 
   useEffect(()=>{
     setLoading(true);
-    setSearch(''); setPage(0); setSelCols(null); setSelectedRows([]);
+    setSearch(''); setSearchColumn(SEARCH_ALL_COLUMNS); setPage(0); setSelCols(null); setSelectedRows([]);
     getTab(tabName).then(d=>setRawData(d)).catch(()=>setRawData(null)).finally(()=>setLoading(false));
   },[tabName]);
 
@@ -184,9 +188,7 @@ export default function GenericSheetPage({tabName}){
   if(!rawData||!rawData.rows?.length) return <Empty tabName={tabName}/>;
 
   // ── Plain JS (no hooks allowed below) ────────────────────────────
-  const filtered=search
-    ? dataRows.filter(r=>Object.values(r).some(v=>String(v||'').toLowerCase().includes(search.toLowerCase())))
-    : dataRows;
+  const filtered=search ? filterTableRows(dataRows, vis, search, searchColumn) : dataRows;
   const totalPages=Math.ceil(filtered.length/PER_PAGE);
   const pageRows=filtered.slice(page*PER_PAGE,(page+1)*PER_PAGE);
 
@@ -207,11 +209,13 @@ export default function GenericSheetPage({tabName}){
             <span style={{fontSize:10,fontWeight:600,padding:'2px 7px',borderRadius:20,background:'var(--accent-dim)',color:'var(--accent)',textTransform:'uppercase',letterSpacing:'.6px'}}>{shapeLabel}</span>
           </div>
         </div>
-        <input value={search} onChange={e=>{setSearch(e.target.value);setPage(0);}}
-          placeholder="Search all columns…"
-          style={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,padding:'8px 14px',color:'var(--text)',fontSize:13,width:240,outline:'none',transition:'border .15s'}}
-          onFocus={e=>e.target.style.borderColor='var(--accent)'}
-          onBlur={e=>e.target.style.borderColor='var(--border2)'}/>
+        <TableFilterBar
+          headers={vis}
+          searchColumn={searchColumn}
+          onSearchColumnChange={(col)=>{setSearchColumn(col);setPage(0);}}
+          search={search}
+          onSearchChange={(v)=>{setSearch(v);setPage(0);}}
+        />
       </div>
 
       {/* ── AI Insights ──────────────────────────────────────────── */}

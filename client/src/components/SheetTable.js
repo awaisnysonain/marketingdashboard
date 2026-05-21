@@ -15,6 +15,9 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { fmt$, fmtCell } from '../utils/api';
 import { COLUMN_TIP } from '../copy/plainLanguage';
+import TableFilterBar from './TableFilterBar';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
+import { filterTableRows } from '../utils/tableFilterSort';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function fmtVal(v, header) {
@@ -79,6 +82,7 @@ export default function SheetTable({
 }) {
   // ── search & sort
   const [search, setSearch] = useState('');
+  const [searchColumn, setSearchColumn] = useState(SEARCH_ALL_COLUMNS);
   const [internalSortBy, setInternalSortBy] = useState(defaultSortField || null);
   const [internalSortDir, setInternalSortDir] = useState(defaultSortDir);
   const sortControlled = controlledOnSort != null;
@@ -123,7 +127,7 @@ export default function SheetTable({
 
   // ── filter (skipped when parent pre-filters, e.g. PaginatedSheetTable)
   const filtered = searchable && search
-    ? rows.filter(row => headers.some(h => String(row[h] ?? '').toLowerCase().includes(search.toLowerCase())))
+    ? filterTableRows(rows, headers, search, searchColumn)
     : rows;
 
   // ── sort (skipped when parent pre-sorts)
@@ -317,31 +321,13 @@ export default function SheetTable({
       {/* ── toolbar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
         {searchable && (
-          <div style={{ position: 'relative' }}>
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Filter rows…"
-              style={{
-                padding: '5px 8px 5px 26px', width: 200,
-                background: 'var(--bg3)', border: '1px solid var(--border2)',
-                borderRadius: 6, color: 'var(--text)',
-                fontSize: 12, outline: 'none', fontFamily: 'var(--font-body)',
-              }}
-              onFocus={e => (e.target.style.borderColor = 'var(--accent)')}
-              onBlur={e => (e.target.style.borderColor = 'var(--border2)')}
-            />
-            <svg style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', opacity: .4, pointerEvents: 'none' }}
-              width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-            {search && (
-              <button onClick={() => setSearch('')}
-                style={{ position:'absolute', right:5, top:'50%', transform:'translateY(-50%)', background:'none', border:'none', color:'var(--text3)', cursor:'pointer', fontSize:14, padding:0, lineHeight:1 }}>
-                ×
-              </button>
-            )}
-          </div>
+          <TableFilterBar
+            headers={headers}
+            searchColumn={searchColumn}
+            onSearchColumnChange={setSearchColumn}
+            search={search}
+            onSearchChange={setSearch}
+          />
         )}
 
         {/* row count */}

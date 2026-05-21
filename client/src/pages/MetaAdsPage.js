@@ -6,6 +6,7 @@ import ServerPaginatedSheetTable from '../components/ServerPaginatedSheetTable';
 import { getMetaAds, fmt$, fmtNum, fmtPct } from '../utils/api';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 
@@ -56,7 +57,9 @@ export default function MetaAdsPage() {
   const [brandOpen, setBrandOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [tableSearch, setTableSearch] = useState('');
+  const [tableSearchColumn, setTableSearchColumn] = useState(SEARCH_ALL_COLUMNS);
   const debouncedSearch = useDebouncedValue(tableSearch, 350);
+  const debouncedSearchColumn = useDebouncedValue(tableSearchColumn, 0);
   const [loading, setLoading] = useState(true);
   const [tableLoading, setTableLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -70,7 +73,9 @@ export default function MetaAdsPage() {
       setTableLoading(true);
     }
     try {
-      const res = await getMetaAds(range.start, range.end, level, brand, targetPage, TABLE_PAGE_SIZE, debouncedSearch);
+      const res = await getMetaAds(
+        range.start, range.end, level, brand, targetPage, TABLE_PAGE_SIZE, debouncedSearch, debouncedSearchColumn,
+      );
       setData({
         rows: res.rows || [],
         totals: res.totals || {},
@@ -84,12 +89,12 @@ export default function MetaAdsPage() {
       setLoading(false);
       setTableLoading(false);
     }
-  }, [range, level, brand, debouncedSearch]);
+  }, [range, level, brand, debouncedSearch, debouncedSearchColumn]);
 
   useEffect(() => {
     setPage(1);
     load(1, { full: true });
-  }, [range, level, brand, debouncedSearch, load]);
+  }, [range, level, brand, debouncedSearch, debouncedSearchColumn, load]);
 
   const handlePageChange = (nextPage) => {
     if (nextPage === page) return;
@@ -156,6 +161,8 @@ export default function MetaAdsPage() {
             onPageChange={handlePageChange}
             search={tableSearch}
             onSearchChange={(v) => { setTableSearch(v); setPage(1); }}
+            searchColumn={tableSearchColumn}
+            onSearchColumnChange={(col) => { setTableSearchColumn(col); setPage(1); }}
             loading={tableLoading}
             defaultSortField={L.spend}
             defaultSortDir="desc"

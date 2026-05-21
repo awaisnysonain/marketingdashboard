@@ -4,6 +4,9 @@ import { useClientPagination } from '../hooks/useClientPagination';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import AnnotationModal from './AnnotationModal';
 import TablePagination from './TablePagination';
+import TableFilterBar from './TableFilterBar';
+import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
+import { filterTableRows } from '../utils/tableFilterSort';
 
 const HL_BG = { yellow: 'var(--hl-yellow)', green: 'var(--hl-green)', red: 'var(--hl-red)', blue: 'var(--hl-blue)' };
 const HL_CYCLE = ['yellow', 'green', 'red', 'blue', null];
@@ -33,6 +36,7 @@ export default function DataTable({
   pageSize = TABLE_PAGE_SIZE,
 }) {
   const [search, setSearch]       = useState('');
+  const [searchColumn, setSearchColumn] = useState(SEARCH_ALL_COLUMNS);
   const [localRows, setLocalRows] = useState(rows);
   const [modal, setModal]         = useState(null);
   const [sortBy, setSortBy]       = useState(null);
@@ -84,7 +88,7 @@ export default function DataTable({
 
   // Filter
   const filtered = search
-    ? localRows.filter(r => Object.values(r).some(v => String(v ?? '').toLowerCase().includes(search.toLowerCase())))
+    ? filterTableRows(localRows, visibleHeaders, search, searchColumn)
     : localRows;
 
   // Sort
@@ -100,7 +104,7 @@ export default function DataTable({
 
   const {
     page, setPage, pageItems, totalRows, rowOffset,
-  } = useClientPagination(sorted, pageSize, [search, sortBy, sortDir, rows]);
+  } = useClientPagination(sorted, pageSize, [search, searchColumn, sortBy, sortDir, rows]);
   const displayRows = paginated ? pageItems : sorted;
 
   function handleSort(h) {
@@ -210,29 +214,13 @@ export default function DataTable({
       {/* Toolbar */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         {searchable && (
-          <div style={{ position: 'relative' }}>
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Filter rows..."
-              style={{
-                padding: '5px 8px 5px 26px', width: 200,
-                background: 'var(--bg3)', border: '1px solid var(--border2)',
-                borderRadius: 'var(--radius)', color: 'var(--text)',
-                fontSize: 12, outline: 'none', fontFamily: 'var(--font-body)',
-              }}
-              onFocus={e => e.target.style.borderColor = 'var(--accent)'}
-              onBlur={e => e.target.style.borderColor = 'var(--border2)'}
-            />
-            <svg style={{ position: 'absolute', left: 7, top: '50%', transform: 'translateY(-50%)', opacity: .4 }}
-              width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-            </svg>
-            {search && (
-              <button onClick={() => setSearch('')}
-                style={{ position: 'absolute', right: 5, top: '50%', transform: 'translateY(-50%)',
-                  background: 'none', border: 'none', color: 'var(--text3)', cursor: 'pointer', fontSize: 14 }}>×</button>
-            )}
-          </div>
+          <TableFilterBar
+            headers={visibleHeaders}
+            searchColumn={searchColumn}
+            onSearchColumnChange={(col) => { setSearchColumn(col); setPage(1); }}
+            search={search}
+            onSearchChange={(v) => { setSearch(v); setPage(1); }}
+          />
         )}
 
         <span style={{ fontSize: 11, color: 'var(--text4)', marginLeft: 'auto' }}>
