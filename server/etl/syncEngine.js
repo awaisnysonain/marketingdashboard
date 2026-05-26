@@ -7,6 +7,7 @@ const { syncShopifyOrders } = require('./shopifyOrders');
 const { syncAppstleContracts, syncFloAppstleContracts } = require('./appstleContracts');
 const { aggregateNoblAir, aggregateProductDaily } = require('./noblAirAggregate');
 const { refreshNoblAirMetaAdDaily } = require('./noblAirMetaAdDaily');
+const { syncMetaAds } = require('./metaAdsSync');
 const { invalidateNoblAirDataVersionCache } = require('../utils/noblAirDataVersion');
 const { clearResponseCache } = require('../utils/responseCache');
 // Use the new SQL-based TW ETL (matches Brad's queries — Triple Attribution + Amazon + EU)
@@ -287,6 +288,26 @@ async function runSync(options = {}) {
           errors.push(msg);
           await logFinish(logId, 'error', 0, e.message);
         }
+      }
+    }
+  }
+
+  // ── Meta Ads API — NOBL spend (primary; TW remains fallback at read time) ─
+  if (tasks.includes('meta_ads')) {
+    const chunks = weeklyChunks(startDate, endDate);
+    for (const chunk of chunks) {
+      const logId = await logStart(runId, 'NOBL', 'meta_ads', chunk.start, chunk.end);
+      try {
+        const r = await syncMetaAds('NOBL', chunk.start, chunk.end);
+        const status = r.skipped ? 'skipped' : 'success';
+        await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
+        results.push({ task: 'meta_ads', brand: 'NOBL', chunk, rows: r.rows, skipped: r.skipped });
+        if (r.errors.length) errors.push(...r.errors);
+      } catch (e) {
+        const msg = `meta_ads NOBL ${chunk.start}-${chunk.end}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
       }
     }
   }

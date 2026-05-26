@@ -1,0 +1,78 @@
+/**
+ * Backfill meta_ads_daily from Meta Marketing API, then refresh Air Meta cache.
+ *
+ * Usage:
+ *   node server/scripts/syncMetaAdsBackfill.js
+ *   node server/scripts/syncMetaAdsBackfill.js 2025-01-01 2026-05-26
+ */
+require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
+
+const { syncMetaAds } = require('../etl/metaAdsSync');
+const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
+const { invalidateNoblAirDataVersionCache } = require('../utils/noblAirDataVersion');
+const { clearResponseCache } = require('../utils/responseCache');
+
+function toISO(d) {
+  return d.toISOString().slice(0, 10);
+}
+
+function addDays(dateStr, n) {
+  const d = new Date(dateStr);
+  d.setDate(d.getDate() + n);
+  return toISO(d);
+}
+
+/** 3-day chunks to avoid Meta “reduce the amount of data” errors on large accounts. */
+function syncChunks(startDate, endDate) {
+  const chunks = [];
+  let cur = startDate;
+  while (cur <= endDate) {
+    const end = addDays(cur, 2) > endDate ? endDate : addDays(cur, 2);
+    chunks.push({ start: cur, end });
+    cur = addDays(end, 1);
+  }
+  return chunks;
+}
+
+async function main() {
+  const today = toISO(new Date());
+  const start = process.argv[2] || (() => {
+    const d = new Date();
+    d.setDate(1);
+    return toISO(d);
+  })();
+  const end = process.argv[3] || today;
+
+  console.log(`Meta ads backfill: ${start} → ${end}`);
+  const chunks = syncChunks(start, end);
+  let total = 0;
+  const errors = [];
+
+  for (const chunk of chunks) {
+    console.log(`  chunk ${chunk.start} .. ${chunk.end}`);
+    const r = await syncMetaAds('NOBL', chunk.start, chunk.end);
+    total += r.rows || 0;
+    if (r.errors?.length) errors.push(...r.errors);
+    if (r.skipped) {
+      console.error('Skipped:', r.errors?.[0] || 'no credentials');
+      process.exit(1);
+    }
+  }
+
+  console.log(`Meta upserted: ${total} row(s)`);
+  if (errors.length) {
+    console.warn('Errors:', errors.slice(0, 10).join('; '));
+  }
+
+  console.log('Refreshing nobl_air_meta_ad_daily cache…');
+  const agg = await refreshNoblAirMetaAdDaily(start, end);
+  console.log(`Cache rows: ${agg.rows}`);
+  invalidateNoblAirDataVersionCache();
+  clearResponseCache('nobl-air');
+  console.log('Done.');
+}
+
+main().catch((e) => {
+  console.error('FATAL:', e.message);
+  process.exit(1);
+});

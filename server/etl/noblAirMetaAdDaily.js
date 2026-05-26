@@ -3,6 +3,7 @@
  * Populated after tw_air_order_attribution sync (see syncEngine).
  */
 const { pgQuery, pgRun } = require('../db/postgres');
+const { metaAdsDailySourceSql } = require('./metaAdsSync');
 
 const DAILY_AGG_SQL = `
   WITH attr AS (
@@ -90,11 +91,8 @@ const DAILY_AGG_SQL = `
       SUM(spend)::numeric(14,2) AS spend,
       SUM(revenue)::numeric(14,2) AS day_1_revenue,
       SUM(purchases)::numeric(14,2) AS purchases
-    FROM tw_ads_daily
+    FROM ${metaAdsDailySourceSql('$1::date AND $2::date')} src
     WHERE brand = 'NOBL'
-      AND platform = 'META'
-      AND date BETWEEN $1::date AND $2::date
-      AND COALESCE(ad_id, '') <> ''
     GROUP BY date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name
   )
   SELECT

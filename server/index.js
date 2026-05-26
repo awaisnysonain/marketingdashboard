@@ -174,6 +174,33 @@ async function initPostgresTables() {
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_ads_meta_perf ON tw_ads_daily (brand, platform, date DESC)`);
 
     await pgRun(`
+      CREATE TABLE IF NOT EXISTS meta_ads_daily (
+        id BIGSERIAL PRIMARY KEY,
+        brand TEXT NOT NULL,
+        date DATE NOT NULL,
+        platform TEXT NOT NULL DEFAULT 'META',
+        campaign_id TEXT NOT NULL DEFAULT '',
+        campaign_name TEXT,
+        adset_id TEXT NOT NULL DEFAULT '',
+        adset_name TEXT,
+        ad_id TEXT NOT NULL,
+        ad_name TEXT,
+        impressions BIGINT DEFAULT 0,
+        clicks BIGINT DEFAULT 0,
+        spend NUMERIC(14,4) DEFAULT 0,
+        purchases INT DEFAULT 0,
+        revenue NUMERIC(14,4) DEFAULT 0,
+        link_clicks BIGINT DEFAULT 0,
+        add_to_cart BIGINT DEFAULT 0,
+        initiate_checkout BIGINT DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (brand, date, platform, ad_id)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_meta_ads_brand_date ON meta_ads_daily (brand, date DESC)`);
+
+    await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_air_order_attribution (
         id                 BIGSERIAL PRIMARY KEY,
         brand              TEXT        NOT NULL,
@@ -1320,6 +1347,7 @@ const ALL_DAILY_TASKS = [
   'klaviyo',
   'tw_refresh',          // brand-level summary (TW Summary API)
   'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
+  'meta_ads',            // Meta Marketing API — NOBL ad spend (TW fallback at read)
   'tw_ads',              // campaign/adset/ad performance from TW
   'tw_air_attribution',  // NOBL Air order-level attribution
   'shopify_orders',      // per-order detail + product line items (NOBL + FLO)

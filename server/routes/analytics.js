@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const { pgQuery } = require('../db/postgres');
 const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
+const { metaAdsDailySourceSql } = require('../etl/metaAdsSync');
 const { getNoblAirDataVersion } = require('../utils/noblAirDataVersion');
 const { withResponseCache } = require('../utils/responseCache');
 
@@ -2347,11 +2348,7 @@ function airAttrMergedGroupedSubquery(groupCols, groupFields) {
           SUM(spend)::numeric(14,2) AS spend,
           SUM(revenue)::numeric(14,2) AS day_1_revenue,
           SUM(purchases)::numeric(14,2) AS total_attributed_orders
-        FROM tw_ads_daily
-        WHERE brand = 'NOBL'
-          AND platform = 'META'
-          AND date BETWEEN $1::date AND $2::date
-          AND COALESCE(ad_id, '') <> ''
+        FROM ${metaAdsDailySourceSql('$1::date AND $2::date')} ads_src
         GROUP BY ${groupCols}
       ) ads
       FULL OUTER JOIN (
@@ -2429,7 +2426,8 @@ router.get('/meta/ads', async (req, res) => {
     ad: ['brand', 'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name'],
   }[level];
 
-  const metaWhere = `($1 = 'ALL' OR brand = $1) AND platform = 'META' AND date BETWEEN $2::date AND $3::date`;
+  const metaWhere = `($1 = 'ALL' OR brand = $1) AND date BETWEEN $2::date AND $3::date`;
+  const metaFrom = metaAdsDailySourceSql('$2::date AND $3::date');
   const groupHaving = 'SUM(spend) > 0 OR SUM(purchases) > 0';
   const metricsSelect = `
         SUM(spend)::numeric(14,2) AS spend,
@@ -2455,7 +2453,7 @@ router.get('/meta/ads', async (req, res) => {
         SUM(impressions)::bigint AS impressions,
         SUM(clicks)::bigint AS clicks,
         SUM(link_clicks)::bigint AS link_clicks
-      FROM tw_ads_daily
+      FROM ${metaFrom} src
       WHERE ${metaWhere}
     `, [brand, start, end]);
     const totalsRow = totalsRes.rows[0] || {};
@@ -2470,7 +2468,7 @@ router.get('/meta/ads', async (req, res) => {
     const countRes = await pgQuery(`
       SELECT COUNT(*)::int AS n FROM (
         SELECT ${groupFields.join(', ')}, ${metricsSelect}
-        FROM tw_ads_daily
+        FROM ${metaFrom} src
         WHERE ${metaWhere}
         GROUP BY ${groupFields.join(', ')}
         HAVING ${groupHaving}
@@ -2491,7 +2489,7 @@ router.get('/meta/ads', async (req, res) => {
       SELECT grouped.*
       FROM (
         SELECT ${groupFields.join(', ')}, ${metricsSelect}
-        FROM tw_ads_daily
+        FROM ${metaFrom} src
         WHERE ${metaWhere}
         GROUP BY ${groupFields.join(', ')}
         HAVING ${groupHaving}
@@ -2504,7 +2502,7 @@ router.get('/meta/ads', async (req, res) => {
       SELECT grouped.*
       FROM (
         SELECT ${groupFields.join(', ')}, ${metricsSelect}
-        FROM tw_ads_daily
+        FROM ${metaFrom} src
         WHERE ${metaWhere}
         GROUP BY ${groupFields.join(', ')}
         HAVING ${groupHaving}
@@ -2735,11 +2733,8 @@ async function queryMetaAirAttributionAdsOnly(
       SELECT
         ${groupCols},
         ${AIR_ATTR_ADS_ONLY_METRICS}
-      FROM tw_ads_daily
+      FROM ${metaAdsDailySourceSql('$1::date AND $2::date')} src
       WHERE brand = 'NOBL'
-        AND platform = 'META'
-        AND date BETWEEN $1::date AND $2::date
-        AND COALESCE(ad_id, '') <> ''
       GROUP BY ${groupCols}
       HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
     ) grouped
@@ -2762,11 +2757,8 @@ async function queryMetaAirAttributionAdsOnlyCount(start, end, groupCols, search
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
       SELECT ${groupCols}, ${AIR_ATTR_ADS_ONLY_METRICS}
-      FROM tw_ads_daily
+      FROM ${metaAdsDailySourceSql('$1::date AND $2::date')} src
       WHERE brand = 'NOBL'
-        AND platform = 'META'
-        AND date BETWEEN $1::date AND $2::date
-        AND COALESCE(ad_id, '') <> ''
       GROUP BY ${groupCols}
       HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
     ) grouped
@@ -2788,11 +2780,8 @@ async function queryMetaAirAttributionAdsOnlyTotals(start, end) {
       0::numeric(14,2) AS ttp_paid_air_orders,
       0::int AS ttp_mature_subscribers,
       0::int AS ttp_paid_subscribers
-    FROM tw_ads_daily
+    FROM ${metaAdsDailySourceSql('$1::date AND $2::date')} src
     WHERE brand = 'NOBL'
-      AND platform = 'META'
-      AND date BETWEEN $1::date AND $2::date
-      AND COALESCE(ad_id, '') <> ''
   `, [start, end]);
   return buildAirAttributionTotals(res.rows[0] || {});
 }
