@@ -58,6 +58,8 @@ export default function MetaAdsPage() {
   const [page, setPage] = useState(1);
   const [tableSearch, setTableSearch] = useState('');
   const [tableSearchColumn, setTableSearchColumn] = useState(SEARCH_ALL_COLUMNS);
+  const [tableSortBy, setTableSortBy] = useState(L.spend);
+  const [tableSortDir, setTableSortDir] = useState('desc');
   const debouncedSearch = useDebouncedValue(tableSearch, 350);
   const debouncedSearchColumn = useDebouncedValue(tableSearchColumn, 0);
   const [loading, setLoading] = useState(true);
@@ -74,7 +76,8 @@ export default function MetaAdsPage() {
     }
     try {
       const res = await getMetaAds(
-        range.start, range.end, level, brand, targetPage, TABLE_PAGE_SIZE, debouncedSearch, debouncedSearchColumn,
+        range.start, range.end, level, brand, targetPage, TABLE_PAGE_SIZE,
+        debouncedSearch, debouncedSearchColumn, tableSortBy, tableSortDir,
       );
       setData({
         rows: res.rows || [],
@@ -89,7 +92,17 @@ export default function MetaAdsPage() {
       setLoading(false);
       setTableLoading(false);
     }
-  }, [range, level, brand, debouncedSearch, debouncedSearchColumn]);
+  }, [range, level, brand, debouncedSearch, debouncedSearchColumn, tableSortBy, tableSortDir]);
+
+  const handleTableSort = useCallback((field) => {
+    setPage(1);
+    if (field === tableSortBy) {
+      setTableSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setTableSortBy(field);
+      setTableSortDir('asc');
+    }
+  }, [tableSortBy]);
 
   const loadRef = useRef(load);
   loadRef.current = load;
@@ -107,7 +120,7 @@ export default function MetaAdsPage() {
     }
     setPage(1);
     loadRef.current(1, { full: false });
-  }, [level, brand, debouncedSearch, debouncedSearchColumn]);
+  }, [level, brand, debouncedSearch, debouncedSearchColumn, tableSortBy, tableSortDir]);
 
   const handlePageChange = (nextPage) => {
     if (nextPage === page) return;
@@ -190,8 +203,9 @@ export default function MetaAdsPage() {
             searchColumn={tableSearchColumn}
             onSearchColumnChange={(col) => { setTableSearchColumn(col); setPage(1); }}
             loading={tableLoading || loading}
-            defaultSortField={L.spend}
-            defaultSortDir="desc"
+            sortBy={tableSortBy}
+            sortDir={tableSortDir}
+            onSort={handleTableSort}
           />
         </>
       )}

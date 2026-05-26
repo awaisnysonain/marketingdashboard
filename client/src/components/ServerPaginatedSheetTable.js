@@ -22,8 +22,9 @@ export default function ServerPaginatedSheetTable({
   onSearchColumnChange,
   loading = false,
   title,
-  defaultSortField = null,
-  defaultSortDir = 'desc',
+  sortBy = null,
+  sortDir = 'desc',
+  onSort,
   ...sheetProps
 }) {
   return (
@@ -59,8 +60,9 @@ export default function ServerPaginatedSheetTable({
         scrollable={false}
         searchable={false}
         hideRowCount
-        defaultSortField={defaultSortField}
-        defaultSortDir={defaultSortDir}
+        sortBy={sortBy}
+        sortDir={sortDir}
+        onSort={onSort}
         {...sheetProps}
       />
       <TablePagination

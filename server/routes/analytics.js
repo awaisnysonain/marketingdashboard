@@ -2191,6 +2191,25 @@ function parseSearchColumn(req) {
   return c && c !== '__all__' ? c : '__all__';
 }
 
+/** Map UI column label (or SQL col) → sort field; default when absent. */
+function parseTableSort(req, labelToSql, { defaultCol = 'spend', defaultDir = 'desc' } = {}) {
+  const rawDir = String(req.query.sort_dir || req.query.dir || '').toLowerCase();
+  const sortDir = rawDir === 'asc' ? 'asc' : (rawDir === 'desc' ? 'desc' : defaultDir);
+  const label = String(req.query.sort_by || req.query.sortBy || '').trim();
+  const sqlCol = label ? (labelToSql[label] || label) : defaultCol;
+  return { sqlCol, sortDir };
+}
+
+function buildGroupedOrderClause(sqlCol, sortDir, expressions, allowedCols, { defaultCol = 'spend' } = {}) {
+  const dir = sortDir === 'asc' ? 'ASC' : 'DESC';
+  const col = allowedCols.has(sqlCol) ? sqlCol : defaultCol;
+  const expr = expressions[col] || `grouped.${col}`;
+  const tieBreak = expressions.ad_name
+    ? `${expressions.ad_name} ASC`
+    : (expressions.campaign_name ? `${expressions.campaign_name} ASC` : 'grouped.ad_name ASC');
+  return `${expr} ${dir} NULLS LAST, ${tieBreak}`;
+}
+
 /** UI column labels → SQL column on grouped Meta ads rows */
 const META_ADS_LABEL_TO_SQL = {
   Brand: 'brand',
@@ -2246,6 +2265,111 @@ const AIR_ATTR_METRIC_COLS = [
   'ttp_paid_air_orders', 'attach_rate', 'ttp_rate', 'activation_rate',
 ];
 
+const AIR_ATTR_SORT_EXPRESSIONS = {
+  campaign_id: 'grouped.campaign_id',
+  campaign_name: 'LOWER(COALESCE(grouped.campaign_name, \'\'))',
+  adset_id: 'grouped.adset_id',
+  adset_name: 'LOWER(COALESCE(grouped.adset_name, \'\'))',
+  ad_id: 'grouped.ad_id',
+  ad_name: 'LOWER(COALESCE(grouped.ad_name, \'\'))',
+  spend: 'grouped.spend',
+  day_1_revenue: 'grouped.day_1_revenue',
+  aov: 'grouped.aov',
+  total_attributed_orders: 'grouped.total_attributed_orders',
+  air_orders: 'grouped.air_orders',
+  attributed_air_orders: 'grouped.attributed_air_orders',
+  attributed_air_revenue: 'grouped.attributed_air_revenue',
+  ttp_mature_air_orders: 'grouped.ttp_mature_air_orders',
+  ttp_paid_air_orders: 'grouped.ttp_paid_air_orders',
+  attach_rate: `CASE WHEN grouped.total_attributed_orders > 0
+    THEN grouped.attributed_air_orders / grouped.total_attributed_orders ELSE NULL END`,
+  ttp_rate: `CASE WHEN grouped.ttp_mature_air_orders > 0
+    THEN grouped.ttp_paid_air_orders / grouped.ttp_mature_air_orders ELSE NULL END`,
+  activation_rate: `CASE WHEN grouped.total_attributed_orders > 0 AND grouped.ttp_mature_air_orders > 0
+    THEN (grouped.attributed_air_orders / grouped.total_attributed_orders)
+      * (grouped.ttp_paid_air_orders / grouped.ttp_mature_air_orders) ELSE NULL END`,
+};
+
+const AIR_ATTR_ALLOWED_SORT = new Set(Object.keys(AIR_ATTR_SORT_EXPRESSIONS));
+
+const META_ADS_SORT_EXPRESSIONS = {
+  brand: 'LOWER(COALESCE(grouped.brand, \'\'))',
+  campaign_id: 'grouped.campaign_id',
+  campaign_name: 'LOWER(COALESCE(grouped.campaign_name, \'\'))',
+  adset_id: 'grouped.adset_id',
+  adset_name: 'LOWER(COALESCE(grouped.adset_name, \'\'))',
+  ad_id: 'grouped.ad_id',
+  ad_name: 'LOWER(COALESCE(grouped.ad_name, \'\'))',
+  spend: 'grouped.spend',
+  revenue: 'grouped.revenue',
+  purchases: 'grouped.purchases',
+  impressions: 'grouped.impressions',
+  clicks: 'grouped.clicks',
+  link_clicks: 'grouped.link_clicks',
+  add_to_cart: 'grouped.add_to_cart',
+  initiate_checkout: 'grouped.initiate_checkout',
+  roas: 'grouped.roas',
+  cac: 'grouped.cac',
+  ctr: 'grouped.ctr',
+  cpc: 'grouped.cpc',
+  cpm: 'grouped.cpm',
+};
+
+const META_ADS_ALLOWED_SORT = new Set(Object.keys(META_ADS_SORT_EXPRESSIONS));
+
+/** Merge TW ad spend with cached Air attribution so high-spend ads are never dropped. */
+function airAttrMergedGroupedSubquery(groupCols, groupFields) {
+  const idFields = groupFields.filter((f) => f.endsWith('_id'));
+  const nameFields = groupFields.filter((f) => f.endsWith('_name'));
+  const joinCond = idFields
+    .map((f) => `COALESCE(ads.${f}, '') = COALESCE(air.${f}, '')`)
+    .join('\n        AND ');
+  const idSelect = idFields.map((f) => `COALESCE(ads.${f}, air.${f}, '') AS ${f}`).join(',\n        ');
+  const nameSelect = nameFields.map((f) => `COALESCE(ads.${f}, air.${f}) AS ${f}`).join(',\n        ');
+  return `
+      SELECT
+        ${idSelect}${nameSelect ? `,\n        ${nameSelect}` : ''},
+        COALESCE(ads.spend, 0)::numeric(14,2) AS spend,
+        COALESCE(ads.day_1_revenue, 0)::numeric(14,2) AS day_1_revenue,
+        CASE WHEN COALESCE(ads.total_attributed_orders, 0) > 0
+          THEN ROUND(COALESCE(ads.day_1_revenue, 0) / ads.total_attributed_orders, 2)
+          ELSE NULL END AS aov,
+        COALESCE(ads.total_attributed_orders, 0)::numeric(14,2) AS total_attributed_orders,
+        COALESCE(air.air_orders, 0)::int AS air_orders,
+        COALESCE(air.attributed_air_orders, 0)::numeric(14,2) AS attributed_air_orders,
+        COALESCE(air.attributed_air_revenue, 0)::numeric(14,2) AS attributed_air_revenue,
+        COALESCE(air.ttp_mature_air_orders, 0)::numeric(14,2) AS ttp_mature_air_orders,
+        COALESCE(air.ttp_paid_air_orders, 0)::numeric(14,2) AS ttp_paid_air_orders,
+        COALESCE(air.ttp_mature_subscribers, 0)::int AS ttp_mature_subscribers,
+        COALESCE(air.ttp_paid_subscribers, 0)::int AS ttp_paid_subscribers
+      FROM (
+        SELECT ${groupCols},
+          SUM(spend)::numeric(14,2) AS spend,
+          SUM(revenue)::numeric(14,2) AS day_1_revenue,
+          SUM(purchases)::numeric(14,2) AS total_attributed_orders
+        FROM tw_ads_daily
+        WHERE brand = 'NOBL'
+          AND platform = 'META'
+          AND date BETWEEN $1::date AND $2::date
+          AND COALESCE(ad_id, '') <> ''
+        GROUP BY ${groupCols}
+      ) ads
+      FULL OUTER JOIN (
+        SELECT ${groupCols},
+          SUM(air_orders)::int AS air_orders,
+          SUM(attributed_air_orders)::numeric(14,2) AS attributed_air_orders,
+          SUM(attributed_air_revenue)::numeric(14,2) AS attributed_air_revenue,
+          SUM(ttp_mature_air_orders)::numeric(14,2) AS ttp_mature_air_orders,
+          SUM(ttp_paid_air_orders)::numeric(14,2) AS ttp_paid_air_orders,
+          SUM(ttp_mature_subscribers)::int AS ttp_mature_subscribers,
+          SUM(ttp_paid_subscribers)::int AS ttp_paid_subscribers
+        FROM nobl_air_meta_ad_daily
+        WHERE brand = 'NOBL'
+          AND date BETWEEN $1::date AND $2::date
+        GROUP BY ${groupCols}
+      ) air ON ${joinCond}`;
+}
+
 function buildGroupedTableSearchFilter(pattern, paramIndex, {
   groupCols = '',
   searchColumn = '__all__',
@@ -2292,10 +2416,12 @@ router.get('/meta/ads', async (req, res) => {
   const brand = (req.query.brand || 'NOBL').toUpperCase();
   const level = ['campaign', 'adset', 'ad'].includes(req.query.level) ? req.query.level : 'adset';
   const { page, pageSize, offset } = parseTablePagination(req);
-  const sortBy = String(req.query.sortBy || '').trim();
-  const sortDir = (String(req.query.dir || 'desc').toLowerCase() === 'asc') ? 'asc' : 'desc';
+  const { sqlCol: sortSqlCol, sortDir } = parseTableSort(req, META_ADS_LABEL_TO_SQL, { defaultCol: 'spend', defaultDir: 'desc' });
   const searchPattern = parseTableSearch(req);
   const searchColumn = parseSearchColumn(req);
+  const metaOrderBy = buildGroupedOrderClause(
+    sortSqlCol, sortDir, META_ADS_SORT_EXPRESSIONS, META_ADS_ALLOWED_SORT, { defaultCol: 'spend' },
+  );
 
   const groupFields = {
     campaign: ['brand', 'campaign_id', 'campaign_name'],
@@ -2371,16 +2497,19 @@ router.get('/meta/ads', async (req, res) => {
         HAVING ${groupHaving}
       ) grouped
       ${pageSearch.clause}
-      ORDER BY grouped.spend DESC
+      ORDER BY ${metaOrderBy}
       LIMIT $4 OFFSET $5
     `, [brand, start, end, pageSize, offset, ...pageSearch.params]),
       pgQuery(`
-      SELECT ${groupFields.join(', ')}, ${metricsSelect}
-      FROM tw_ads_daily
-      WHERE ${metaWhere}
-      GROUP BY ${groupFields.join(', ')}
-      HAVING ${groupHaving}
-      ORDER BY spend DESC
+      SELECT grouped.*
+      FROM (
+        SELECT ${groupFields.join(', ')}, ${metricsSelect}
+        FROM tw_ads_daily
+        WHERE ${metaWhere}
+        GROUP BY ${groupFields.join(', ')}
+        HAVING ${groupHaving}
+      ) grouped
+      ORDER BY ${metaOrderBy}
       LIMIT 12
     `, [brand, start, end]),
     ]);
@@ -2400,17 +2529,7 @@ router.get('/meta/ads', async (req, res) => {
     totals.cpc = totals.clicks > 0 ? totals.spend / totals.clicks : null;
     totals.cpm = totals.impressions > 0 ? totals.spend * 1000 / totals.impressions : null;
 
-    let rows = fmtRows(r.rows);
-    if (sortBy) {
-      rows.sort((a, b) => {
-        const av = a[sortBy];
-        const bv = b[sortBy];
-        const cmp = (Number.isFinite(av) && Number.isFinite(bv))
-          ? av - bv
-          : String(av ?? '').localeCompare(String(bv ?? ''));
-        return sortDir === 'desc' ? -cmp : cmp;
-      });
-    }
+    const rows = fmtRows(r.rows);
     res.json({
       rows,
       chart_rows: fmtRows(chartRes.rows),
@@ -2502,7 +2621,14 @@ function buildAirAttributionTotals(row = {}) {
   return totals;
 }
 
-async function queryMetaAirAttributionGrouped(start, end, groupCols, limit, offset, searchPattern = null, searchColumn = '__all__') {
+function airAttrGroupedHavingClause() {
+  return `(grouped.spend > 0 OR grouped.air_orders > 0 OR grouped.attributed_air_orders > 0)`;
+}
+
+async function queryMetaAirAttributionGrouped(
+  start, end, groupCols, groupFields, limit, offset,
+  searchPattern = null, searchColumn = '__all__', sqlCol = 'spend', sortDir = 'desc',
+) {
   const params = [start, end];
   const search = buildGroupedTableSearchFilter(searchPattern, params.length + 1, {
     groupCols,
@@ -2512,6 +2638,9 @@ async function queryMetaAirAttributionGrouped(start, end, groupCols, limit, offs
     includeBrand: false,
   });
   params.push(...search.params);
+  const orderBy = buildGroupedOrderClause(
+    sqlCol, sortDir, AIR_ATTR_SORT_EXPRESSIONS, AIR_ATTR_ALLOWED_SORT, { defaultCol: 'spend' },
+  );
   let limitSql = '';
   if (limit != null) {
     params.push(limit);
@@ -2524,20 +2653,18 @@ async function queryMetaAirAttributionGrouped(start, end, groupCols, limit, offs
   return pgQuery(`
     SELECT grouped.*
     FROM (
-      SELECT ${groupCols}, ${AIR_ATTR_GROUP_METRICS}
-      FROM nobl_air_meta_ad_daily
-      WHERE brand = 'NOBL'
-        AND date BETWEEN $1::date AND $2::date
-      GROUP BY ${groupCols}
-      HAVING ${AIR_ATTR_CACHE_HAVING}
+      ${airAttrMergedGroupedSubquery(groupCols, groupFields)}
     ) grouped
+    WHERE ${airAttrGroupedHavingClause()}
     ${search.clause}
-    ORDER BY grouped.attributed_air_orders DESC, grouped.attributed_air_revenue DESC
+    ORDER BY ${orderBy}
     ${limitSql}
   `, params);
 }
 
-async function queryMetaAirAttributionGroupedCount(start, end, groupCols, searchPattern = null, searchColumn = '__all__') {
+async function queryMetaAirAttributionGroupedCount(
+  start, end, groupCols, groupFields, searchPattern = null, searchColumn = '__all__',
+) {
   const params = [start, end];
   const search = buildGroupedTableSearchFilter(searchPattern, params.length + 1, {
     groupCols,
@@ -2549,13 +2676,9 @@ async function queryMetaAirAttributionGroupedCount(start, end, groupCols, search
   params.push(...search.params);
   const res = await pgQuery(`
     SELECT COUNT(*)::int AS n FROM (
-      SELECT ${groupCols}, ${AIR_ATTR_GROUP_METRICS}
-      FROM nobl_air_meta_ad_daily
-      WHERE brand = 'NOBL'
-        AND date BETWEEN $1::date AND $2::date
-      GROUP BY ${groupCols}
-      HAVING ${AIR_ATTR_CACHE_HAVING}
+      ${airAttrMergedGroupedSubquery(groupCols, groupFields)}
     ) grouped
+    WHERE ${airAttrGroupedHavingClause()}
     ${search.clause}
   `, params);
   return Number(res.rows[0]?.n || 0);
@@ -2581,7 +2704,10 @@ async function queryMetaAirAttributionTotalsDaily(start, end) {
   return buildAirAttributionTotals(res.rows[0] || {});
 }
 
-async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offset, searchPattern = null, searchColumn = '__all__') {
+async function queryMetaAirAttributionAdsOnly(
+  start, end, groupCols, limit, offset,
+  searchPattern = null, searchColumn = '__all__', sqlCol = 'spend', sortDir = 'desc',
+) {
   const params = [start, end];
   const search = buildGroupedTableSearchFilter(searchPattern, params.length + 1, {
     groupCols,
@@ -2591,6 +2717,9 @@ async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offs
     includeBrand: false,
   });
   params.push(...search.params);
+  const orderBy = buildGroupedOrderClause(
+    sqlCol, sortDir, AIR_ATTR_SORT_EXPRESSIONS, AIR_ATTR_ALLOWED_SORT, { defaultCol: 'spend' },
+  );
   let limitSql = '';
   if (limit != null) {
     params.push(limit);
@@ -2615,7 +2744,7 @@ async function queryMetaAirAttributionAdsOnly(start, end, groupCols, limit, offs
       HAVING ${AIR_ATTR_ADS_ONLY_HAVING}
     ) grouped
     ${search.clause}
-    ORDER BY grouped.spend DESC
+    ORDER BY ${orderBy}
     ${limitSql}
   `, params);
 }
@@ -2684,13 +2813,46 @@ function filterLiveAirAttrRows(rows, searchPattern, searchColumn = '__all__') {
   return rows.filter((r) => fields.some((f) => matchVal(r[f])));
 }
 
-async function fetchAirAttributionPage(dataSource, start, end, groupCols, pageSize, offset, searchPattern = null, searchColumn = '__all__') {
+function sortLiveAirAttrRows(rows, sqlCol, sortDir = 'desc') {
+  const col = AIR_ATTR_ALLOWED_SORT.has(sqlCol) ? sqlCol : 'spend';
+  const dir = sortDir === 'asc' ? 1 : -1;
+  const textCols = new Set(['campaign_name', 'adset_name', 'ad_name', 'campaign_id', 'adset_id', 'ad_id']);
+  return [...rows].sort((a, b) => {
+    let av = a[col];
+    let bv = b[col];
+    if (col === 'attach_rate' || col === 'ttp_rate' || col === 'activation_rate') {
+      const mapped = mapAirAttributionRates([a, b]);
+      av = mapped[0][col];
+      bv = mapped[1][col];
+    }
+    if (av == null && bv == null) return String(a.ad_name || '').localeCompare(String(b.ad_name || ''));
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    if (textCols.has(col)) {
+      const cmp = String(av).localeCompare(String(bv));
+      return cmp * dir || String(a.ad_name || '').localeCompare(String(b.ad_name || ''));
+    }
+    const na = Number(av);
+    const nb = Number(bv);
+    const cmp = Number.isFinite(na) && Number.isFinite(nb) ? na - nb : String(av).localeCompare(String(bv));
+    return cmp * dir || String(a.ad_name || '').localeCompare(String(b.ad_name || ''));
+  });
+}
+
+async function fetchAirAttributionPage(
+  dataSource, start, end, groupCols, groupFields, pageSize, offset,
+  searchPattern = null, searchColumn = '__all__', sqlCol = 'spend', sortDir = 'desc',
+) {
   if (dataSource === 'cache') {
-    const r = await queryMetaAirAttributionGrouped(start, end, groupCols, pageSize, offset, searchPattern, searchColumn);
+    const r = await queryMetaAirAttributionGrouped(
+      start, end, groupCols, groupFields, pageSize, offset, searchPattern, searchColumn, sqlCol, sortDir,
+    );
     return fmtRows(mapAirAttributionRates(r.rows));
   }
   if (dataSource === 'meta_ads_only') {
-    const r = await queryMetaAirAttributionAdsOnly(start, end, groupCols, pageSize, offset, searchPattern, searchColumn);
+    const r = await queryMetaAirAttributionAdsOnly(
+      start, end, groupCols, pageSize, offset, searchPattern, searchColumn, sqlCol, sortDir,
+    );
     return fmtRows(mapAirAttributionRates(r.rows));
   }
   return [];
@@ -2703,6 +2865,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
   const { page, pageSize, offset } = parseTablePagination(req);
   const searchPattern = parseTableSearch(req);
   const searchColumn = parseSearchColumn(req);
+  const { sqlCol: sortSqlCol, sortDir } = parseTableSort(req, AIR_ATTR_LABEL_TO_SQL, { defaultCol: 'spend', defaultDir: 'desc' });
   const allowLive = ['1', 'true', 'yes'].includes(String(req.query.live || '').toLowerCase());
 
   const groupFields = {
@@ -2719,7 +2882,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
     let source = 'cache';
     let cacheHint = null;
     let dataSource = 'cache';
-    let totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols);
+    let totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols, groupFields);
 
     if (totalRows === 0) {
       const src = await pgQuery(`
@@ -2739,7 +2902,7 @@ router.get('/nobl/air-attribution', async (req, res) => {
         try {
           console.log(`[Analytics /nobl/air-attribution] warming cache ${start}..${end} (${fbAttr} fb attr rows)`);
           await refreshNoblAirMetaAdDaily(start, end);
-          totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols);
+          totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols, groupFields);
           source = totalRows > 0 ? 'cache_warmed' : 'empty_after_warm';
         } finally {
           metaAirWarmInFlight.delete(warmKey);
@@ -2775,12 +2938,16 @@ router.get('/nobl/air-attribution', async (req, res) => {
 
     if (dataSource === 'cache') {
       totals = await queryMetaAirAttributionTotalsDaily(start, end);
-      totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols);
-      const top = await queryMetaAirAttributionGrouped(start, end, groupCols, 12, 0);
+      totalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols, groupFields);
+      const top = await queryMetaAirAttributionGrouped(
+        start, end, groupCols, groupFields, 12, 0, null, '__all__', 'spend', 'desc',
+      );
       chartRows = fmtRows(mapAirAttributionRates(top.rows));
     } else if (dataSource === 'meta_ads_only') {
       totals = await queryMetaAirAttributionAdsOnlyTotals(start, end);
-      const top = await queryMetaAirAttributionAdsOnly(start, end, groupCols, 12, 0);
+      const top = await queryMetaAirAttributionAdsOnly(
+        start, end, groupCols, 12, 0, null, '__all__', 'spend', 'desc',
+      );
       chartRows = fmtRows(mapAirAttributionRates(top.rows));
     } else if (dataSource === 'live') {
       const totalJoin = groupFields
@@ -2959,18 +3126,27 @@ router.get('/nobl/air-attribution', async (req, res) => {
     let rows = [];
     let tableTotalRows = meta.total_rows || 0;
     if (meta.data_source === 'live' && meta.live_rows) {
-      const liveRows = filterLiveAirAttrRows(meta.live_rows, searchPattern, searchColumn);
+      const liveRows = sortLiveAirAttrRows(
+        filterLiveAirAttrRows(meta.live_rows, searchPattern, searchColumn),
+        sortSqlCol,
+        sortDir,
+      );
       tableTotalRows = liveRows.length;
       rows = liveRows.slice(offset, offset + pageSize);
     } else if (meta.data_source !== 'empty') {
       if (searchPattern) {
         if (meta.data_source === 'cache') {
-          tableTotalRows = await queryMetaAirAttributionGroupedCount(start, end, groupCols, searchPattern, searchColumn);
+          tableTotalRows = await queryMetaAirAttributionGroupedCount(
+            start, end, groupCols, groupFields, searchPattern, searchColumn,
+          );
         } else if (meta.data_source === 'meta_ads_only') {
           tableTotalRows = await queryMetaAirAttributionAdsOnlyCount(start, end, groupCols, searchPattern, searchColumn);
         }
       }
-      rows = await fetchAirAttributionPage(meta.data_source, start, end, groupCols, pageSize, offset, searchPattern, searchColumn);
+      rows = await fetchAirAttributionPage(
+        meta.data_source, start, end, groupCols, groupFields, pageSize, offset,
+        searchPattern, searchColumn, sortSqlCol, sortDir,
+      );
     }
 
     res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
