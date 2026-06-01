@@ -2322,6 +2322,7 @@ const META_ADS_ALLOWED_SORT = new Set(Object.keys(META_ADS_SORT_EXPRESSIONS));
 function airAttrMergedGroupedSubquery(groupCols, groupFields) {
   const idFields = groupFields.filter((f) => f.endsWith('_id'));
   const nameFields = groupFields.filter((f) => f.endsWith('_name'));
+  const adsGroupBy = groupFields.map((f) => `ads_src.${f}`).join(', ');
   const joinCond = idFields
     .map((f) => `COALESCE(ads.${f}, '') = COALESCE(air.${f}, '')`)
     .join('\n        AND ');
@@ -2345,11 +2346,12 @@ function airAttrMergedGroupedSubquery(groupCols, groupFields) {
         COALESCE(air.ttp_paid_subscribers, 0)::int AS ttp_paid_subscribers
       FROM (
         SELECT ${groupCols},
-          SUM(spend)::numeric(14,2) AS spend,
-          SUM(revenue)::numeric(14,2) AS day_1_revenue,
-          SUM(purchases)::numeric(14,2) AS total_attributed_orders
+          SUM(ads_src.spend)::numeric(14,2) AS spend,
+          SUM(ads_src.revenue)::numeric(14,2) AS day_1_revenue,
+          SUM(ads_src.purchases)::numeric(14,2) AS total_attributed_orders
         FROM ${metaAdsDailySourceSql('$1::date AND $2::date')} ads_src
-        GROUP BY ${groupCols}
+        WHERE ads_src.brand = 'NOBL'
+        GROUP BY ${adsGroupBy}
       ) ads
       FULL OUTER JOIN (
         SELECT ${groupCols},
