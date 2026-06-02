@@ -1022,15 +1022,16 @@ async function syncTWBenchmarks(brand) {
 }
 
 // ─────────────────────────────────────────────────────────────────
-//  11. ORDER REVENUE  — canonical metric via blended_stats_tvf
+//  11. ORDER REVENUE  — canonical revenue + channel-reported ads_table spend
 //
-//  Uses TW's blended_stats_tvf (the same source as the TW UI):
+//  Uses TW's blended_stats_tvf for order revenue, and ads_table for spend.
+//  ads_table is intentionally used for spend so custom expenses marked as ad
+//  spend are excluded and the dashboard matches channel-reported ad spend.
 //
 //  For NOBL:
 //    revenue = blended_stats_tvf(include_amazon=TRUE).order_revenue
 //              = Shopify + Amazon, after discounts, before refunds
-//    spend   = blended_stats_tvf(include_amazon=TRUE).spend
-//              = Ad Spend (Shopify-connected platforms only)
+//    spend   = ads_table.spend (channel-reported platforms only)
 //
 //  For FLO:
 //    revenue = blended_stats_tvf(include_amazon=TRUE).order_revenue
@@ -1049,17 +1050,28 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
   let written = 0;
   const refundsDr = chDateRange('refund_date', startDate, endDate);
 
-  // ── Query 1: Total order revenue + spend (Shopify + Amazon) ─────
+  // ── Query 1: Total order revenue (Shopify + Amazon) ─────────────
   const allRevSql = `
     SELECT
       bst.event_date                              AS date,
-      COALESCE(SUM(bst.order_revenue), 0)         AS order_revenue,
-      COALESCE(SUM(bst.spend), 0)                 AS total_spend
+      COALESCE(SUM(bst.order_revenue), 0)         AS order_revenue
     FROM blended_stats_tvf(include_amazon=TRUE) AS bst
     WHERE bst.event_date >= '${startDate}'
       AND bst.event_date <= '${endDate}'
     GROUP BY bst.event_date
     ORDER BY bst.event_date
+  `;
+
+  // ── Query 1b: Channel-reported ad spend (excludes custom expenses) ─────
+  const adSpendSql = `
+    SELECT
+      adt.event_date                              AS date,
+      COALESCE(SUM(adt.spend), 0)                 AS total_spend
+    FROM ads_table AS adt
+    WHERE adt.event_date >= toDate('${startDate}')
+      AND adt.event_date <= toDate('${endDate}')
+    GROUP BY adt.event_date
+    ORDER BY adt.event_date
   `;
 
   // ── Query 2: Shopify-only order revenue (derive Amazon split) ───
@@ -1086,8 +1098,9 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
     ORDER BY refund_date
   `;
 
-  const [allRows, shopifyRows, refundRows] = await Promise.all([
+  const [allRows, adSpendRows, shopifyRows, refundRows] = await Promise.all([
     twSqlSafe(brand, allRevSql),
+    twSqlSafe(brand, adSpendSql),
     twSqlSafe(brand, shopifyRevSql),
     twSqlSafe(brand, refundsSql),
   ]);
@@ -1104,6 +1117,12 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
     shopifyMap[d] = parseFloat(r.shopify_revenue || 0);
   }
 
+  const adSpendMap = {};
+  for (const r of adSpendRows) {
+    const d = toDateStr(r.date || r.event_date);
+    adSpendMap[d] = parseFloat(r.total_spend || 0);
+  }
+
   const refundMap = {};
   for (const r of refundRows) {
     const d = toDateStr(r.date);
@@ -1116,7 +1135,7 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
   for (const r of allRows) {
     const date         = toDateStr(r.date || r.event_date);
     const orderRevenue = parseFloat(r.order_revenue || 0);
-    const totalSpend   = parseFloat(r.total_spend   || 0);
+    const totalSpend   = parseFloat(adSpendMap[date] || 0);
     const shopifyRev   = shopifyMap[date] !== undefined ? shopifyMap[date] : orderRevenue;
     const amazonRev    = Math.max(0, orderRevenue - shopifyRev);
     const refunds      = refundMap[date] || { count: 0, amount: 0 };

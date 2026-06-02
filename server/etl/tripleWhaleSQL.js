@@ -5,7 +5,7 @@
  *
  * Tables refreshed:
  *   tw_summary_daily     — total_revenue (= Shopify + Amazon for the selected brand),
- *                          total_spend (= blendedAds for the selected brand), order counts.
+ *                          total_spend (= ads_table channel-reported spend), order counts.
  *   tw_channel_daily     — per-channel spend / revenue using Triple Attribution +
  *                          1-day click window (matches the TW dashboard UI).
  *   tw_geo_daily         — per-region revenue + spend (US/CA/AUS/DUBAI/EU/TOTAL).
@@ -101,16 +101,20 @@ async function fetchAmazonRevenue(brand, startYmd, endYmd) {
   return indexByDate(rows, 'amazon_revenue');
 }
 
-async function fetchBlendedSpend(brand, startYmd, endYmd) {
+async function fetchAdSpend(brand, startYmd, endYmd) {
   const rows = await twSqlQuery(brand,
-    `SELECT bst.event_date AS event_date,
-            COALESCE(SUM(bst.spend), 0) AS total_ad_spend
-     FROM blended_stats_tvf() AS bst
-     WHERE bst.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
-     GROUP BY bst.event_date ORDER BY bst.event_date`,
+    `SELECT adt.event_date AS event_date,
+            COALESCE(SUM(adt.spend), 0) AS total_ad_spend
+     FROM ads_table AS adt
+     WHERE adt.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
+     GROUP BY adt.event_date ORDER BY adt.event_date`,
     { period: { startDate: startYmd, endDate: endYmd } });
   return indexByDate(rows, 'total_ad_spend');
 }
+
+// Backward-compatible name: this now intentionally uses ads_table instead of
+// blended_stats_tvf so custom expenses marked as ad spend are excluded.
+const fetchBlendedSpend = fetchAdSpend;
 
 async function fetchOrderCounts(brand, startYmd, endYmd) {
   // total orders + new customer orders, broken down via orders_table
@@ -181,63 +185,145 @@ async function fetchChannelMetrics(brand, startYmd, endYmd) {
 }
 
 async function fetchFloProductDaily(brand, startYmd, endYmd) {
-  // Per Brad's classification: portable / wooden / metal based on campaign + adset
-  const rows = await twSqlQuery(brand,
-    `WITH spend_rows AS (
-       SELECT adt.event_date AS event_date, 'wooden' AS product_line, SUM(adt.spend) AS spend
+  // FLO product tab source of truth:
+  //   - Spend: ads_table channel-reported spend, categorized by adset/campaign/ad names.
+  //            Mixed and unclassified rows are kept separate so product totals are not inflated.
+  //   - Units/revenue: product_analytics_tvf product/collection rows.
+  const spendRows = await twSqlQuery(brand,
+    `WITH ads_classified AS (
+       SELECT
+         adt.event_date AS event_date,
+         CASE
+           WHEN adt.channel = 'facebook-ads' THEN 'META'
+           WHEN adt.channel = 'google-ads' THEN 'GOOGLE'
+           WHEN adt.channel = 'tiktok-ads' THEN 'TIKTOK'
+           WHEN adt.channel = 'snapchat-ads' THEN 'SNAPCHAT'
+           WHEN adt.channel = 'pinterest-ads' THEN 'PINTEREST'
+           WHEN adt.channel = 'bing' THEN 'BING'
+           WHEN adt.channel = 'applovin' THEN 'APPLOVIN'
+           ELSE 'OTHER'
+         END AS sheet_group,
+         CASE
+           WHEN lowerUTF8(coalesce(adt.adset_name, '')) = 'portable'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%portable pilates reformer%'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%portable-pdp%'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%flo portable%' THEN 'portable'
+           WHEN lowerUTF8(coalesce(adt.adset_name, '')) = 'studio'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%studio reformer%'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%wood reformer%'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%wooden reformer%' THEN 'wooden'
+           WHEN lowerUTF8(coalesce(adt.adset_name, '')) = 'metal'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%home reformer%'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%metal reformer%' THEN 'metal'
+
+           WHEN lowerUTF8(coalesce(adt.campaign_name, '')) LIKE '%all mixed%'
+             OR lowerUTF8(coalesce(adt.adset_name, '')) LIKE '%all mixed%'
+             OR lowerUTF8(coalesce(adt.ad_name, '')) LIKE '%all mixed%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%portable + studio%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%portable + metal%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%studio + metal%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%portable + studio + home%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%portable + studio + metal%' THEN 'mixed'
+
+           WHEN lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%studio%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%wood%' THEN 'wooden'
+           WHEN lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%metal%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%home%' THEN 'metal'
+           WHEN lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%portable%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%reformer pro%'
+             OR lowerUTF8(concat(coalesce(adt.campaign_name, ''), ' ', coalesce(adt.adset_name, ''), ' ', coalesce(adt.ad_name, ''))) LIKE '%reformer board%' THEN 'portable'
+           ELSE 'unclassified'
+         END AS product_line,
+         adt.spend AS raw_spend
        FROM ads_table AS adt
        WHERE adt.event_date >= toDate('${startYmd}') AND adt.event_date < toDate('${nextYmd(endYmd)}')
-         AND ( lowerUTF8(adt.campaign_name) LIKE '%wood%'
-            OR lowerUTF8(adt.campaign_name) LIKE '%wooden%'
-            OR ( lowerUTF8(adt.campaign_name) LIKE '%all mixed%'
-                 AND lowerUTF8(adt.adset_name) LIKE '%studio reformer%' ) )
-       GROUP BY adt.event_date
-       UNION ALL
-       SELECT adt.event_date AS event_date, 'portable' AS product_line, SUM(adt.spend) AS spend
-       FROM ads_table AS adt
-       WHERE adt.event_date >= toDate('${startYmd}') AND adt.event_date < toDate('${nextYmd(endYmd)}')
-         AND ( lowerUTF8(adt.campaign_name) LIKE '%portable%'
-            OR lowerUTF8(adt.campaign_name) LIKE '%reformer pro%'
-            OR ( lowerUTF8(adt.campaign_name) LIKE '%all mixed%'
-                 AND lowerUTF8(adt.adset_name) LIKE '%portable pilates reformer%' ) )
-       GROUP BY adt.event_date
-       UNION ALL
-       SELECT adt.event_date AS event_date, 'metal' AS product_line, SUM(adt.spend) AS spend
-       FROM ads_table AS adt
-       WHERE adt.event_date >= toDate('${startYmd}') AND adt.event_date < toDate('${nextYmd(endYmd)}')
-         AND ( lowerUTF8(adt.campaign_name) LIKE '%metal%'
-            OR ( lowerUTF8(adt.campaign_name) LIKE '%all mixed%'
-                 AND lowerUTF8(adt.adset_name) LIKE '%metal%' ) )
-       GROUP BY adt.event_date
-     ),
-     product_revenue AS (
-       SELECT ot.event_date AS event_date,
-              CASE
-                WHEN lowerUTF8(tupleElement(pi, 'product_name')) = 'pilates studio reformer' THEN 'wooden'
-                WHEN lowerUTF8(tupleElement(pi, 'product_name')) IN ('flo portable pilates reformer', 'pilates reformer pro') THEN 'portable'
-                WHEN lowerUTF8(tupleElement(pi, 'product_name')) = 'pilates home reformer' THEN 'metal'
-                ELSE NULL
-              END AS product_line,
-              uniqIf(ot.order_id, ot.is_new_customer = 1) AS new_customer_orders,
-              SUM(tupleElement(pi, 'product_name_quantity_sold') * tupleElement(pi, 'product_name_price')) AS revenue
-       FROM orders_table AS ot ARRAY JOIN ot.products_info AS pi
-       WHERE ot.platform = 'shopify'
-         AND ot.event_date >= toDate('${startYmd}') AND ot.event_date < toDate('${nextYmd(endYmd)}')
-       GROUP BY ot.event_date, product_line
      )
      SELECT
-       COALESCE(s.event_date, r.event_date) AS event_date,
-       COALESCE(s.product_line, r.product_line) AS product_line,
-       COALESCE(s.spend, 0) AS spend,
-       COALESCE(r.new_customer_orders, 0) AS new_customer_orders,
-       COALESCE(r.revenue, 0) AS revenue
-     FROM spend_rows AS s
-     FULL OUTER JOIN product_revenue AS r
-       ON s.event_date = r.event_date AND s.product_line = r.product_line
-     WHERE COALESCE(s.product_line, r.product_line) IS NOT NULL
+       event_date,
+       product_line,
+       SUM(raw_spend) AS spend,
+       SUM(CASE WHEN sheet_group = 'META' THEN raw_spend ELSE 0 END) AS meta_spend,
+       SUM(CASE WHEN sheet_group = 'GOOGLE' THEN raw_spend ELSE 0 END) AS google_spend,
+       SUM(CASE WHEN sheet_group = 'TIKTOK' THEN raw_spend ELSE 0 END) AS tiktok_spend,
+       SUM(CASE WHEN sheet_group = 'SNAPCHAT' THEN raw_spend ELSE 0 END) AS snap_spend,
+       SUM(CASE WHEN sheet_group = 'PINTEREST' THEN raw_spend ELSE 0 END) AS pinterest_spend,
+       SUM(CASE WHEN sheet_group = 'BING' THEN raw_spend ELSE 0 END) AS bing_spend,
+       SUM(CASE WHEN sheet_group = 'APPLOVIN' THEN raw_spend ELSE 0 END) AS applovin_spend
+     FROM ads_classified
+     GROUP BY event_date, product_line
      ORDER BY event_date, product_line`,
     { period: { startDate: startYmd, endDate: endYmd } });
-  return rows || [];
+
+  const portableRows = await twSqlQuery(brand,
+    `SELECT
+       pat.event_date AS event_date,
+       'portable' AS product_line,
+       SUM(pat.total_items_sold) AS units_sold,
+       SUM(pat.revenue) AS revenue
+     FROM product_analytics_tvf AS pat
+     WHERE pat.event_date >= toDate('${startYmd}') AND pat.event_date < toDate('${nextYmd(endYmd)}')
+       AND pat.entity = 'collection'
+       AND lowerUTF8(pat.name) = 'portable reformer'
+     GROUP BY pat.event_date
+     ORDER BY pat.event_date`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+
+  const variantRows = await twSqlQuery(brand,
+    `SELECT
+       pat.event_date AS event_date,
+       CASE
+         WHEN lowerUTF8(pat.product_name) = 'pilates studio reformer' THEN 'wooden'
+         WHEN lowerUTF8(pat.product_name) = 'pilates home reformer' THEN 'metal'
+         ELSE NULL
+       END AS product_line,
+       SUM(pat.total_items_sold) AS units_sold,
+       SUM(pat.revenue) AS revenue
+     FROM product_analytics_tvf AS pat
+     WHERE pat.event_date >= toDate('${startYmd}') AND pat.event_date < toDate('${nextYmd(endYmd)}')
+       AND pat.entity = 'variant'
+       AND lowerUTF8(pat.product_name) IN ('pilates studio reformer', 'pilates home reformer')
+     GROUP BY pat.event_date, product_line
+     ORDER BY pat.event_date, product_line`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+
+  const merged = new Map();
+  function key(row) { return `${String(row.event_date || '').slice(0, 10)}|${row.product_line}`; }
+  function ensure(row) {
+    const k = key(row);
+    if (!merged.has(k)) {
+      merged.set(k, {
+        event_date: String(row.event_date || '').slice(0, 10),
+        product_line: row.product_line,
+        spend: 0, revenue: 0, new_customer_orders: 0,
+        meta_spend: 0, google_spend: 0, tiktok_spend: 0, snap_spend: 0,
+        pinterest_spend: 0, bing_spend: 0, applovin_spend: 0,
+      });
+    }
+    return merged.get(k);
+  }
+
+  for (const row of spendRows || []) {
+    if (!row.product_line) continue;
+    const out = ensure(row);
+    out.spend = Number(row.spend || 0);
+    out.meta_spend = Number(row.meta_spend || 0);
+    out.google_spend = Number(row.google_spend || 0);
+    out.tiktok_spend = Number(row.tiktok_spend || 0);
+    out.snap_spend = Number(row.snap_spend || 0);
+    out.pinterest_spend = Number(row.pinterest_spend || 0);
+    out.bing_spend = Number(row.bing_spend || 0);
+    out.applovin_spend = Number(row.applovin_spend || 0);
+  }
+  for (const row of [...(portableRows || []), ...(variantRows || [])]) {
+    if (!row.product_line) continue;
+    const out = ensure(row);
+    out.revenue = Number(row.revenue || 0);
+    out.new_customer_orders = Number(row.units_sold || 0);
+  }
+
+  return [...merged.values()].sort((a, b) =>
+    String(a.event_date).localeCompare(String(b.event_date)) || String(a.product_line).localeCompare(String(b.product_line))
+  );
 }
 
 // ─── Top-level: refresh one brand's tw_summary_daily + tw_channel_daily ─────
@@ -396,14 +482,34 @@ async function refreshBrand(brand, startYmd, endYmd) {
       if (!date || !row.product_line) continue;
       await pgRun(`
         INSERT INTO tw_product_daily
-          (brand, date, product_line, spend, revenue, new_cust_orders)
-        VALUES ($1,$2,$3,$4,$5,$6)
+          (brand, date, product_line, spend, revenue, new_cust_orders,
+           meta_spend, google_spend, tiktok_spend, snap_spend, pinterest_spend, bing_spend, applovin_spend)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
         ON CONFLICT (brand, date, product_line) DO UPDATE SET
           spend           = EXCLUDED.spend,
           revenue         = EXCLUDED.revenue,
           new_cust_orders = EXCLUDED.new_cust_orders,
+          meta_spend      = EXCLUDED.meta_spend,
+          google_spend    = EXCLUDED.google_spend,
+          tiktok_spend    = EXCLUDED.tiktok_spend,
+          snap_spend      = EXCLUDED.snap_spend,
+          pinterest_spend = EXCLUDED.pinterest_spend,
+          bing_spend      = EXCLUDED.bing_spend,
+          applovin_spend  = EXCLUDED.applovin_spend,
           updated_at      = NOW()
-      `, [brand, date, row.product_line, Number(row.spend || 0), Number(row.revenue || 0), Number(row.new_customer_orders || 0)]);
+      `, [
+        brand, date, row.product_line,
+        Number(row.spend || 0),
+        Number(row.revenue || 0),
+        Number(row.new_customer_orders || 0),
+        Number(row.meta_spend || 0),
+        Number(row.google_spend || 0),
+        Number(row.tiktok_spend || 0),
+        Number(row.snap_spend || 0),
+        Number(row.pinterest_spend || 0),
+        Number(row.bing_spend || 0),
+        Number(row.applovin_spend || 0),
+      ]);
     }
     console.log(`  → ${productRows.length} product rows`);
   }
@@ -418,6 +524,6 @@ async function refreshSummary(brand, startDate, endDate) {
 
 module.exports = {
   refreshBrand, refreshSummary,
-  fetchShopifyRevenue, fetchAmazonRevenue, fetchBlendedSpend,
+  fetchShopifyRevenue, fetchAmazonRevenue, fetchBlendedSpend, fetchAdSpend,
   fetchChannelMetrics, fetchRegionRevenue, fetchFloProductDaily,
 };

@@ -26,7 +26,8 @@ const CHANNEL_COL = {
   PINTEREST:'#e60023', APPLOVIN:'#ff8c00', BING:'#00809d', X:'#657786',
 };
 const GEO_COL     = ['#14b8a6','#6366f1','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
-const PROD_COL    = { portable:'#14b8a6', wooden:'#f59e0b', metal:'#6366f1' };
+const PROD_COL    = { portable:'#14b8a6', wooden:'#f59e0b', metal:'#6366f1', mixed:'#94a3b8', unclassified:'#64748b' };
+const CORE_PRODUCT_LINES = ['portable', 'wooden', 'metal'];
 const FLO_ACCENT  = '#14b8a6';
 const FLO_WARN    = '#f59e0b';
 
@@ -140,6 +141,8 @@ export default function StoreFLOPage({ showToast }) {
       .sort((a,b) => b.revenue - a.revenue);
   }, [products]);
 
+  const coreProdAgg = useMemo(() => prodAgg.filter(p => CORE_PRODUCT_LINES.includes(p.line)), [prodAgg]);
+
   const emailTotals = useMemo(() => email.reduce((a, r) => ({
     sent:    a.sent    + (r.emails_sent    || 0),
     opened:  a.opened  + (r.emails_opened  || 0),
@@ -179,7 +182,7 @@ export default function StoreFLOPage({ showToast }) {
             <KpiCard label={L.ncOrders}     value={fmtNum(totals.nc)} tooltip={TIP.ncOrders} color="nobl"   />
             <KpiCard label={L.aov}           value={fmt$(totalAov)} tooltip={TIP.aov} color="purple" />
             <KpiCard label={L.nvp}         value={nvpPct.toFixed(1)+'%'} tooltip={TIP.nvp} color={nvpPct>=50?'green':nvpPct>=45?'warn':'red'} />
-            <KpiCard label="Product Lines" value={prodAgg.length + ' lines'} color="teal"  />
+            <KpiCard label="Product Lines" value={coreProdAgg.length + ' lines'} color="teal"  />
           </div>
 
           {/* Tabs */}
@@ -473,19 +476,22 @@ function RegionsTab({ geo, geoAgg }) {
 /* ═══════════════════════════════════════════════════════════════════
    PRODUCTS TAB
 ════════════════════════════════════════════════════════════════════ */
-const PROD_AGG_HEADERS   = ['Product Line','Revenue','Spend','MER','NC Orders','CAC'];
-const PROD_DAILY_HEADERS = ['Date','Product Line','Revenue','Spend','MER','NC Orders','Meta','Google','TikTok','Snap','Pinterest','Bing','AppLovin'];
+const PROD_AGG_HEADERS   = ['Product Line','Revenue','Spend','MER','Units Sold','CAC'];
+const PROD_DAILY_HEADERS = ['Date','Product Line','Revenue','Spend','MER','Units Sold','Meta','Google','TikTok','Snap','Pinterest','Bing','AppLovin'];
 
 function ProductsTab({ products, prodAgg }) {
-  const totalRev = prodAgg.reduce((s,r) => s + r.revenue, 0);
+  const productAgg = prodAgg.filter(p => CORE_PRODUCT_LINES.includes(p.line));
+  const unallocatedAgg = prodAgg.filter(p => !CORE_PRODUCT_LINES.includes(p.line));
+  const totalRev = productAgg.reduce((s,r) => s + r.revenue, 0);
+  const unallocatedTotal = unallocatedAgg.reduce((s,r) => s + r.spend, 0);
   const capitalize = s => s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
 
-  const aggRows = prodAgg.map(r => ({
+  const aggRows = productAgg.map(r => ({
     'Product Line': capitalize(r.line),
     Revenue:        r.revenue,
     Spend:          r.spend,
     MER:            r.mer,
-    'NC Orders':    r.orders,
+    'Units Sold':   r.orders,
     CAC:            r.spend > 0 && r.orders > 0 ? parseFloat((r.spend/r.orders).toFixed(2)) : null,
   }));
 
@@ -495,7 +501,7 @@ function ProductsTab({ products, prodAgg }) {
     Revenue:          r.revenue,
     Spend:            r.spend,
     MER:              r.mer,
-    'NC Orders':      r.new_cust_orders,
+    'Units Sold':     r.new_cust_orders,
     Meta:             r.meta_spend,
     Google:           r.google_spend,
     TikTok:           r.tiktok_spend,
@@ -506,8 +512,7 @@ function ProductsTab({ products, prodAgg }) {
   }));
 
   // Channel spend breakdown per product
-  const channelKeys = ['meta','google','tiktok','snap','pinterest','bing','applovin'];
-  const chBreakdown = prodAgg.map(p => ({
+  const chBreakdown = productAgg.map(p => ({
     name: capitalize(p.line),
     Meta: p.meta, Google: p.google, TikTok: p.tiktok,
     Snap: p.snap, Pinterest: p.pinterest, Bing: p.bing, AppLovin: p.applovin,
@@ -517,7 +522,7 @@ function ProductsTab({ products, prodAgg }) {
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {/* Product line KPI cards */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))', gap:12 }}>
-        {prodAgg.map(p => (
+        {productAgg.map(p => (
           <div key={p.line} style={{
             background:'var(--bg2)', border:`1px solid ${PROD_COL[p.line]||'var(--border)'}40`,
             borderRadius:12, padding:'16px 18px',
@@ -542,7 +547,7 @@ function ProductsTab({ products, prodAgg }) {
                 <div style={{ fontSize:14, fontWeight:800, color: merColor(p.mer) }}>{p.mer.toFixed(2)}x</div>
               </div>
               <div>
-                <div style={{ fontSize:10, color:'var(--text3)', marginBottom:1 }}>NC Orders</div>
+                <div style={{ fontSize:10, color:'var(--text3)', marginBottom:1 }}>Units Sold</div>
                 <div style={{ fontSize:14, fontWeight:800 }}>{fmtNum(p.orders)}</div>
               </div>
             </div>
@@ -554,6 +559,31 @@ function ProductsTab({ products, prodAgg }) {
           </div>
         ))}
       </div>
+
+      {unallocatedAgg.length > 0 && (
+        <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
+          <div style={{ display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:12, flexWrap:'wrap', marginBottom:12 }}>
+            <div>
+              <div style={{ fontSize:14, fontWeight:700 }}>Mixed / Unclassified Ad Spend</div>
+              <div style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>
+                Kept separate from product MER so Portable/Wooden/Metal are not artificially inflated.
+              </div>
+            </div>
+            <div style={{ fontSize:16, fontWeight:800 }}>{fmt$(unallocatedTotal)}</div>
+          </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:10 }}>
+            {unallocatedAgg.map(p => (
+              <div key={p.line} style={{ background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:8 }}>
+                  <div style={{ width:9, height:9, borderRadius:3, background: PROD_COL[p.line] || '#94a3b8' }} />
+                  <span style={{ fontSize:12, fontWeight:700, textTransform:'capitalize' }}>{p.line}</span>
+                </div>
+                <div style={{ fontSize:15, fontWeight:800 }}>{fmt$(p.spend)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Revenue pie + Channel spend stacked bar */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
