@@ -476,6 +476,11 @@ async function refreshBrand(brand, startYmd, endYmd) {
 
   // FLO products
   if (brand === 'FLO') {
+    // Remove stale product_line rows for this window (e.g. mixed/unclassified split).
+    await pgRun(
+      `DELETE FROM tw_product_daily WHERE brand = $1 AND date >= $2::date AND date <= $3::date`,
+      [brand, startYmd, endYmd],
+    );
     const productRows = await fetchFloProductDaily(brand, startYmd, endYmd);
     for (const row of productRows) {
       const date = String(row.event_date || '').slice(0, 10);
