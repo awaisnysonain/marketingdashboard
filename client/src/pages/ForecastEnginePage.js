@@ -23,6 +23,40 @@ const pct = (n) => (n === null || n === undefined ? '—' : fmtPct(n));
 const mer = (n) => (n === null || n === undefined ? '—' : `${Number(n || 0).toFixed(2)}x`);
 const tooltipStyle = { background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:10, fontSize:12, boxShadow:'0 8px 22px rgba(15,23,42,.10)' };
 
+function monthOptionLabel(key) {
+  if (!key || key === 'all') return 'All months';
+  if (key === 'current') return 'Current month ongoing';
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const idx = Number(String(key).slice(5, 7)) - 1;
+  return `${months[idx] || key} ${String(key).slice(0, 4)}`;
+}
+
+function rowText(row) {
+  return Object.values(row || {}).map(v => String(v ?? '')).join(' ').toLowerCase();
+}
+
+function filterRows(rows, { monthFilter, currentMonthKey, typeFilter, search }) {
+  const q = String(search || '').trim().toLowerCase();
+  return (rows || []).filter(row => {
+    const mk = row.month_key || String(row.date || '').slice(0, 7);
+    const type = String(row.row_type || row.status_label || row.status || '').toLowerCase();
+    const monthOk = monthFilter === 'all' || (monthFilter === 'current' ? mk === currentMonthKey : mk === monthFilter);
+    const typeOk = typeFilter === 'all'
+      || (typeFilter === 'projected' ? (type.includes('project') || type.includes('projection') || type.includes('future') || type.includes('target')) : type.includes(typeFilter));
+    const searchOk = !q || rowText(row).includes(q);
+    return monthOk && typeOk && searchOk;
+  });
+}
+
+function monthOptionsFromRows(...groups) {
+  const keys = new Set();
+  groups.flat().forEach(r => {
+    const mk = r?.month_key || String(r?.date || '').slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(mk)) keys.add(mk);
+  });
+  return [...keys].sort();
+}
+
 function Card({ title, subtitle, children, style }) {
   return (
     <section style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:18, padding:18, boxShadow:'0 10px 30px rgba(15,23,42,.045)', ...style }}>
@@ -81,7 +115,9 @@ function DataTable({ columns, rows, page, pageSize, totalRows, onPageChange, foo
         <thead><tr style={{ color:'var(--text3)', background:'var(--bg3)' }}>
           {columns.map(c => <th key={c.key || c.label} style={{ textAlign:c.align || 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{c.label}</th>)}
         </tr></thead>
-        <tbody>{rows.map((r, i) => <tr key={r.date || r.month_key || `${r.month}-${i}`} style={{ color:'var(--text2)' }}>
+        <tbody>{rows.length === 0 ? (
+          <tr><td colSpan={columns.length} style={{ padding:18, color:'var(--text3)', textAlign:'center' }}>No rows match the selected filters.</td></tr>
+        ) : rows.map((r, i) => <tr key={r.date || r.month_key || `${r.month}-${i}`} style={{ color:'var(--text2)' }}>
           {columns.map(c => <td key={c.key || c.label} style={{ padding:'10px 12px', textAlign:c.align || 'right', whiteSpace:c.wrap ? 'normal' : 'nowrap', borderBottom:'1px solid var(--border)', fontVariantNumeric:'tabular-nums', minWidth:c.minWidth }}>
             {c.render ? c.render(r) : r[c.key]}
           </td>)}
@@ -96,6 +132,9 @@ function DataTable({ columns, rows, page, pageSize, totalRows, onPageChange, foo
 export default function ForecastEnginePage() {
   const [activeTab, setActiveTab] = useState('overview');
   const [asOf, setAsOf] = useState('');
+  const [monthFilter, setMonthFilter] = useState('current');
+  const [typeFilter, setTypeFilter] = useState('all');
+  const [search, setSearch] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -116,11 +155,18 @@ export default function ForecastEnginePage() {
   const airMonthly = data?.air?.monthly || [];
   const airDaily = data?.air?.daily || [];
   const airMonthlyWithTotal = useMemo(() => [...airMonthly, data?.air?.full_year].filter(Boolean), [airMonthly, data?.air?.full_year]);
+  const currentMonthKey = String(data?.as_of || data?.air_as_of || new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const monthOptions = useMemo(() => monthOptionsFromRows(noblMonthly, noblDaily, airMonthly, airDaily), [noblMonthly, noblDaily, airMonthly, airDaily]);
+  const filterState = { monthFilter, currentMonthKey, typeFilter, search };
+  const filteredNoblMonthly = useMemo(() => filterRows(noblMonthly, filterState), [noblMonthly, monthFilter, currentMonthKey, typeFilter, search]);
+  const filteredNoblDaily = useMemo(() => filterRows(noblDaily, filterState), [noblDaily, monthFilter, currentMonthKey, typeFilter, search]);
+  const filteredAirMonthly = useMemo(() => filterRows(airMonthlyWithTotal, filterState), [airMonthlyWithTotal, monthFilter, currentMonthKey, typeFilter, search]);
+  const filteredAirDaily = useMemo(() => filterRows(airDaily, filterState), [airDaily, monthFilter, currentMonthKey, typeFilter, search]);
   const currentNobl = noblMonthly.find(r => r.row_type === 'current_projection') || noblMonthly.find(r => r.month_key === String(data?.as_of || '').slice(0, 7));
   const currentAir = airMonthly.find(r => r.row_type === 'current_projection') || airMonthly.find(r => r.month_key === String(data?.air_as_of || '').slice(0, 7));
 
-  const { page: noblDailyPage, setPage: setNoblDailyPage, pageItems: noblDailyItems, totalRows: noblDailyTotal } = useClientPagination(noblDaily, TABLE_PAGE_SIZE, [noblDaily.length]);
-  const { page: airDailyPage, setPage: setAirDailyPage, pageItems: airDailyItems, totalRows: airDailyTotal } = useClientPagination(airDaily, TABLE_PAGE_SIZE, [airDaily.length]);
+  const { page: noblDailyPage, setPage: setNoblDailyPage, pageItems: noblDailyItems, totalRows: noblDailyTotal } = useClientPagination(filteredNoblDaily, TABLE_PAGE_SIZE, [filteredNoblDaily.length, monthFilter, typeFilter, search]);
+  const { page: airDailyPage, setPage: setAirDailyPage, pageItems: airDailyItems, totalRows: airDailyTotal } = useClientPagination(filteredAirDaily, TABLE_PAGE_SIZE, [filteredAirDaily.length, monthFilter, typeFilter, search]);
 
   const chartRows = noblMonthly.map(r => ({
     month: String(r.month || '').replace(' 2026', ''),
@@ -154,6 +200,20 @@ export default function ForecastEnginePage() {
       <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:18 }}>
         {TAB_META.map(([id, label]) => <TabButton key={id} id={id} label={label} active={activeTab === id} onClick={setActiveTab} />)}
       </div>
+
+      <FilterPanel
+        activeTab={activeTab}
+        monthFilter={monthFilter}
+        setMonthFilter={setMonthFilter}
+        typeFilter={typeFilter}
+        setTypeFilter={setTypeFilter}
+        search={search}
+        setSearch={setSearch}
+        monthOptions={monthOptions}
+        currentMonthKey={currentMonthKey}
+      />
+
+      <CurrentMonthStrip currentMonthKey={currentMonthKey} currentNobl={currentNobl} currentAir={currentAir} />
 
       {activeTab === 'overview' && (
         <>
@@ -193,11 +253,74 @@ export default function ForecastEnginePage() {
         </>
       )}
 
-      {activeTab === 'nobl-monthly' && <NoblMonthly rows={noblMonthly} />}
+      {activeTab === 'nobl-monthly' && <NoblMonthly rows={filteredNoblMonthly} />}
       {activeTab === 'nobl-daily' && <NoblDaily rows={noblDailyItems} page={noblDailyPage} totalRows={noblDailyTotal} onPageChange={setNoblDailyPage} />}
-      {activeTab === 'air-monthly' && <AirMonthly rows={airMonthlyWithTotal} />}
+      {activeTab === 'air-monthly' && <AirMonthly rows={filteredAirMonthly} />}
       {activeTab === 'air-daily' && <AirDaily rows={airDailyItems} page={airDailyPage} totalRows={airDailyTotal} onPageChange={setAirDailyPage} />}
       {activeTab === 'methodology' && <Methodology data={data} />}
+    </div>
+  );
+}
+
+function FilterPanel({ activeTab, monthFilter, setMonthFilter, typeFilter, setTypeFilter, search, setSearch, monthOptions, currentMonthKey }) {
+  const typeOptions = [
+    ['all', 'All row types'],
+    ['actual', 'Actual'],
+    ['projected', 'Projected / Forecast'],
+    ['missing', 'Missing actuals'],
+    ['target', 'Target'],
+  ];
+  return (
+    <section style={{
+      display:'grid', gridTemplateColumns:'minmax(220px, .85fr) minmax(180px, .65fr) minmax(260px, 1fr) auto', gap:10,
+      alignItems:'center', marginBottom:14, padding:12, border:'1px solid var(--border)', borderRadius:18,
+      background:'linear-gradient(135deg, rgba(99,102,241,.07), rgba(20,184,166,.06)), var(--bg2)',
+      boxShadow:'0 8px 22px rgba(15,23,42,.035)',
+    }}>
+      <div>
+        <div style={filterLabel}>Month</div>
+        <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} style={controlStyle}>
+          <option value="current">Current month ongoing ({monthOptionLabel(currentMonthKey)})</option>
+          <option value="all">All months</option>
+          {monthOptions.map(m => <option key={m} value={m}>{monthOptionLabel(m)}</option>)}
+        </select>
+      </div>
+      <div>
+        <div style={filterLabel}>Row type</div>
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={controlStyle}>
+          {typeOptions.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+        </select>
+      </div>
+      <div>
+        <div style={filterLabel}>Search</div>
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search sale, drop, reason, status…" style={controlStyle} />
+      </div>
+      <button type="button" onClick={() => { setMonthFilter('current'); setTypeFilter('all'); setSearch(''); }} style={{ ...controlStyle, cursor:'pointer', fontWeight:900, color:'#6366f1', alignSelf:'end' }}>
+        Reset to current
+      </button>
+      <div style={{ gridColumn:'1 / -1', fontSize:11, color:'var(--text3)', lineHeight:1.45 }}>
+        Showing <strong>{activeTab.replace('-', ' ')}</strong>. Default is always the ongoing current month so you see what is happening now first.
+      </div>
+    </section>
+  );
+}
+
+function CurrentMonthStrip({ currentMonthKey, currentNobl, currentAir }) {
+  return (
+    <div style={{
+      display:'grid', gridTemplateColumns:'minmax(220px, .8fr) repeat(4, minmax(140px, 1fr))', gap:10,
+      marginBottom:18, padding:14, borderRadius:20, border:'1px solid rgba(99,102,241,.20)',
+      background:'radial-gradient(circle at top left, rgba(99,102,241,.14), transparent 32%), var(--bg2)',
+    }}>
+      <div style={{ display:'flex', flexDirection:'column', justifyContent:'center' }}>
+        <div style={{ fontSize:11, textTransform:'uppercase', letterSpacing:'.7px', color:'var(--text3)', fontWeight:900 }}>Current month ongoing</div>
+        <div style={{ fontSize:22, fontWeight:950, color:'var(--text)', marginTop:3 }}>{monthOptionLabel(currentMonthKey)}</div>
+        <div style={{ fontSize:11, color:'var(--text3)', marginTop:4 }}>Pinned on every tab.</div>
+      </div>
+      <StatCard label="NOBL current P50" value={money(currentNobl?.projected_revenue)} sub={pct(currentNobl?.variance_pct)} tone="indigo" />
+      <StatCard label={`NOBL current ${L.mer}`} value={mer(currentNobl?.projected_mer)} sub={`Target ${mer(currentNobl?.mer_target)}`} tone="teal" />
+      <StatCard label="Air current forecast" value={money(currentAir?.total_air_rev_net_est)} sub="Forecast Air revenue" tone="green" />
+      <StatCard label="Air actual so far" value={money(currentAir?.actual_air_rev_net)} sub="Database actual" tone="amber" />
     </div>
   );
 }
@@ -297,3 +420,4 @@ function Methodology({ data }) {
 }
 
 const controlStyle = { padding:'10px 12px', border:'1px solid var(--border2)', borderRadius:12, background:'var(--bg2)', color:'var(--text)', fontFamily:'var(--font-body)', width:'100%' };
+const filterLabel = { fontSize:10.5, color:'var(--text3)', fontWeight:900, textTransform:'uppercase', letterSpacing:'.6px', margin:'0 0 5px 2px' };
