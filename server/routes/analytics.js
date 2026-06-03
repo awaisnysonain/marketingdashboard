@@ -1222,6 +1222,191 @@ async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   };
 }
 
+async function loadNoblStoreActualDailyMap(start, end) {
+  const res = await pgQuery(`
+    SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+           COALESCE(order_revenue, shopify_revenue, total_revenue, 0)::numeric(14,2) AS revenue,
+           COALESCE(total_spend, 0)::numeric(14,2) AS spend,
+           COALESCE(total_orders, 0)::int AS orders
+    FROM nobl_brand_tw_summary_daily
+    WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+    ORDER BY date ASC
+  `, [start, end]);
+  return Object.fromEntries(fmtRows(res.rows).map(r => [r.date, {
+    date: r.date,
+    revenue: toNum(r.revenue),
+    spend: toNum(r.spend),
+    orders: Math.round(toNum(r.orders)),
+  }]));
+}
+
+function buildNoblStoreDailyForecast(storeForecast, actualByDate) {
+  const asOf = storeForecast.as_of;
+  const currentMonth = monthKey(asOf);
+  const monthlyByKey = Object.fromEntries((storeForecast.monthly || []).map(r => [r.month_key, r]));
+  const rows = [];
+
+  FORECAST_MONTHS_2026.forEach(key => {
+    const month = monthlyByKey[key] || {};
+    const dates = eachDateISO(`${key}-01`, monthEndFromKey(key));
+    const futureDates = dates.filter(d => d > asOf);
+    const futureWeight = futureDates.reduce((s, d) => s + forecastDayFactors(d).weight, 0) || futureDates.length || 1;
+    const actualRevenue = dates.filter(d => d <= asOf).reduce((s, d) => s + toNum(actualByDate[d]?.revenue), 0);
+    const actualSpend = dates.filter(d => d <= asOf).reduce((s, d) => s + toNum(actualByDate[d]?.spend), 0);
+    const projectedMonthRevenue = toNum(month.projected_revenue || month.plan_revenue || actualRevenue);
+    const remainingRevenue = key === currentMonth
+      ? Math.max(0, projectedMonthRevenue - actualRevenue)
+      : (key > currentMonth ? projectedMonthRevenue : 0);
+    const targetMer = toNum(month.mer_target || FORECAST_BRANDS.NOBL.merTargets[key] || 3);
+
+    dates.forEach(date => {
+      const actual = date <= asOf ? actualByDate[date] : null;
+      const factors = forecastDayFactors(date);
+      const isFuture = date > asOf;
+      const allocatedRevenue = isFuture ? remainingRevenue * (factors.weight / futureWeight) : 0;
+      const projectedRevenue = actual ? toNum(actual.revenue) : allocatedRevenue;
+      const projectedSpend = actual ? toNum(actual.spend) : (targetMer > 0 ? projectedRevenue / targetMer : 0);
+      rows.push({
+        date,
+        month: monthLabel(key),
+        month_key: key,
+        row_type: actual ? 'Actual' : (date <= asOf ? 'Missing Actual' : 'Projected'),
+        actual_revenue: actual ? toNum(actual.revenue) : null,
+        actual_spend: actual ? toNum(actual.spend) : null,
+        actual_orders: actual ? Math.round(toNum(actual.orders)) : null,
+        actual_mer: actual && toNum(actual.spend) > 0 ? toNum(actual.revenue) / toNum(actual.spend) : null,
+        forecast_revenue: projectedRevenue,
+        forecast_spend: projectedSpend,
+        forecast_mer: projectedSpend > 0 ? projectedRevenue / projectedSpend : null,
+        plan_revenue_month: month.plan_revenue || null,
+        projected_revenue_month: month.projected_revenue || null,
+        mer_target: targetMer,
+        day_weight: factors.day_weight,
+        seasonality: factors.seasonality,
+        sale_name: factors.sale_name,
+        sale_tier: factors.sale_tier,
+        drop_type: factors.drop_type,
+        weight: factors.weight,
+        reason: actual
+          ? 'Database actual from Triple Whale daily summary.'
+          : (date <= asOf ? 'Completed day is missing from the database; refresh/backfill ETL.' : 'Database-backed forecast allocated from monthly P50 by day-of-week, sale, seasonality, and drop weights.'),
+      });
+    });
+  });
+
+  return rows;
+}
+
+async function loadNoblAirActualDailyMap(start, end) {
+  const res = await pgQuery(`
+    SELECT date::text AS date,
+           total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
+           tag_net_sales, sub_net_sales, rebill_revenue, combined_net_revenue,
+           mature_count, converted_count
+    FROM nobl_air_daily
+    WHERE date BETWEEN $1::date AND $2::date
+    ORDER BY date ASC
+  `, [start, end]);
+  return Object.fromEntries(fmtRows(res.rows).map(r => [r.date, r]));
+}
+
+function buildNoblAirDailyForecast(storeDailyRows, airActualByDate, airForecast) {
+  const a = airForecast.assumptions || {};
+  const avgRevenuePerOrder = toNum(a.avg_revenue_per_store_order);
+  const attachRate = toNum(a.overall_attach_rate);
+  const activationRate = toNum(a.forecast_activation_rate);
+  const tagPerAirOrder = toNum(a.tag_net_sales_per_air_order);
+  const tierPrice = toNum(a.avg_tier_price_converted_subs);
+
+  return storeDailyRows.map(store => {
+    const actual = airActualByDate[store.date];
+    const hasActual = store.row_type !== 'Projected' && !!actual && (toNum(actual.total_orders) > 0 || toNum(actual.air_orders) > 0 || toNum(actual.combined_net_revenue) !== 0);
+    const rowType = hasActual ? 'Actual' : (store.row_type === 'Projected' ? 'Projected' : 'Missing Actual');
+    const forecastStoreRevenue = toNum(store.forecast_revenue);
+    const forecastEligibleOrders = avgRevenuePerOrder > 0 ? forecastStoreRevenue / avgRevenuePerOrder : 0;
+    const forecastAirOrders = forecastEligibleOrders * attachRate;
+    const forecastActivations = forecastEligibleOrders * activationRate;
+    const forecastTagRevenue = forecastAirOrders * tagPerAirOrder;
+    const forecastSubRevenue = forecastActivations * tierPrice;
+    const forecastAirRevenue = forecastTagRevenue + forecastSubRevenue;
+
+    return {
+      date: store.date,
+      month: store.month,
+      month_key: store.month_key,
+      row_type: rowType,
+      actual_store_revenue: store.actual_revenue,
+      actual_eligible_orders: hasActual ? Math.round(toNum(actual.total_orders)) : null,
+      actual_air_orders: hasActual ? Math.round(toNum(actual.air_orders)) : null,
+      actual_attach_rate: hasActual ? toNum(actual.attach_rate) : null,
+      actual_ttp_rate: hasActual ? toNum(actual.ttp_rate) : null,
+      actual_activation_rate: hasActual ? toNum(actual.activation_rate) : null,
+      actual_tag_rev_net: hasActual ? toNum(actual.tag_net_sales) : null,
+      actual_sub_rev_net: hasActual ? toNum(actual.sub_net_sales) : null,
+      actual_rebill_rev_net: hasActual ? toNum(actual.rebill_revenue) : null,
+      actual_air_rev_net: hasActual ? toNum(actual.combined_net_revenue) : null,
+      mature_count: hasActual ? Math.round(toNum(actual.mature_count)) : null,
+      converted_count: hasActual ? Math.round(toNum(actual.converted_count)) : null,
+      forecast_store_revenue: forecastStoreRevenue,
+      forecast_eligible_orders: Math.round(forecastEligibleOrders),
+      forecast_air_orders: Math.round(forecastAirOrders),
+      forecast_activations: Math.round(forecastActivations),
+      forecast_attach_rate: attachRate,
+      forecast_activation_rate: activationRate,
+      forecast_tag_rev_net: Number(forecastTagRevenue.toFixed(2)),
+      forecast_sub_rev_net: Number(forecastSubRevenue.toFixed(2)),
+      forecast_total_air_rev_net: Number(forecastAirRevenue.toFixed(2)),
+      target_status: rowType === 'Projected'
+        ? 'Future'
+        : (!hasActual ? 'Missing Actual' : (toNum(actual.combined_net_revenue) >= forecastAirRevenue ? 'Target Met' : 'Below Target')),
+      forecast_note: 'Database-backed NOBL Air forecast: NOBL store forecast × eligible AOV, attach, and activation assumptions from nobl_air_daily.',
+    };
+  });
+}
+
+// GET /dashboard-forecast — DB-backed replacement for sheet forecast tabs.
+router.get('/dashboard-forecast', async (req, res) => {
+  try {
+    const requestedAsOf = req.query.asOf ? String(req.query.asOf).slice(0, 10) : null;
+    const nobl = await loadForecastBrand('NOBL', requestedAsOf);
+    const airAsOf = await capNoblAirEndDate(nobl.as_of);
+    const ttpCohort = await loadNoblAirTtpAsOfEnd(airAsOf, null);
+    const air = await loadNoblAirRevenueForecast('2026-03-01', airAsOf, [], ttpCohort);
+    const storeActuals = await loadNoblStoreActualDailyMap('2026-01-01', '2026-12-31');
+    const storeDaily = buildNoblStoreDailyForecast(nobl, storeActuals);
+    const airActuals = await loadNoblAirActualDailyMap('2026-03-01', '2026-12-31');
+    const airDaily = buildNoblAirDailyForecast(storeDaily.filter(r => r.date >= '2026-03-01'), airActuals, air);
+
+    res.json({
+      as_of: nobl.as_of,
+      air_as_of: airAsOf,
+      data_source: 'Database first: nobl_brand_tw_summary_daily + nobl_air_daily. Google Sheets are not used for dashboard values.',
+      nobl: {
+        monthly: nobl.monthly,
+        daily: storeDaily,
+        full_year: nobl.full_year,
+        narrative: nobl.narrative,
+        redlines: nobl.redlines,
+        assumptions: nobl.assumptions,
+      },
+      air: {
+        monthly: air.rows,
+        daily: airDaily,
+        full_year: air.full_year,
+        assumptions: air.assumptions,
+      },
+      methodology: {
+        purpose: 'One dashboard page for the four forecast tabs: NOBL monthly, NOBL daily, NOBL Air monthly, and NOBL Air daily.',
+        checks: ['actuals come from database tables first', 'future rows use weighted forecast model', 'missing completed days are shown as Missing Actual instead of silently using sheet values'],
+        database_tables: ['nobl_brand_tw_summary_daily', 'nobl_air_daily'],
+      },
+    });
+  } catch (e) {
+    console.error('[Analytics /dashboard-forecast]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 async function capNoblAirEndDate(end) {
   const r = await pgQuery(
     `SELECT MAX(end_date::date)::text AS latest_complete_date

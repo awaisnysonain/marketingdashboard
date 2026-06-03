@@ -1,50 +1,32 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
-  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  ComposedChart,
+  Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { getForecastEngine, fmt$, fmtNum, fmtPct } from '../utils/api';
+import { getDashboardForecast, fmt$, fmtNum, fmtPct } from '../utils/api';
 import TablePagination from '../components/TablePagination';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { L, PAGE } from '../copy/plainLanguage';
 
-const STATUS = {
-  green: { label: 'On Track', bg: 'rgba(34,197,94,.12)', color: '#16a34a', border: 'rgba(34,197,94,.26)' },
-  amber: { label: 'Watch', bg: 'rgba(245,158,11,.13)', color: '#d97706', border: 'rgba(245,158,11,.28)' },
-  red: { label: 'Off Track', bg: 'rgba(239,68,68,.12)', color: '#dc2626', border: 'rgba(239,68,68,.26)' },
-  model: { label: 'Model', bg: 'rgba(99,102,241,.12)', color: '#6366f1', border: 'rgba(99,102,241,.25)' },
-};
-
-const BRAND_ACCENT = {
-  NOBL: { from: '#6366f1', to: '#14b8a6', soft: 'rgba(99,102,241,.10)' },
-  FLO: { from: '#ec4899', to: '#f59e0b', soft: 'rgba(236,72,153,.10)' },
-};
+const TAB_META = [
+  ['overview', 'Overview'],
+  ['nobl-monthly', 'NOBL Monthly'],
+  ['nobl-daily', 'NOBL Daily'],
+  ['air-monthly', 'NOBL Air Monthly'],
+  ['air-daily', 'NOBL Air Daily'],
+  ['methodology', 'Methodology'],
+];
 
 const money = (n) => (n === null || n === undefined ? '—' : fmt$(n));
 const num = (n) => (n === null || n === undefined ? '—' : fmtNum(n));
 const pct = (n) => (n === null || n === undefined ? '—' : fmtPct(n));
-const mer = (n) => (n === null || n === undefined ? '—' : `${Number(n).toFixed(2)}x`);
+const mer = (n) => (n === null || n === undefined ? '—' : `${Number(n || 0).toFixed(2)}x`);
+const tooltipStyle = { background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:10, fontSize:12, boxShadow:'0 8px 22px rgba(15,23,42,.10)' };
 
-function statusMeta(s) { return STATUS[s] || STATUS.model; }
-function statusPill(s) {
-  const x = statusMeta(s);
-  return (
-    <span style={{ display:'inline-flex', alignItems:'center', gap:6, padding:'5px 9px', borderRadius:999, background:x.bg, color:x.color, border:`1px solid ${x.border}`, fontSize:11, fontWeight:800, whiteSpace:'nowrap' }}>
-      <span style={{ width:6, height:6, borderRadius:999, background:x.color }} />{x.label}
-    </span>
-  );
-}
-
-function Card({ title, subtitle, children, style, action }) {
+function Card({ title, subtitle, children, style }) {
   return (
     <section style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:18, padding:18, boxShadow:'0 10px 30px rgba(15,23,42,.045)', ...style }}>
-      {(title || action) && (
-        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:12, marginBottom:subtitle ? 5 : 14 }}>
-          {title && <div style={{ fontSize:15, fontWeight:900, color:'var(--text)' }}>{title}</div>}
-          {action}
-        </div>
-      )}
+      {title && <div style={{ fontSize:15, fontWeight:900, color:'var(--text)', marginBottom:subtitle ? 5 : 14 }}>{title}</div>}
       {subtitle && <div style={{ fontSize:12, color:'var(--text3)', marginBottom:14, lineHeight:1.55 }}>{subtitle}</div>}
       {children}
     </section>
@@ -57,7 +39,7 @@ function StatCard({ label, value, sub, tone = 'indigo' }) {
     teal: ['#14b8a6', 'rgba(20,184,166,.12)'],
     green: ['#22c55e', 'rgba(34,197,94,.12)'],
     amber: ['#f59e0b', 'rgba(245,158,11,.13)'],
-    rose: ['#ec4899', 'rgba(236,72,153,.12)'],
+    rose: ['#ef4444', 'rgba(239,68,68,.12)'],
   };
   const [c, bg] = tones[tone] || tones.indigo;
   return (
@@ -71,40 +53,48 @@ function StatCard({ label, value, sub, tone = 'indigo' }) {
   );
 }
 
-function Metric({ label, value, hint }) {
+function Pill({ value }) {
+  const text = String(value || '—');
+  const lower = text.toLowerCase();
+  const good = lower.includes('actual') || lower.includes('target met') || lower === 'green' || lower.includes('track');
+  const warn = lower.includes('missing') || lower.includes('watch') || lower === 'amber' || lower.includes('pending');
+  const bad = lower.includes('below') || lower === 'red' || lower.includes('off');
+  const color = bad ? '#dc2626' : warn ? '#d97706' : good ? '#16a34a' : '#6366f1';
+  const bg = bad ? 'rgba(239,68,68,.12)' : warn ? 'rgba(245,158,11,.13)' : good ? 'rgba(34,197,94,.12)' : 'rgba(99,102,241,.12)';
+  return <span style={{ display:'inline-flex', alignItems:'center', padding:'5px 9px', borderRadius:999, background:bg, color, fontSize:11, fontWeight:800, whiteSpace:'nowrap' }}>{text}</span>;
+}
+
+function TabButton({ id, label, active, onClick }) {
   return (
-    <div style={{ padding:'11px 12px', border:'1px solid var(--border)', borderRadius:14, background:'var(--bg3)' }}>
-      <div style={{ fontSize:11, color:'var(--text3)', marginBottom:5 }}>{label}</div>
-      <div style={{ fontSize:18, fontWeight:900, color:'var(--text)' }}>{value}</div>
-      {hint && <div style={{ marginTop:4, fontSize:10.5, color:'var(--text4)' }}>{hint}</div>}
+    <button type="button" onClick={() => onClick(id)} style={{
+      border:'1px solid var(--border2)', borderRadius:999, padding:'9px 14px', cursor:'pointer', fontSize:12, fontWeight:900,
+      background:active ? 'linear-gradient(135deg, #6366f1, #14b8a6)' : 'var(--bg2)',
+      color:active ? '#fff' : 'var(--text2)', fontFamily:'var(--font-body)',
+    }}>{label}</button>
+  );
+}
+
+function DataTable({ columns, rows, page, pageSize, totalRows, onPageChange, footer }) {
+  return (
+    <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:14 }}>
+      <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
+        <thead><tr style={{ color:'var(--text3)', background:'var(--bg3)' }}>
+          {columns.map(c => <th key={c.key || c.label} style={{ textAlign:c.align || 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{c.label}</th>)}
+        </tr></thead>
+        <tbody>{rows.map((r, i) => <tr key={r.date || r.month_key || `${r.month}-${i}`} style={{ color:'var(--text2)' }}>
+          {columns.map(c => <td key={c.key || c.label} style={{ padding:'10px 12px', textAlign:c.align || 'right', whiteSpace:c.wrap ? 'normal' : 'nowrap', borderBottom:'1px solid var(--border)', fontVariantNumeric:'tabular-nums', minWidth:c.minWidth }}>
+            {c.render ? c.render(r) : r[c.key]}
+          </td>)}
+        </tr>)}</tbody>
+        {footer}
+      </table>
+      {page && <TablePagination page={page} pageSize={pageSize} totalRows={totalRows} onPageChange={onPageChange} />}
     </div>
   );
 }
 
-function BrandSummaryCard({ brand, selected, onClick }) {
-  const accent = BRAND_ACCENT[brand.brand] || BRAND_ACCENT.NOBL;
-  return (
-    <button type="button" onClick={onClick} style={{ textAlign:'left', cursor:'pointer', background:selected ? `linear-gradient(135deg, ${accent.soft}, var(--bg2))` : 'var(--bg2)', border:`1px solid ${selected ? accent.from : 'var(--border)'}`, borderRadius:18, padding:17, boxShadow:selected ? `0 12px 26px ${accent.soft}` : '0 8px 22px rgba(15,23,42,.035)', color:'var(--text)', fontFamily:'var(--font-body)' }}>
-      <div style={{ display:'flex', justifyContent:'space-between', gap:10, alignItems:'center', marginBottom:12 }}>
-        <div>
-          <div style={{ fontWeight:900, fontSize:15 }}>{brand.label}</div>
-          <div style={{ fontSize:11, color:'var(--text3)', marginTop:3 }}>As of {brand.as_of}</div>
-        </div>
-        {statusPill(brand.full_year?.status)}
-      </div>
-      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:9 }}>
-        <Metric label="Current P50" value={money(brand.current_month?.projected_revenue)} />
-        <Metric label="FY Projection" value={money(brand.full_year?.projected_revenue)} />
-        <Metric label={`FY ${L.mer}`} value={mer(brand.full_year?.projected_mer)} />
-        <Metric label="Plan Variance" value={brand.full_year?.variance_pct == null ? '—' : pct(brand.full_year.variance_pct)} />
-      </div>
-    </button>
-  );
-}
-
 export default function ForecastEnginePage() {
-  const [brand, setBrand] = useState('ALL');
-  const [detailBrand, setDetailBrand] = useState('NOBL');
+  const [activeTab, setActiveTab] = useState('overview');
   const [asOf, setAsOf] = useState('');
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -114,234 +104,196 @@ export default function ForecastEnginePage() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    getForecastEngine(brand, asOf)
+    getDashboardForecast(asOf)
       .then(d => { if (!cancelled) setData(d); })
       .catch(e => { if (!cancelled) setError(e.message || String(e)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [brand, asOf]);
+  }, [asOf]);
 
-  const brands = data?.brands || [];
-  const selected = brands.find(b => b.brand === detailBrand) || brands[0] || null;
-  const combined = data?.combined || {};
-  const dailyProjection = selected?.daily_projection || [];
-  const {
-    page: dailyPage,
-    setPage: setDailyPage,
-    pageItems: dailyPageItems,
-    totalRows: dailyTotal,
-  } = useClientPagination(dailyProjection, TABLE_PAGE_SIZE, [detailBrand, dailyProjection.length]);
+  const noblMonthly = data?.nobl?.monthly || [];
+  const noblDaily = data?.nobl?.daily || [];
+  const airMonthly = data?.air?.monthly || [];
+  const airDaily = data?.air?.daily || [];
+  const airMonthlyWithTotal = useMemo(() => [...airMonthly, data?.air?.full_year].filter(Boolean), [airMonthly, data?.air?.full_year]);
+  const currentNobl = noblMonthly.find(r => r.row_type === 'current_projection') || noblMonthly.find(r => r.month_key === String(data?.as_of || '').slice(0, 7));
+  const currentAir = airMonthly.find(r => r.row_type === 'current_projection') || airMonthly.find(r => r.month_key === String(data?.air_as_of || '').slice(0, 7));
 
-  useEffect(() => {
-    if (!brands.length) return;
-    if (brand !== 'ALL') setDetailBrand(brand);
-    else if (!brands.some(b => b.brand === detailBrand)) setDetailBrand(brands[0].brand);
-  }, [brands, brand, detailBrand]);
+  const { page: noblDailyPage, setPage: setNoblDailyPage, pageItems: noblDailyItems, totalRows: noblDailyTotal } = useClientPagination(noblDaily, TABLE_PAGE_SIZE, [noblDaily.length]);
+  const { page: airDailyPage, setPage: setAirDailyPage, pageItems: airDailyItems, totalRows: airDailyTotal } = useClientPagination(airDaily, TABLE_PAGE_SIZE, [airDaily.length]);
 
-  const chartRows = useMemo(() => {
-    if (!selected) return [];
-    return selected.monthly.map(r => ({
-      ...r,
-      plan_revenue: r.plan_revenue || null,
-      actual_revenue: r.actual_revenue || null,
-      projected_revenue: r.projected_revenue || null,
-      projected_mer: r.projected_mer || null,
-      mer_target: r.mer_target || null,
-    }));
-  }, [selected]);
+  const chartRows = noblMonthly.map(r => ({
+    month: String(r.month || '').replace(' 2026', ''),
+    nobl: r.projected_revenue || 0,
+    plan: r.plan_revenue || 0,
+    air: airMonthly.find(a => a.month_key === r.month_key)?.forecast_total_air_rev_net || 0,
+  }));
 
-  const redlines = brands.flatMap(b => (b.redlines || []).map(r => ({ ...r, brand:b.label })));
-
-  if (loading) return <div style={{ padding:20, color:'var(--text3)' }}>Loading forecast engine…</div>;
+  if (loading) return <div style={{ padding:20, color:'var(--text3)' }}>Loading database forecast…</div>;
   if (error) return <div style={{ padding:20, color:'var(--danger)' }}>Forecast error: {error}</div>;
 
   return (
     <div style={{ paddingBottom:24 }}>
-      <header style={{
-        display:'grid', gridTemplateColumns:'minmax(0, 1.6fr) minmax(280px, .8fr)', gap:18, marginBottom:18,
-      }}>
-        <div style={{
-          position:'relative', overflow:'hidden', borderRadius:24, padding:24,
-          background:'radial-gradient(circle at top left, rgba(99,102,241,.24), transparent 34%), radial-gradient(circle at bottom right, rgba(20,184,166,.18), transparent 30%), var(--bg2)',
-          border:'1px solid rgba(99,102,241,.22)', boxShadow:'0 18px 44px rgba(15,23,42,.08)',
-        }}>
-          <div style={{ position:'absolute', right:-50, top:-60, width:180, height:180, borderRadius:'50%', background:'rgba(99,102,241,.10)' }} />
+      <header style={{ display:'grid', gridTemplateColumns:'minmax(0, 1.6fr) minmax(280px, .8fr)', gap:18, marginBottom:18 }}>
+        <div style={{ position:'relative', overflow:'hidden', borderRadius:24, padding:24, background:'radial-gradient(circle at top left, rgba(99,102,241,.24), transparent 34%), radial-gradient(circle at bottom right, rgba(20,184,166,.18), transparent 30%), var(--bg2)', border:'1px solid rgba(99,102,241,.22)', boxShadow:'0 18px 44px rgba(15,23,42,.08)' }}>
           <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
-            {['P50 Forecast', 'P25–P75 Range', 'Calendar-aware', `${L.mer} + ${L.sales}`].map(x => (
-              <span key={x} style={{ padding:'5px 10px', borderRadius:999, background:'rgba(255,255,255,.65)', border:'1px solid var(--border)', fontSize:11, fontWeight:800, color:'var(--text2)' }}>{x}</span>
-            ))}
+            {['Database-backed', 'NOBL + NOBL Air', 'Daily + Monthly tabs', 'No sheet dependency'].map(x => <span key={x} style={{ padding:'5px 10px', borderRadius:999, background:'rgba(255,255,255,.65)', border:'1px solid var(--border)', fontSize:11, fontWeight:800, color:'var(--text2)' }}>{x}</span>)}
           </div>
           <h1 style={{ margin:0, fontSize:30, letterSpacing:'-.03em', lineHeight:1.05, fontWeight:950, color:'var(--text)', fontFamily:'var(--font-head)' }}>{PAGE.forecastEngine.title}</h1>
-          <p style={{ margin:'10px 0 0', maxWidth:760, color:'var(--text2)', fontSize:14, lineHeight:1.65 }}>{PAGE.forecastEngine.desc}</p>
+          <p style={{ margin:'10px 0 0', maxWidth:820, color:'var(--text2)', fontSize:14, lineHeight:1.65 }}>{PAGE.forecastEngine.desc} This page replaces the old sheet-only forecast view with four proper tabs: NOBL Monthly, NOBL Daily, NOBL Air Monthly, and NOBL Air Daily.</p>
         </div>
-        <Card title="Controls" subtitle="Choose stores and forecast as-of date." style={{ borderRadius:24 }}>
+        <Card title="Controls" subtitle={`NOBL actuals through ${data?.as_of || 'latest'} · Air actuals through ${data?.air_as_of || 'latest'}.`} style={{ borderRadius:24 }}>
           <div style={{ display:'grid', gap:10 }}>
-            <select value={brand} onChange={e => setBrand(e.target.value)} style={controlStyle}>
-              <option value="ALL">All Stores</option>
-              <option value="NOBL">NOBL Travel</option>
-              <option value="FLO">Pilates FLO</option>
-            </select>
             <input type="date" value={asOf} onChange={e => setAsOf(e.target.value)} style={controlStyle} />
-            <button type="button" onClick={() => setAsOf('')} style={{ ...controlStyle, cursor:'pointer', fontWeight:900, color:'#6366f1' }}>Use latest actual date</button>
+            <button type="button" onClick={() => setAsOf('')} style={{ ...controlStyle, cursor:'pointer', fontWeight:900, color:'#6366f1' }}>Use latest database actuals</button>
+            <div style={{ fontSize:11, color:'var(--text3)', lineHeight:1.55 }}>{data?.data_source}</div>
           </div>
         </Card>
       </header>
 
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(5, minmax(150px, 1fr))', gap:12, marginBottom:18 }}>
-        <StatCard label={`Combined actual ${L.sales.toLowerCase()}`} value={money(combined.actual_revenue)} sub={`Through ${data?.as_of || 'latest'}`} tone="green" />
-        <StatCard label="Combined FY Projection" value={money(combined.projected_revenue)} sub="Actuals + forecast" tone="indigo" />
-        <StatCard label="Plan / Target" value={combined.plan_revenue ? money(combined.plan_revenue) : '—'} sub="Configured plan" tone="amber" />
-        <StatCard label={`Projected ${L.mer}`} value={mer(combined.projected_mer)} sub="Sales / ad spend" tone="teal" />
-        <StatCard label="Variance vs Plan" value={combined.variance_pct == null ? '—' : pct(combined.variance_pct)} sub={statusMeta(combined.status).label} tone={combined.status === 'red' ? 'rose' : combined.status === 'amber' ? 'amber' : 'green'} />
+      <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:18 }}>
+        {TAB_META.map(([id, label]) => <TabButton key={id} id={id} label={label} active={activeTab === id} onClick={setActiveTab} />)}
       </div>
 
-      <div style={{ display:'grid', gridTemplateColumns:'1.35fr .65fr', gap:16, marginBottom:18 }}>
-        <Card title="Executive narrative" subtitle="Plain-English summary for the selected forecast run.">
-          <div style={{ display:'grid', gap:10 }}>
-            {brands.map(b => (
-              <div key={b.brand} style={{ padding:'12px 14px', borderRadius:14, border:'1px solid var(--border)', background:'var(--bg3)', lineHeight:1.6, fontSize:13, color:'var(--text2)' }}>
-                <strong style={{ color:'var(--text)' }}>{b.label}</strong> — {b.narrative}
-              </div>
-            ))}
-          </div>
-        </Card>
-        <Card title="Redline monitor" subtitle="Non-negotiable guardrails from the brief.">
-          {redlines.length === 0 ? (
-            <div style={{ padding:14, borderRadius:14, background:'rgba(34,197,94,.10)', border:'1px solid rgba(34,197,94,.22)', color:'#16a34a', fontWeight:900 }}>No redline breaches detected.</div>
-          ) : redlines.map((r, i) => (
-            <div key={i} style={{ padding:12, borderRadius:12, background:'rgba(239,68,68,.10)', border:'1px solid rgba(239,68,68,.22)', color:'#dc2626', fontSize:12, lineHeight:1.55, marginBottom:8 }}><strong>{r.brand} · {r.code}</strong>: {r.message}</div>
-          ))}
-          <div style={{ marginTop:12, fontSize:11.5, color:'var(--text3)', lineHeight:1.55 }}>No flat rolling average. Drop windows stay discrete. BFCM is model anchored. NOBL full-year below $404M requires human review.</div>
-        </Card>
-      </div>
-
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(300px, 1fr))', gap:14, marginBottom:16 }}>
-        {brands.map(b => <BrandSummaryCard key={b.brand} brand={b} selected={selected?.brand === b.brand} onClick={() => setDetailBrand(b.brand)} />)}
-      </div>
-
-      {selected && (
+      {activeTab === 'overview' && (
         <>
-          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:12, margin:'10px 0 14px', flexWrap:'wrap' }}>
-            <div>
-              <div style={{ fontSize:18, fontWeight:950, color:'var(--text)' }}>{selected.label} detail</div>
-              <div style={{ fontSize:12, color:'var(--text3)', marginTop:2 }}>Actuals through {selected.as_of}; current month uses weighted remaining-days projection.</div>
-            </div>
-            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
-              {brands.map(b => (
-                <button key={b.brand} type="button" onClick={() => setDetailBrand(b.brand)} style={{
-                  border:'1px solid var(--border2)', borderRadius:999, padding:'8px 13px', cursor:'pointer', fontSize:12, fontWeight:900,
-                  background:selected.brand === b.brand ? `linear-gradient(135deg, ${(BRAND_ACCENT[b.brand] || BRAND_ACCENT.NOBL).from}, ${(BRAND_ACCENT[b.brand] || BRAND_ACCENT.NOBL).to})` : 'var(--bg2)',
-                  color:selected.brand === b.brand ? '#fff' : 'var(--text2)',
-                }}>{b.label}</button>
-              ))}
-            </div>
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(6, minmax(140px, 1fr))', gap:12, marginBottom:18 }}>
+            <StatCard label="NOBL FY Forecast" value={money(data?.nobl?.full_year?.projected_revenue)} sub="Store sales P50" tone="indigo" />
+            <StatCard label="NOBL FY Plan" value={money(data?.nobl?.full_year?.plan_revenue)} sub={pct(data?.nobl?.full_year?.variance_pct)} tone="amber" />
+            <StatCard label={`NOBL FY ${L.mer}`} value={mer(data?.nobl?.full_year?.projected_mer)} sub="Sales / ad spend" tone="teal" />
+            <StatCard label="Air FY Forecast" value={money(data?.air?.full_year?.total_air_rev_net_est)} sub="Tag + sub + rebill estimate" tone="green" />
+            <StatCard label="Air attach used" value={pct(data?.air?.assumptions?.overall_attach_rate)} sub="From nobl_air_daily" tone="teal" />
+            <StatCard label="Air activation used" value={pct(data?.air?.assumptions?.forecast_activation_rate)} sub="Trailing cohort basis" tone="indigo" />
           </div>
-
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(6, minmax(140px, 1fr))', gap:12, marginBottom:16 }}>
-            <StatCard label="Actual YTD" value={money(selected.full_year?.actual_revenue)} tone="green" />
-            <StatCard label="Current P50" value={money(selected.current_month?.projected_revenue)} tone="indigo" />
-            <StatCard label="Current Range" value={`${money(selected.current_month?.p25)}–${money(selected.current_month?.p75)}`} tone="teal" />
-            <StatCard label="FY Projection" value={money(selected.full_year?.projected_revenue)} tone="indigo" />
-            <StatCard label={`FY ${L.mer}`} value={mer(selected.full_year?.projected_mer)} tone="amber" />
-            <StatCard label="FY Status" value={statusMeta(selected.full_year?.status).label} tone={selected.full_year?.status === 'red' ? 'rose' : selected.full_year?.status === 'amber' ? 'amber' : 'green'} />
-          </div>
-
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(390px, 1fr))', gap:16, marginBottom:16 }}>
-            <Card title="Monthly sales forecast" subtitle="Actuals, plan, and P50 projection by month.">
-              <ResponsiveContainer width="100%" height={315}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
+            <Card title="Monthly forecast overview" subtitle="NOBL store revenue vs plan, with NOBL Air forecast layered on the same month axis.">
+              <ResponsiveContainer width="100%" height={330}>
                 <ComposedChart data={chartRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
                   <YAxis tickFormatter={fmt$} tick={{ fontSize:11 }} width={74} stroke="var(--border2)" />
                   <Tooltip formatter={(v, n) => [money(v), n]} contentStyle={tooltipStyle} />
                   <Legend wrapperStyle={{ fontSize:12 }} />
-                  <Bar dataKey="actual_revenue" name="Actual" fill="#22c55e" radius={[3,3,0,0]} />
-                  <Bar dataKey="projected_revenue" name="Projection" fill="#6366f1" radius={[3,3,0,0]} />
-                  <Line dataKey="plan_revenue" name="Plan" stroke="#f59e0b" strokeWidth={2.5} dot={false} />
+                  <Bar dataKey="nobl" name="NOBL P50" fill="#6366f1" radius={[3,3,0,0]} />
+                  <Line dataKey="plan" name="NOBL Plan" stroke="#f59e0b" strokeWidth={2.5} dot={false} />
+                  <Line dataKey="air" name="NOBL Air" stroke="#14b8a6" strokeWidth={2.5} dot={{ r:3 }} />
                 </ComposedChart>
               </ResponsiveContainer>
             </Card>
-            <Card title={`${L.mer} forecast`} subtitle="Sales per ad dollar tracked alongside top-line sales.">
-              <ResponsiveContainer width="100%" height={315}>
-                <LineChart data={chartRows} margin={{ top:8, right:18, left:0, bottom:4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="month" tick={{ fontSize:11 }} stroke="var(--border2)" />
-                  <YAxis tickFormatter={(v) => `${Number(v || 0).toFixed(1)}x`} tick={{ fontSize:11 }} width={54} stroke="var(--border2)" />
-                  <Tooltip formatter={(v, n) => [`${Number(v || 0).toFixed(2)}x`, n]} contentStyle={tooltipStyle} />
-                  <Legend wrapperStyle={{ fontSize:12 }} />
-                  <Line dataKey="projected_mer" name={`Projected ${L.mer}`} stroke="#14b8a6" strokeWidth={2.5} dot={{ r:3 }} />
-                  <Line dataKey="mer_target" name={`${L.mer} target`} stroke="#f59e0b" strokeWidth={2.5} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
-            </Card>
-          </div>
-
-          <Card title="Monthly forecast detail" subtitle="Every projection has a reason and a confidence range. Green/amber/red status uses plan variance thresholds." style={{ marginBottom:16 }}>
-            <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:14 }}>
-              <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
-                <thead><tr style={{ color:'var(--text3)', background:'var(--bg3)' }}>
-                  {['Month','Status',L.planTarget,`Actual ${L.sales}`,`Projected ${L.sales}`,L.variance,`Actual ${L.mer}`,`Projected ${L.mer}`,`${L.mer} target`,'P25','P75','Reason'].map(h => <th key={h} style={{ textAlign:h === 'Month' || h === 'Reason' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap' }}>{h}</th>)}
-                </tr></thead>
-                <tbody>{selected.monthly.map(r => <tr key={r.month_key} style={{ color:'var(--text2)' }}>
-                  <td style={tdLeft}>{r.month}</td>
-                  <td style={tdRight}>{statusPill(r.status)}</td>
-                  <td style={tdRight}>{money(r.plan_revenue)}</td>
-                  <td style={{ ...tdRight, color:'#16a34a', fontWeight:800 }}>{money(r.actual_revenue)}</td>
-                  <td style={{ ...tdRight, fontWeight:900, color:'var(--text)' }}>{money(r.projected_revenue)}</td>
-                  <td style={tdRight}>{r.variance_pct == null ? '—' : pct(r.variance_pct)}</td>
-                  <td style={tdRight}>{mer(r.actual_mer)}</td>
-                  <td style={tdRight}>{mer(r.projected_mer)}</td>
-                  <td style={tdRight}>{mer(r.mer_target)}</td>
-                  <td style={tdRight}>{money(r.p25)}</td>
-                  <td style={tdRight}>{money(r.p75)}</td>
-                  <td style={{ padding:'10px 12px', minWidth:310, maxWidth:520, color:'var(--text3)', borderBottom:'1px solid var(--border)', lineHeight:1.45 }}>{r.reason}</td>
-                </tr>)}</tbody>
-              </table>
-            </div>
-          </Card>
-
-          <div style={{ display:'grid', gridTemplateColumns:'minmax(0, 1.7fr) minmax(280px, .8fr)', gap:16 }}>
-            <Card title="Current month daily projection" subtitle="Auditable formula: base × day-of-week × seasonality × sale × drop.">
-              <div style={{ overflowX:'auto', border:'1px solid var(--border)', borderRadius:14 }}>
-                <table style={{ width:'100%', borderCollapse:'separate', borderSpacing:0, fontSize:12 }}>
-                  <thead><tr style={{ color:'var(--text3)', background:'var(--bg3)' }}>
-                    {['Date','Type',L.sales,'DOW','Season','Sale','Drop','Weight'].map(h => <th key={h} style={{ textAlign:h === 'Date' || h === 'Type' || h === 'Sale' || h === 'Drop' ? 'left' : 'right', padding:'10px 12px', borderBottom:'1px solid var(--border)', background:'var(--bg3)' }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>{dailyPageItems.map(r => <tr key={r.date} style={{ color:r.is_actual ? '#16a34a' : 'var(--text2)' }}>
-                    <td style={tdLeft}>{r.date}</td>
-                    <td style={tdLeft}>{r.is_actual ? 'Actual' : 'Projected'}</td>
-                    <td style={tdRight}>{money(r.projected_revenue)}</td>
-                    <td style={tdRight}>{Number(r.day_weight).toFixed(2)}x</td>
-                    <td style={tdRight}>{Number(r.seasonality).toFixed(2)}x</td>
-                    <td style={tdLeft}>{r.sale_name} <span style={{ color:'var(--text4)' }}>({Number(r.sale_lift).toFixed(2)}x)</span></td>
-                    <td style={tdLeft}>{r.drop_type ? `${r.drop_type} (${Number(r.drop_lift).toFixed(2)}x)` : '—'}</td>
-                    <td style={tdRight}>{Number(r.weight).toFixed(2)}x</td>
-                  </tr>)}</tbody>
-                </table>
-                <TablePagination page={dailyPage} pageSize={TABLE_PAGE_SIZE} totalRows={dailyTotal} onPageChange={setDailyPage} />
+            <Card title="Current month focus" subtitle="Actual-to-date plus projection from database values, not Google Sheet formulas.">
+              <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+                <StatCard label="NOBL current P50" value={money(currentNobl?.projected_revenue)} sub={currentNobl?.month} tone="indigo" />
+                <StatCard label="NOBL current status" value={<Pill value={currentNobl?.status} />} sub={pct(currentNobl?.variance_pct)} tone={currentNobl?.status === 'red' ? 'rose' : currentNobl?.status === 'amber' ? 'amber' : 'green'} />
+                <StatCard label="Air current forecast" value={money(currentAir?.total_air_rev_net_est)} sub={currentAir?.month || currentAir?.month_label} tone="green" />
+                <StatCard label="Air current actual" value={money(currentAir?.actual_air_rev_net)} sub="Actual Air revenue" tone="teal" />
               </div>
-            </Card>
-            <Card title="Regional pacing" subtitle={`Year-to-date actual ${L.sales.toLowerCase()} by region. ${L.mer} shows when regional ad spend is available.`}>
-              <div style={{ display:'grid', gap:8 }}>
-                {(selected.regions || []).slice(0, 8).map(r => (
-                  <div key={r.region} style={{ padding:12, border:'1px solid var(--border)', borderRadius:14, background:'var(--bg3)' }}>
-                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'baseline', gap:10 }}>
-                      <div style={{ fontWeight:900 }}>{r.region}</div>
-                      <div style={{ fontWeight:950 }}>{money(r.actual_revenue)}</div>
-                    </div>
-                    <div style={{ marginTop:5, fontSize:11, color:'var(--text3)' }}>{L.mer} {mer(r.actual_mer)} · ratio {r.mer_ratio_vs_usa || '—'}</div>
-                  </div>
-                ))}
-              </div>
+              <div style={{ marginTop:14, padding:12, borderRadius:14, background:'var(--bg3)', color:'var(--text2)', fontSize:13, lineHeight:1.65 }}>{data?.nobl?.narrative}</div>
             </Card>
           </div>
         </>
       )}
+
+      {activeTab === 'nobl-monthly' && <NoblMonthly rows={noblMonthly} />}
+      {activeTab === 'nobl-daily' && <NoblDaily rows={noblDailyItems} page={noblDailyPage} totalRows={noblDailyTotal} onPageChange={setNoblDailyPage} />}
+      {activeTab === 'air-monthly' && <AirMonthly rows={airMonthlyWithTotal} />}
+      {activeTab === 'air-daily' && <AirDaily rows={airDailyItems} page={airDailyPage} totalRows={airDailyTotal} onPageChange={setAirDailyPage} />}
+      {activeTab === 'methodology' && <Methodology data={data} />}
     </div>
   );
 }
 
+function NoblMonthly({ rows }) {
+  const columns = [
+    { label:'Month', key:'month', align:'left' },
+    { label:'Type', align:'left', render:r => <Pill value={r.row_type} /> },
+    { label:L.planTarget, render:r => money(r.plan_revenue) },
+    { label:`Actual ${L.sales}`, render:r => money(r.actual_revenue) },
+    { label:`P50 ${L.sales}`, render:r => money(r.projected_revenue) },
+    { label:'P25', render:r => money(r.p25) },
+    { label:'P75', render:r => money(r.p75) },
+    { label:L.variance, render:r => pct(r.variance_pct) },
+    { label:`Projected ${L.mer}`, render:r => mer(r.projected_mer) },
+    { label:`${L.mer} Target`, render:r => mer(r.mer_target) },
+    { label:'Reason', align:'left', wrap:true, minWidth:320, render:r => r.reason },
+  ];
+  return <Card title="NOBL Forecast Monthly" subtitle="Matches the store-level monthly forecast model, but reads actuals from nobl_brand_tw_summary_daily."><DataTable columns={columns} rows={rows} /></Card>;
+}
+
+function NoblDaily({ rows, page, totalRows, onPageChange }) {
+  const columns = [
+    { label:'Date', key:'date', align:'left' },
+    { label:'Row Type', align:'left', render:r => <Pill value={r.row_type} /> },
+    { label:`Actual ${L.sales}`, render:r => money(r.actual_revenue) },
+    { label:`Forecast ${L.sales}`, render:r => money(r.forecast_revenue) },
+    { label:'Actual Spend', render:r => money(r.actual_spend) },
+    { label:'Forecast Spend', render:r => money(r.forecast_spend) },
+    { label:'Orders', render:r => num(r.actual_orders) },
+    { label:L.mer, render:r => mer(r.actual_mer || r.forecast_mer) },
+    { label:'Sale', align:'left', render:r => r.sale_name },
+    { label:'Drop', align:'left', render:r => r.drop_type || '—' },
+    { label:'Weight', render:r => `${Number(r.weight || 0).toFixed(2)}x` },
+    { label:'Reason', align:'left', wrap:true, minWidth:320, render:r => r.reason },
+  ];
+  return <Card title="NOBL Forecast Daily" subtitle="Daily audit view: actual rows from the database and future rows allocated from the forecast model."><DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={onPageChange} /></Card>;
+}
+
+function AirMonthly({ rows }) {
+  const columns = [
+    { label:'Month', align:'left', render:r => r.month_label || r.month },
+    { label:'Status', align:'left', render:r => <Pill value={r.status_label || r.status || r.row_type} /> },
+    { label:'Actual Store Rev', render:r => money(r.actual_store_revenue) },
+    { label:'Actual Eligible Orders', render:r => num(r.actual_eligible_orders) },
+    { label:'Actual Air Orders', render:r => num(r.actual_air_orders) },
+    { label:'Actual Attach', render:r => pct(r.actual_attach_rate) },
+    { label:'Actual TTP', render:r => pct(r.actual_ttp_rate) },
+    { label:'Actual Air Rev', render:r => money(r.actual_air_rev_net) },
+    { label:'Forecast Store Rev', render:r => money(r.store_revenue) },
+    { label:'Forecast Eligible Orders', render:r => num(r.eligible_orders) },
+    { label:'Forecast Air Orders', render:r => num(r.est_air_orders) },
+    { label:'Forecast Air Rev', render:r => money(r.total_air_rev_net_est) },
+    { label:'Source', align:'left', wrap:true, minWidth:300, render:r => r.order_source },
+  ];
+  return <Card title="NOBL Air Forecast Monthly" subtitle="Forecast columns use database actuals and Air assumptions from nobl_air_daily."><DataTable columns={columns} rows={rows} /></Card>;
+}
+
+function AirDaily({ rows, page, totalRows, onPageChange }) {
+  const columns = [
+    { label:'Date', key:'date', align:'left' },
+    { label:'Row Type', align:'left', render:r => <Pill value={r.row_type} /> },
+    { label:'Actual Store Rev', render:r => money(r.actual_store_revenue) },
+    { label:'Actual Eligible Orders', render:r => num(r.actual_eligible_orders) },
+    { label:'Actual Air Orders', render:r => num(r.actual_air_orders) },
+    { label:'Actual Attach', render:r => pct(r.actual_attach_rate) },
+    { label:'Actual TTP', render:r => pct(r.actual_ttp_rate) },
+    { label:'Actual Air Rev', render:r => money(r.actual_air_rev_net) },
+    { label:'Forecast Store Rev', render:r => money(r.forecast_store_revenue) },
+    { label:'Forecast Eligible Orders', render:r => num(r.forecast_eligible_orders) },
+    { label:'Forecast Air Orders', render:r => num(r.forecast_air_orders) },
+    { label:'Forecast Activations', render:r => num(r.forecast_activations) },
+    { label:'Forecast Air Rev', render:r => money(r.forecast_total_air_rev_net) },
+    { label:'Target Status', align:'left', render:r => <Pill value={r.target_status} /> },
+    { label:'Note', align:'left', wrap:true, minWidth:320, render:r => r.forecast_note },
+  ];
+  return <Card title="NOBL Air Forecast Daily" subtitle="This is the dashboard equivalent of the NOBL Air daily sheet tab, with completed days pulled from nobl_air_daily."><DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={onPageChange} /></Card>;
+}
+
+function Methodology({ data }) {
+  const items = [
+    ['Data source', data?.data_source],
+    ['NOBL actual table', 'nobl_brand_tw_summary_daily'],
+    ['NOBL Air actual table', 'nobl_air_daily'],
+    ['Future NOBL method', 'Monthly P50 revenue is allocated to future days using day-of-week, seasonality, sale, and drop weights.'],
+    ['Future Air method', 'Forecast Store Revenue ÷ eligible AOV × attach/activation assumptions from the database.'],
+    ['Missing actuals', 'Completed dates missing from the database are labeled Missing Actual so ETL gaps are visible.'],
+  ];
+  return (
+    <Card title="Forecast methodology" subtitle="What changed from the sheet workflow and how the dashboard protects future values.">
+      <div style={{ display:'grid', gap:10 }}>
+        {items.map(([k, v]) => <div key={k} style={{ display:'grid', gridTemplateColumns:'220px 1fr', gap:12, padding:12, border:'1px solid var(--border)', borderRadius:14, background:'var(--bg3)', fontSize:13, lineHeight:1.55 }}><strong>{k}</strong><span style={{ color:'var(--text2)' }}>{v}</span></div>)}
+        {(data?.methodology?.checks || []).map(x => <div key={x} style={{ padding:12, border:'1px solid rgba(34,197,94,.22)', borderRadius:14, background:'rgba(34,197,94,.08)', color:'#16a34a', fontWeight:800 }}>✓ {x}</div>)}
+      </div>
+    </Card>
+  );
+}
+
 const controlStyle = { padding:'10px 12px', border:'1px solid var(--border2)', borderRadius:12, background:'var(--bg2)', color:'var(--text)', fontFamily:'var(--font-body)', width:'100%' };
-const tooltipStyle = { background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:10, fontSize:12, boxShadow:'0 8px 22px rgba(15,23,42,.10)' };
-const tdLeft = { padding:'10px 12px', whiteSpace:'nowrap', borderBottom:'1px solid var(--border)' };
-const tdRight = { padding:'10px 12px', textAlign:'right', whiteSpace:'nowrap', borderBottom:'1px solid var(--border)', fontVariantNumeric:'tabular-nums' };

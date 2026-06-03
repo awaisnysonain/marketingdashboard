@@ -261,6 +261,12 @@ export const getForecastEngine = (brand = 'ALL', asOf = '') =>
     `${B}/api/analytics/forecast-engine?brand=${encodeURIComponent(brand)}${asOf ? `&asOf=${encodeURIComponent(asOf)}` : ''}`,
     '/api/analytics/forecast-engine'
   );
+
+export const getDashboardForecast = (asOf = '') =>
+  fetchJson(
+    `${B}/api/analytics/dashboard-forecast${asOf ? `?asOf=${encodeURIComponent(asOf)}` : ''}`,
+    '/api/analytics/dashboard-forecast'
+  );
 export const getFloProducts = (start, end) => fetch(`${B}/api/analytics/flo/products?start=${start}&end=${end}`).then(r=>r.json());
 
 // ── Store pages (comprehensive per-store data) ────────────────────
