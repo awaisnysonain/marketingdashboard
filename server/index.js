@@ -1296,6 +1296,14 @@ app.post('/api/ai/dashboard-generate', async (req, res) => {
 // ── Sync trigger (manual + backfill) ─────────────────────────────
 app.post('/api/sync/trigger', requireAppAuth, async (req, res) => {
   try {
+    if (syncEngine.isSyncRunning()) {
+      return res.json({
+        ok: true,
+        already_running: true,
+        message: 'Sync already in progress — skipping duplicate trigger',
+      });
+    }
+
     const {
       tasks     = ['klaviyo', 'appstle', 'tw_refresh'],
       startDate = null,
@@ -1356,7 +1364,7 @@ const ALL_DAILY_TASKS = [
   'product_daily',       // recompute shopify_product_daily
 ];
 
-const CRON_HARD_TIMEOUT_MS = 60 * 60 * 1000; // 60 min absolute cap
+const CRON_HARD_TIMEOUT_MS = 90 * 60 * 1000; // 90 min — TW API is serialized with retries
 
 // In-process flag prevents double-firing if cron + manual click overlap
 let cronRunning = false;
@@ -1431,7 +1439,7 @@ try {
       // Step 1: find missing days in the last 14 (we'll catch holes)
       let missing = [];
       try {
-        const lookback = 14;
+        const lookback = 7;
         const startBack = new Date(today.getTime() - lookback * 86400000).toISOString().slice(0, 10);
         const r = await pgQuery(`
           WITH days AS (SELECT generate_series($1::date, $2::date, '1 day')::date AS d)
@@ -1970,7 +1978,25 @@ app.get('*', (req, res) => res.sendFile(path.join(clientBuild, 'index.html')));
 const server = app.listen(PORT, async () => {
   console.log(`\n  NOBL Analytics Dashboard → http://localhost:${PORT}\n`);
   await initPostgresTables();
+  pgRun(`
+    UPDATE etl_run_log
+    SET status='error', error_message='auto-cleanup: stuck on boot', finished_at=NOW()
+    WHERE status='running' AND started_at < NOW() - interval '3 hours'
+  `).catch(() => {});
 });
+
+function shutdown(signal) {
+  console.log(`[Shutdown] ${signal} — closing HTTP server and DB pool`);
+  server.close(() => {
+    pgPool.end()
+      .catch(err => console.error('[Shutdown] pool.end error:', err.message))
+      .finally(() => process.exit(0));
+  });
+  setTimeout(() => process.exit(1), 15000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
     console.error(`[UNCAUGHT] listen EADDRINUSE: address already in use :::${PORT}`, err);

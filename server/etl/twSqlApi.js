@@ -21,8 +21,16 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 const TW_SQL_URL = process.env.TW_SQL_URL
   || 'https://api.triplewhale.com/api/v2/orcabase/api/sql';
 
+const { enqueueTw } = require('../utils/twRequestQueue');
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryableTwError(err, status) {
+  if (status === 429 || status === 502 || status === 503 || status === 504) return true;
+  const msg = String(err?.message || err || '');
+  return /HTTP 500|rate limit|timeout|ECONNRESET|ETIMEDOUT|fetch failed/i.test(msg);
 }
 
 /**
@@ -65,14 +73,13 @@ function brandCreds(brand) {
  * @param {number} maxRetries
  * @returns {Promise<Array<object>>}  array of row objects
  */
-async function twSqlQuery(brand, sql, opts = {}, maxRetries = 3) {
+async function twSqlQueryOnce(brand, sql, opts = {}) {
   const { shopId, apiKey } = brandCreds(brand);
 
   if (!shopId || !apiKey) {
     throw new Error(`[TW SQL] Missing credentials for brand ${brand}`);
   }
 
-  // Body shape per Brad's Apps Script: { period: {startDate, endDate}, currency, shopId, query }
   const body = {
     query:    sql,
     shopId,
@@ -81,62 +88,63 @@ async function twSqlQuery(brand, sql, opts = {}, maxRetries = 3) {
   };
   if (!body.period) delete body.period;
 
-  console.log(`[TW SQL] ${brand} query (${sql.slice(0, 80).replace(/\s+/g,' ')}...)`);
+  console.log(`[TW SQL] ${brand} query (${sql.slice(0, 80).replace(/\s+/g, ' ')}...)`);
 
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const res = await fetch(TW_SQL_URL, {
-        method:  'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key':    apiKey,
-          'accept':       'application/json',
-        },
-        body:   JSON.stringify(body),
-        signal: AbortSignal.timeout(180_000),  // 3-minute timeout per query
-      });
+  const res = await fetch(TW_SQL_URL, {
+    method:  'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key':    apiKey,
+      'accept':       'application/json',
+    },
+    body:   JSON.stringify(body),
+    signal: AbortSignal.timeout(120_000),
+  });
 
-      if (res.status === 429) {
-        const wait = Math.pow(2, attempt) * 3000;
-        console.warn(`[TW SQL] Rate limited — waiting ${wait}ms`);
-        await sleep(wait);
-        continue;
-      }
-
-      if (res.status === 401 || res.status === 403) {
-        throw new Error(`[TW SQL] Auth error ${res.status} for ${brand} — check TW_SQL_URL and API key`);
-      }
-
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new Error(`[TW SQL] HTTP ${res.status}: ${text.slice(0, 400)}`);
-      }
-
-      const json = await res.json();
-
-      // The orcabase endpoint returns the rows array DIRECTLY, not wrapped.
-      const rows = Array.isArray(json) ? json
-        : (json.data || json.rows || json.results || json.result || null);
-
-      if (!rows) {
-        console.warn(`[TW SQL] Unexpected response shape:`, Object.keys(json).join(', '));
-        return [];
-      }
-
-      console.log(`[TW SQL] ${brand}: ${rows.length} rows returned`);
-      return rows;
-
-    } catch (err) {
-      if (attempt === maxRetries) {
-        console.error(`[TW SQL] Failed after ${maxRetries} attempts:`, err.message);
-        throw err;
-      }
-      const wait = Math.pow(2, attempt) * 2000;
-      console.warn(`[TW SQL] Attempt ${attempt}/${maxRetries} error: ${err.message}. Retry in ${wait}ms`);
-      await sleep(wait);
-    }
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`[TW SQL] Auth error ${res.status} for ${brand} — check TW_SQL_URL and API key`);
   }
-  return [];
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    const err = new Error(`[TW SQL] HTTP ${res.status}: ${text.slice(0, 400)}`);
+    err.status = res.status;
+    throw err;
+  }
+
+  const json = await res.json();
+  const rows = Array.isArray(json) ? json
+    : (json.data || json.rows || json.results || json.result || null);
+
+  if (!rows) {
+    console.warn('[TW SQL] Unexpected response shape:', Object.keys(json).join(', '));
+    return [];
+  }
+
+  console.log(`[TW SQL] ${brand}: ${rows.length} rows returned`);
+  return rows;
+}
+
+async function twSqlQuery(brand, sql, opts = {}, maxRetries = 5) {
+  return enqueueTw(async () => {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await twSqlQueryOnce(brand, sql, opts);
+      } catch (err) {
+        const status = err.status || 0;
+        if (attempt === maxRetries || !isRetryableTwError(err, status)) {
+          console.error(`[TW SQL] Failed after ${attempt} attempt(s):`, err.message);
+          throw err;
+        }
+        const wait = status === 429
+          ? Math.pow(2, attempt) * 5000
+          : Math.pow(2, attempt) * 3000 + Math.floor(Math.random() * 1000);
+        console.warn(`[TW SQL] Attempt ${attempt}/${maxRetries} error: ${err.message}. Retry in ${wait}ms`);
+        await sleep(wait);
+      }
+    }
+    return [];
+  });
 }
 
 /**

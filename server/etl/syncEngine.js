@@ -86,6 +86,12 @@ async function logFinish(logId, status, rowsWritten, errorMessage = null) {
 
 // ── Public API ────────────────────────────────────────────────────────────────
 
+let syncRunning = false;
+
+function isSyncRunning() {
+  return syncRunning;
+}
+
 /**
  * Get the most recent finished_at date for a brand+task combination.
  * Returns a Date or null.
@@ -162,9 +168,23 @@ async function checkDataGaps(table, brand) {
  * @returns {Promise<{results: object[], errors: string[], duration: number}>}
  */
 async function runSync(options = {}) {
+  if (syncRunning) {
+    console.warn(`[SyncEngine] Skip ${options.runId || 'sync'} — another sync is already running`);
+    return {
+      runId: options.runId || null,
+      skipped: true,
+      results: [],
+      errors: ['Sync already running'],
+      duration: 0,
+      totalRows: 0,
+    };
+  }
+
+  syncRunning = true;
   const t0 = Date.now();
   const runId = options.runId || `sync_${Date.now()}`;
 
+  try {
   // Defaults
   const today    = new Date().toISOString().slice(0, 10);
   const ago30    = addDays(today, -30);
@@ -624,6 +644,9 @@ async function runSync(options = {}) {
   console.log(`[SyncEngine] ✓ Run ${runId} complete in ${(duration / 1000).toFixed(1)}s | ${totalRows} rows total | ${errors.length} errors`);
 
   return { runId, results, errors, duration, totalRows };
+  } finally {
+    syncRunning = false;
+  }
 }
 
-module.exports = { runSync, getLastSyncDate, checkDataGaps };
+module.exports = { runSync, getLastSyncDate, checkDataGaps, isSyncRunning };

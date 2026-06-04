@@ -334,14 +334,13 @@ async function refreshBrand(brand, startYmd, endYmd) {
 
   console.log(`[TW SQL] ${brand} ${startYmd} → ${endYmd}`);
 
-  const [shopRev, amzRev, spend, orders, regionRev, channelRows] = await Promise.all([
-    fetchShopifyRevenue(brand, startYmd, endYmd),
-    cfg.includeAmazon ? fetchAmazonRevenue(brand, startYmd, endYmd) : Promise.resolve({}),
-    fetchBlendedSpend(brand, startYmd, endYmd),
-    fetchOrderCounts(brand, startYmd, endYmd),
-    fetchRegionRevenue(brand, startYmd, endYmd),
-    fetchChannelMetrics(brand, startYmd, endYmd),
-  ]);
+  // Sequential TW fetches — parallel calls were triggering TW 429/500 during cron.
+  const shopRev = await fetchShopifyRevenue(brand, startYmd, endYmd);
+  const amzRev = cfg.includeAmazon ? await fetchAmazonRevenue(brand, startYmd, endYmd) : {};
+  const spend = await fetchBlendedSpend(brand, startYmd, endYmd);
+  const orders = await fetchOrderCounts(brand, startYmd, endYmd);
+  const regionRev = await fetchRegionRevenue(brand, startYmd, endYmd);
+  const channelRows = await fetchChannelMetrics(brand, startYmd, endYmd);
 
   // Optional EU shop support. FLO EU is intentionally excluded from FLO totals;
   // NOBL EU is also not added here because NOBL's main shop already includes EU.
@@ -349,10 +348,8 @@ async function refreshBrand(brand, startYmd, endYmd) {
   let euSpend = {};
   if (cfg.euBrand) {
     try {
-      const [er, es] = await Promise.all([
-        fetchShopifyRevenue(cfg.euBrand, startYmd, endYmd),
-        fetchBlendedSpend(cfg.euBrand,   startYmd, endYmd),
-      ]);
+      const er = await fetchShopifyRevenue(cfg.euBrand, startYmd, endYmd);
+      const es = await fetchBlendedSpend(cfg.euBrand, startYmd, endYmd);
       euRev   = scaleMap(er, EU_EUR_TO_USD);
       euSpend = scaleMap(es, EU_EUR_TO_USD);
     } catch (e) {

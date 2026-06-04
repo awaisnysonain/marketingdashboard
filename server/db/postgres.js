@@ -16,20 +16,20 @@ const pool = new Pool({
   connectionTimeoutMillis: 5000,
 });
 
-// Set timezone to UTC on every new connection
-pool.on('connect', (client) => {
-  client.query("SET timezone = 'UTC'").catch(err =>
-    console.error('[PG] Failed to set timezone:', err.message)
-  );
-});
-
 pool.on('error', (err) => {
   console.error('[PG] Unexpected pool error:', err.message);
 });
 
+async function ensureClientTimezone(client) {
+  if (client._noblTzReady) return;
+  await client.query("SET timezone = 'UTC'");
+  client._noblTzReady = true;
+}
+
 async function pgQuery(sql, params = []) {
   const client = await pool.connect();
   try {
+    await ensureClientTimezone(client);
     const result = await client.query(sql, params);
     return result;
   } finally {
