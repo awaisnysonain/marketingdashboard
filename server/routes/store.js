@@ -1,6 +1,6 @@
 const express  = require('express');
 const router   = express.Router();
-const { pgQuery } = require('../db/postgres');
+const { pgQueryBatch } = require('../db/postgres');
 const { calcMer }  = require('../config/brandConfig');
 
 /*
@@ -47,11 +47,9 @@ function fmtRows(rows) {
 router.get('/nobl', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
-    const [summaryRes, channelsRes, geoRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await Promise.all([
-
-      // Daily summary — order_revenue is canonical (Shopify+Amazon, before refunds)
-      // Falls back to total_revenue (TW attributed) until order_revenue backfill runs
-      pgQuery(`
+    const [summaryRes, channelsRes, geoRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await pgQueryBatch([
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                total_revenue, total_spend, total_orders,
                new_customer_orders, returning_customer_orders,
@@ -60,33 +58,31 @@ router.get('/nobl', async (req, res) => {
                COALESCE(refund_amount, 0) AS refund_amount, refund_count
         FROM   nobl_brand_tw_summary_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC
-      `, [start, end]),
-
-      // Daily channel rows (date × channel)
-      pgQuery(`
+        ORDER  BY date DESC`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                channel, spend_1d, revenue_1d, roas_1d, purchases_1d,
                new_cust_orders, cac
         FROM   nobl_brand_tw_channel_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC, channel
-      `, [start, end]),
-
-      // Daily geo rows (date × region) — EU always included, TOTAL excluded
-      pgQuery(`
+        ORDER  BY date DESC, channel`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                region, revenue_actual, spend_actual, mer AS mer_stored
         FROM   nobl_brand_tw_geo_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
           AND  region != 'TOTAL'
-        ORDER  BY date DESC, region
-      `, [start, end]),
-
-      // Daily rebill + shopify subscription revenue from the live aggregator.
-      // (nobl_air_sub_revenue_daily is no longer maintained — last write was
-      //  2026-05-03. Use nobl_air_daily instead.)
-      pgQuery(`
+        ORDER  BY date DESC, region`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                sub_gross  AS shopify_sub_gross,
                sub_discounts AS shopify_sub_disc,
@@ -94,23 +90,21 @@ router.get('/nobl', async (req, res) => {
                rebill_revenue
         FROM   nobl_air_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC
-      `, [start, end]),
-
-      // Daily new-sub count + revenue from Appstle subscribers
-      // (the aggregator's new_sub_revenue under-reports because Shopify
-      //  orders no longer carry sub_gross > 0 for NOBL).
-      pgQuery(`
+        ORDER  BY date DESC`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
                COUNT(*) AS new_sub_count,
                COALESCE(SUM(contract_amount), 0) AS new_sub_revenue
         FROM   nobl_air_subscribers
         WHERE  (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
-        GROUP  BY 1
-      `, [start, end]),
-
-      // Subscriber stats (all-time snapshot from the live Appstle pull)
-      pgQuery(`
+        GROUP  BY 1`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT
           COUNT(*)                                                            AS total,
           COUNT(*) FILTER (WHERE LOWER(status) = 'active')                    AS active,
@@ -119,19 +113,21 @@ router.get('/nobl', async (req, res) => {
           COUNT(*) FILTER (WHERE is_converted)                                AS converted,
           AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL
                                        AND contract_amount > 0)               AS avg_order_amount
-        FROM nobl_air_subscribers
-      `, []),
-
-      // Klaviyo daily email data
-      pgQuery(`
+        FROM nobl_air_subscribers`,
+        params: [],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                emails_sent, emails_opened, emails_clicked,
                open_rate, click_rate, revenue AS email_revenue
         FROM   klaviyo_daily
         WHERE  brand = 'NOBL'
           AND  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC
-      `, [start, end]).catch(() => ({ rows: [] })),
+        ORDER  BY date DESC`,
+        params: [start, end],
+        fallback: () => ({ rows: [] }),
+      },
     ]);
 
     // Enrich summary — order_revenue is the canonical metric for MER and AOV
@@ -224,10 +220,9 @@ router.get('/nobl', async (req, res) => {
 router.get('/flo', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
-    const [summaryRes, channelsRes, geoRes, productsRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await Promise.all([
-
-      // Daily summary — order_revenue is canonical
-      pgQuery(`
+    const [summaryRes, channelsRes, geoRes, productsRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await pgQueryBatch([
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                total_revenue, total_spend, total_orders,
                new_customer_orders, returning_customer_orders,
@@ -236,42 +231,42 @@ router.get('/flo', async (req, res) => {
                COALESCE(refund_amount, 0) AS refund_amount, refund_count
         FROM   flo_brand_tw_summary_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC
-      `, [start, end]),
-
-      // Daily channel rows
-      pgQuery(`
+        ORDER  BY date DESC`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                channel, spend_1d, revenue_1d, roas_1d, purchases_1d,
                new_cust_orders, cac
         FROM   flo_brand_tw_channel_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC, channel
-      `, [start, end]),
-
-      // Daily geo rows
-      pgQuery(`
+        ORDER  BY date DESC, channel`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                region, revenue_actual, spend_actual
         FROM   flo_brand_tw_geo_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
           AND  region != 'TOTAL'
-        ORDER  BY date DESC, region
-      `, [start, end]),
-
-      // Daily product rows (date × product_line)
-      pgQuery(`
+        ORDER  BY date DESC, region`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                product_line, spend, revenue, new_cust_orders,
                meta_spend, google_spend, tiktok_spend, snap_spend,
                pinterest_spend, bing_spend, applovin_spend
         FROM   flo_brand_tw_product_daily
         WHERE  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC, product_line
-      `, [start, end]),
-
-      // Daily rebill + shopify subscription revenue (Appstle-derived aggregator).
-      pgQuery(`
+        ORDER  BY date DESC, product_line`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date, 'YYYY-MM-DD') AS date,
                shopify_sub_gross,
                shopify_sub_disc,
@@ -279,22 +274,21 @@ router.get('/flo', async (req, res) => {
                rebill_revenue
         FROM   flo_appstle_revenue_daily
         WHERE  date BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC
-      `, [start, end]),
-
-      // Daily new-sub count + revenue (the aggregator under-reports because
-      // Appstle order_amount is often $0 for trial signups; contract_amount is right).
-      pgQuery(`
+        ORDER  BY date DESC`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT TO_CHAR((created_at AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS date,
                COUNT(*) AS new_sub_count,
                COALESCE(SUM(contract_amount), 0) AS new_sub_revenue
         FROM   flo_appstle_subscribers
         WHERE  (created_at AT TIME ZONE 'UTC')::date BETWEEN $1::date AND $2::date
-        GROUP  BY 1
-      `, [start, end]),
-
-      // All-time subscriber stats
-      pgQuery(`
+        GROUP  BY 1`,
+        params: [start, end],
+      },
+      {
+        sql: `
         SELECT
           COUNT(*)                                                            AS total,
           COUNT(*) FILTER (WHERE LOWER(status) = 'active')                    AS active,
@@ -303,19 +297,21 @@ router.get('/flo', async (req, res) => {
           COUNT(*) FILTER (WHERE is_converted)                                AS converted,
           AVG(contract_amount) FILTER (WHERE contract_amount IS NOT NULL
                                        AND contract_amount > 0)               AS avg_order_amount
-        FROM flo_appstle_subscribers
-      `, []),
-
-      // Klaviyo email
-      pgQuery(`
+        FROM flo_appstle_subscribers`,
+        params: [],
+      },
+      {
+        sql: `
         SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
                emails_sent, emails_opened, emails_clicked,
                open_rate, click_rate, revenue AS email_revenue
         FROM   klaviyo_daily
         WHERE  brand = 'FLO'
           AND  DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-        ORDER  BY date DESC
-      `, [start, end]).catch(() => ({ rows: [] })),
+        ORDER  BY date DESC`,
+        params: [start, end],
+        fallback: () => ({ rows: [] }),
+      },
     ]);
 
     const summary = fmtRows(summaryRes.rows).map(r => {

@@ -18,7 +18,7 @@ const OpenAI = require('openai').default;
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
 
-const { pool: pgPool, pgRun, pgQuery } = require('./db/postgres');
+const { pool: pgPool, sessionPool, pgRun, pgQuery, cleanupStaleConnections } = require('./db/postgres');
 const PgSession = require('connect-pg-simple')(session);
 const analyticsRouter = require('./routes/analytics');
 const { router: dashRouter, SCHEMA_CONTEXT, getClarifyPrompt } = require('./routes/aiDashboards');
@@ -551,7 +551,7 @@ app.use(cors({ origin: true, credentials: true }));
 // we keep Lax so plain http://localhost works.
 const isProd = process.env.NODE_ENV === 'production';
 app.use(session({
-  store: new PgSession({ pool: pgPool, tableName: 'session', createTableIfMissing: true }),
+  store: new PgSession({ pool: sessionPool, tableName: 'session', createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'dev-secret',
   resave: false, saveUninitialized: false,
   cookie: {
@@ -1977,6 +1977,7 @@ app.get('*', (req, res) => res.sendFile(path.join(clientBuild, 'index.html')));
 // ── Start ────────────────────────────────────────────────────────
 const server = app.listen(PORT, async () => {
   console.log(`\n  NOBL Analytics Dashboard → http://localhost:${PORT}\n`);
+  await cleanupStaleConnections();
   await initPostgresTables();
   pgRun(`
     UPDATE etl_run_log
@@ -1988,7 +1989,7 @@ const server = app.listen(PORT, async () => {
 function shutdown(signal) {
   console.log(`[Shutdown] ${signal} — closing HTTP server and DB pool`);
   server.close(() => {
-    pgPool.end()
+    Promise.all([pgPool.end(), sessionPool.end()])
       .catch(err => console.error('[Shutdown] pool.end error:', err.message))
       .finally(() => process.exit(0));
   });

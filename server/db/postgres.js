@@ -4,25 +4,29 @@ const { Pool } = require('pg');
 // regardless of server OS timezone (local = UTC+5, live = UTC)
 process.env.PGTZ = 'UTC';
 
-// Single PM2 instance + serialized ETL — 4 connections is plenty; smaller pool
-// means fewer idle postgres backends sitting on the DB server between requests.
-const pool = new Pool({
+const POOL_OPTS = {
   host: process.env.DB_HOST,
   port: parseInt(process.env.DB_PORT || '5432'),
   database: process.env.DB_NAME,
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  max: 4,
-  idleTimeoutMillis: 10000,
+  max: 1,
+  idleTimeoutMillis: 5000,
   allowExitOnIdle: true,
   connectionTimeoutMillis: 5000,
-  application_name: 'marketingdashboard',
-});
+  maxLifetimeSeconds: 600,
+};
 
-pool.on('error', (err) => {
-  console.error('[PG] Unexpected pool error:', err.message);
-});
+// Two pools × max 1 = at most 2 postgres backends (query + session), not 10.
+const pool = new Pool({ ...POOL_OPTS, application_name: 'marketingdashboard' });
+const sessionPool = new Pool({ ...POOL_OPTS, application_name: 'marketingdashboard-session' });
+
+for (const p of [pool, sessionPool]) {
+  p.on('error', (err) => {
+    console.error('[PG] Unexpected pool error:', err.message);
+  });
+}
 
 async function ensureClientTimezone(client) {
   if (client._noblTzReady) return;
@@ -34,8 +38,27 @@ async function pgQuery(sql, params = []) {
   const client = await pool.connect();
   try {
     await ensureClientTimezone(client);
-    const result = await client.query(sql, params);
-    return result;
+    return await client.query(sql, params);
+  } finally {
+    client.release();
+  }
+}
+
+/** Run multiple queries on one connection (avoids Promise.all opening N pool slots). */
+async function pgQueryBatch(items) {
+  const client = await pool.connect();
+  try {
+    await ensureClientTimezone(client);
+    const results = [];
+    for (const item of items) {
+      try {
+        results.push(await client.query(item.sql, item.params ?? []));
+      } catch (e) {
+        if (item.fallback !== undefined) results.push(item.fallback(e));
+        else throw e;
+      }
+    }
+    return results;
   } finally {
     client.release();
   }
@@ -45,4 +68,29 @@ async function pgRun(sql, params = []) {
   return pgQuery(sql, params);
 }
 
-module.exports = { pool, pgQuery, pgRun };
+/** Drop orphaned backends left when PM2 SIGKILLs the process without pool.end(). */
+async function cleanupStaleConnections() {
+  try {
+    const r = await pool.query(`
+      SELECT pg_terminate_backend(pid) AS terminated
+      FROM pg_stat_activity
+      WHERE datname = current_database()
+        AND usename = current_user
+        AND pid <> pg_backend_pid()
+        AND application_name LIKE 'marketingdashboard%'
+    `);
+    const n = r.rowCount || 0;
+    if (n) console.log(`[PG] Terminated ${n} stale backend(s) from previous run`);
+  } catch (e) {
+    console.warn('[PG] stale cleanup skipped:', e.message);
+  }
+}
+
+module.exports = {
+  pool,
+  sessionPool,
+  pgQuery,
+  pgQueryBatch,
+  pgRun,
+  cleanupStaleConnections,
+};
