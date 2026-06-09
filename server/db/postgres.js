@@ -4,6 +4,8 @@ const { Pool } = require('pg');
 // regardless of server OS timezone (local = UTC+5, live = UTC)
 process.env.PGTZ = 'UTC';
 
+// Single PM2 instance + serialized ETL — 4 connections is plenty; smaller pool
+// means fewer idle postgres backends sitting on the DB server between requests.
 const pool = new Pool({
   host: process.env.DB_HOST,
   port: parseInt(process.env.DB_PORT || '5432'),
@@ -11,9 +13,11 @@ const pool = new Pool({
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  max: 10,
-  idleTimeoutMillis: 30000,
+  max: 4,
+  idleTimeoutMillis: 10000,
+  allowExitOnIdle: true,
   connectionTimeoutMillis: 5000,
+  application_name: 'marketingdashboard',
 });
 
 pool.on('error', (err) => {
