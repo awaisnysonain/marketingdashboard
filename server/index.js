@@ -27,6 +27,7 @@ const syncEngine = require('./etl/syncEngine');
 const { ensureNoblAirRegionDailyTable } = require('./etl/noblAirAggregate');
 const { ensureNoblAirMetaAdDailyTable } = require('./etl/noblAirMetaAdDaily');
 const { ensureNoblAirTtpSnapshotTable } = require('./etl/noblAirTtpSnapshot');
+const { isAuthBypassEnabled, getDevBypassUser, isAdminSession, effectiveUserId } = require('./auth');
 const twRouter    = require('./routes/triplewhale');
 const storeRouter = require('./routes/store');
 
@@ -566,9 +567,9 @@ app.use(session({
 // Accepts EITHER:
 //   - req.session.erp     — ERP-issued session (from POST /auth/erp-verify)
 //   - req.session.userId  — legacy local app_users session (kept for backward compat)
-// In dev, ERP_AUTH_BYPASS=true short-circuits everything as a fake admin.
+// In dev (NODE_ENV !== 'production'), auth is bypassed as a fake admin.
 function requireAppAuth(req, res, next) {
-  if (process.env.ERP_AUTH_BYPASS === 'true') return next();
+  if (isAuthBypassEnabled()) return next();
   // ERP session — verify it hasn't passed its issued expires_at.
   if (req.session?.erp) {
     const exp = Number(req.session.erp.expires_at || 0);
@@ -596,17 +597,8 @@ app.use('/api', requireAppAuth);
 
 // ── App-level auth routes ─────────────────────────────────────────
 app.get('/auth/app-status', async (req, res) => {
-  // Dev escape hatch
-  if (process.env.ERP_AUTH_BYPASS === 'true') {
-    return res.json({
-      authenticated: true,
-      user: {
-        id: 0, email: 'dev@local', name: 'Dev User', role: 'admin',
-        nav_group: 'dev', portals: ['*'], content_permissions: {},
-        theme: 'dark', expires_at: Math.floor(Date.now()/1000) + 7200,
-        source: 'bypass',
-      },
-    });
+  if (isAuthBypassEnabled()) {
+    return res.json({ authenticated: true, user: getDevBypassUser() });
   }
 
   // ERP session — preferred when present
@@ -1536,6 +1528,7 @@ try {
   const MAX_MANUAL_PER_HOUR = 6;
 
   function requireAdmin(req, res, next) {
+    if (isAdminSession(req)) return next();
     if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
     pgQuery(`SELECT role FROM app_users WHERE id = $1`, [req.session.userId])
       .then(r => {
@@ -1546,7 +1539,7 @@ try {
   }
 
   app.post('/api/sync/trigger-daily', requireAdmin, async (req, res) => {
-    const userId = req.session.userId;
+    const userId = effectiveUserId(req);
     const now = Date.now();
 
     // Rate limit
@@ -1977,6 +1970,9 @@ app.get('*', (req, res) => res.sendFile(path.join(clientBuild, 'index.html')));
 // ── Start ────────────────────────────────────────────────────────
 const server = app.listen(PORT, async () => {
   console.log(`\n  NOBL Analytics Dashboard → http://localhost:${PORT}\n`);
+  if (isAuthBypassEnabled()) {
+    console.log('  [Auth] Local bypass active — ERP sign-in not required (production uses real auth)\n');
+  }
   await cleanupStaleConnections();
   await initPostgresTables();
   pgRun(`

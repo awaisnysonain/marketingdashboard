@@ -10,14 +10,24 @@ export const CORE_TABS = [
 ];
 
 const FIXED_DASHBOARD_TABS = [
-  { id: 'Forecast Engine', icon: Icons.TrendingUp, label: 'Sales forecast' },
-  { id: 'NOBL Air Performance', icon: Icons.Activity, label: 'NOBL Air Performance' },
+  { id: 'FLO Topline',             icon: Icons.BarChart3,  label: 'FLO Topline' },
+  { id: 'NOBL Topline',            icon: Icons.BarChart3,  label: 'NOBL Topline' },
+  { id: 'NOBL Channel Level Daily', icon: Icons.Layers,    label: 'NOBL Channel Daily' },
+  { id: 'FLO Channel Level Daily',  icon: Icons.Layers,    label: 'FLO Channel Daily' },
+  { id: 'Forecast Engine',         icon: Icons.TrendingUp, label: 'Sales forecast' },
+  { id: 'NOBL Air Performance',    icon: Icons.Activity,   label: 'NOBL Air Performance' },
 ];
 
 // Dedicated store pages — full per-store data (channels, regions, products, subs, email)
 export const STORE_TABS = [
   { id: 'Store:NOBL', icon: Icons.Store, label: 'NOBL Travel'  },
   { id: 'Store:FLO',  icon: Icons.Store, label: 'Pilates FLO'  },
+];
+
+// Mobile app analytics
+export const APPLICATION_TABS = [
+  { id: 'App:NOBL', icon: Icons.Smartphone, label: 'Nobl' },
+  { id: 'App:FLO',  icon: Icons.Smartphone, label: 'Flo'  },
 ];
 
 /* ── Confirm delete dialog ─────────────────────────────────────────── */
@@ -354,6 +364,14 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
         <SectionLabel label="Stores" collapsed={collapsed} />
         <div>
           {STORE_TABS.map(tab => (
+            <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
+          ))}
+        </div>
+
+        {/* Applications */}
+        <SectionLabel label="Application" collapsed={collapsed} />
+        <div>
+          {APPLICATION_TABS.map(tab => (
             <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
           ))}
         </div>

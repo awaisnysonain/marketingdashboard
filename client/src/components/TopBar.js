@@ -6,6 +6,10 @@ const PAGE_INFO = {
   'NOBL Air':      'nobltravel.com — revenue, spend & subscriptions',
   'NOBL Travel':   'nobltravel.com — revenue, spend & subscriptions',
   'Pilates FLO':   'pilatesflo.com — product & channel performance',
+  'App:NOBL':      'NOBL mobile app — revenue & subscriptions',
+  'App:FLO':       'Pilates FLO app — revenue & product performance',
+  'Store:NOBL':    'nobltravel.com — revenue, spend & subscriptions',
+  'Store:FLO':     'pilatesflo.com — product & channel performance',
   'Channels':      'META · Google · TikTok · Snapchat · more',
   'Subscriptions': 'Appstle — subscription revenue & MRR',
 };

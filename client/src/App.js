@@ -18,9 +18,15 @@ import GenericDashPage   from './pages/GenericDashPage';
 import LivePage          from './pages/LivePage';
 import StoreNoblPage     from './pages/StoreNoblPage';
 import StoreFLOPage      from './pages/StoreFLOPage';
+import NoblPage          from './pages/NoblPage';
+import FloPage           from './pages/FloPage';
 import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
 import MetaAdsPage       from './pages/MetaAdsPage';
 import ForecastEnginePage from './pages/ForecastEnginePage';
+import FloToplinePage       from './pages/FloToplinePage';
+import NoblToplinePage      from './pages/NoblToplinePage';
+import NoblChannelDailyPage from './pages/NoblChannelDailyPage';
+import FloChannelDailyPage  from './pages/FloChannelDailyPage';
 
 function normalizeTheme(t) {
   return 'light';
@@ -51,12 +57,25 @@ const TAB_TO_PATH = {
   'Meta Ads':             '/meta-ads',
   'Subscriptions':        '/subscriptions',
   'Live Data':            '/live',
+  'FLO Topline':          '/flo-topline',
+  'NOBL Topline':         '/nobl-topline',
+  'NOBL Channel Level Daily': '/nobl-channel-daily',
+  'FLO Channel Level Daily':  '/flo-channel-daily',
   'Forecast Engine':      '/forecast-engine',
   'NOBL Air Performance': '/nobl-air-performance',
   'Store:NOBL':           '/store/nobl',
   'Store:FLO':            '/store/flo',
+  'App:NOBL':             '/app/nobl',
+  'App:FLO':              '/app/flo',
   '__builder':            '/aibuilder',
   '__sync':               '/sync',
+};
+
+const TAB_DISPLAY_NAMES = {
+  'Store:NOBL': 'NOBL Travel',
+  'Store:FLO':  'Pilates FLO',
+  'App:NOBL':   'Nobl',
+  'App:FLO':    'Flo',
 };
 
 function pathToActiveTab(pathname, dynamicTabs) {
@@ -65,10 +84,16 @@ function pathToActiveTab(pathname, dynamicTabs) {
   if (pathname.startsWith('/meta-ads')) return 'Meta Ads';
   if (pathname.startsWith('/subscriptions')) return 'Subscriptions';
   if (pathname.startsWith('/live')) return 'Live Data';
+  if (pathname.startsWith('/flo-topline')) return 'FLO Topline';
+  if (pathname.startsWith('/nobl-topline')) return 'NOBL Topline';
+  if (pathname.startsWith('/nobl-channel-daily')) return 'NOBL Channel Level Daily';
+  if (pathname.startsWith('/flo-channel-daily')) return 'FLO Channel Level Daily';
   if (pathname.startsWith('/forecast-engine')) return 'Forecast Engine';
   if (pathname.startsWith('/nobl-air-performance')) return 'NOBL Air Performance';
   if (pathname.startsWith('/store/nobl')) return 'Store:NOBL';
   if (pathname.startsWith('/store/flo')) return 'Store:FLO';
+  if (pathname.startsWith('/app/nobl')) return 'App:NOBL';
+  if (pathname.startsWith('/app/flo')) return 'App:FLO';
   if (pathname.startsWith('/aibuilder')) return '__builder';
   if (pathname.startsWith('/sync')) return '__sync';
   const m = pathname.match(/^\/(dashboard|sheet)\/(.+)$/);
@@ -174,10 +199,16 @@ function AppRoot() {
         <Route path="/meta-ads"             element={<PageHost Comp={MetaAdsPage} />} />
         <Route path="/subscriptions"        element={<PageHost Comp={SubsPage} />} />
         <Route path="/live"                 element={<PageHost Comp={LivePage} />} />
+        <Route path="/flo-topline"            element={<PageHost Comp={FloToplinePage} />} />
+        <Route path="/nobl-topline"           element={<PageHost Comp={NoblToplinePage} />} />
+        <Route path="/nobl-channel-daily"     element={<PageHost Comp={NoblChannelDailyPage} />} />
+        <Route path="/flo-channel-daily"      element={<PageHost Comp={FloChannelDailyPage} />} />
         <Route path="/forecast-engine"      element={<PageHost Comp={ForecastEnginePage} />} />
         <Route path="/nobl-air-performance" element={<PageHost Comp={NoblAirPerformancePage} />} />
         <Route path="/store/nobl"           element={<PageHost Comp={StoreNoblPage} />} />
         <Route path="/store/flo"            element={<PageHost Comp={StoreFLOPage} />} />
+        <Route path="/app/nobl"             element={<PageHost Comp={NoblPage} />} />
+        <Route path="/app/flo"              element={<PageHost Comp={FloPage} />} />
         <Route path="/aibuilder"            element={<AiBuilderRoute />} />
         <Route path="/sync"                 element={<PageHost Comp={SyncPage} />} />
         <Route path="/dashboard/:id"        element={<DynamicDashRoute kind="dashboard" />} />
@@ -323,7 +354,7 @@ function Layout({ appUser }) {
   const topbarTitle =
     isSyncRoute    ? 'Sync Status' :
     isBuilderRoute ? 'AI Builder'  :
-    activeTab;
+    TAB_DISPLAY_NAMES[activeTab] || activeTab;
 
   return (
     <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg)' }}>

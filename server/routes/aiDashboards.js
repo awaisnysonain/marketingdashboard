@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { pgQuery } = require('../db/postgres');
+const { effectiveUserId } = require('../auth');
 
 // ── Schema context string for AI prompts ──────────────────────────
 // IMPORTANT: this MUST match the actual PG schema. Verified 2026-05-01.
@@ -515,12 +516,13 @@ function fmtRows(rows) {
 
 // ── List dashboards ───────────────────────────────────────────────
 router.get('/', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  const userId = effectiveUserId(req);
+  if (userId == null) return res.status(401).json({ error: 'Not authenticated' });
   try {
     const r = await pgQuery(
       `SELECT id, name, description, config, is_public, created_at, updated_at
        FROM ai_dashboards WHERE user_id = $1 ORDER BY updated_at DESC`,
-      [req.session.userId]
+      [userId]
     );
     res.json(r.rows);
   } catch (e) {
@@ -531,7 +533,8 @@ router.get('/', async (req, res) => {
 
 // ── Create dashboard ──────────────────────────────────────────────
 router.post('/', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  const userId = effectiveUserId(req);
+  if (userId == null) return res.status(401).json({ error: 'Not authenticated' });
   const { name, description = '', config = {}, is_public = false } = req.body;
   if (!name) return res.status(400).json({ error: 'name is required' });
   try {
@@ -539,7 +542,7 @@ router.post('/', async (req, res) => {
       `INSERT INTO ai_dashboards (user_id, name, description, config, is_public)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING id, name, description, config, is_public, created_at, updated_at`,
-      [req.session.userId, name, description, JSON.stringify(config), is_public]
+      [userId, name, description, JSON.stringify(config), is_public]
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -550,13 +553,14 @@ router.post('/', async (req, res) => {
 
 // ── Update dashboard ──────────────────────────────────────────────
 router.put('/:id', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  const userId = effectiveUserId(req);
+  if (userId == null) return res.status(401).json({ error: 'Not authenticated' });
   const { name, description, config, is_public } = req.body;
   const { id } = req.params;
   try {
     const existing = await pgQuery(
       `SELECT id FROM ai_dashboards WHERE id = $1 AND user_id = $2`,
-      [id, req.session.userId]
+      [id, userId]
     );
     if (existing.rows.length === 0) return res.status(404).json({ error: 'Dashboard not found' });
     const r = await pgQuery(
@@ -564,7 +568,7 @@ router.put('/:id', async (req, res) => {
        SET name=$1, description=$2, config=COALESCE($3,config), is_public=COALESCE($4,is_public), updated_at=NOW()
        WHERE id=$5 AND user_id=$6
        RETURNING id, name, description, config, is_public, created_at, updated_at`,
-      [name||null, description||null, config ? JSON.stringify(config) : null, is_public ?? null, id, req.session.userId]
+      [name||null, description||null, config ? JSON.stringify(config) : null, is_public ?? null, id, userId]
     );
     res.json(r.rows[0]);
   } catch (e) {
@@ -575,12 +579,13 @@ router.put('/:id', async (req, res) => {
 
 // ── Delete dashboard ──────────────────────────────────────────────
 router.delete('/:id', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  const userId = effectiveUserId(req);
+  if (userId == null) return res.status(401).json({ error: 'Not authenticated' });
   const { id } = req.params;
   try {
     await pgQuery(
       `DELETE FROM ai_dashboards WHERE id=$1 AND user_id=$2`,
-      [id, req.session.userId]
+      [id, userId]
     );
     res.json({ ok: true });
   } catch (e) {
@@ -591,7 +596,8 @@ router.delete('/:id', async (req, res) => {
 
 // ── Execute dashboard config ──────────────────────────────────────
 router.post('/execute', async (req, res) => {
-  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  const userId = effectiveUserId(req);
+  if (userId == null) return res.status(401).json({ error: 'Not authenticated' });
   const { config } = req.body;
   if (!config || !Array.isArray(config.sections)) {
     return res.status(400).json({ error: 'config.sections array is required' });
