@@ -24,6 +24,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 
 const { pgRun, pgQuery } = require('../db/postgres');
 const { twSqlSafe, chDateRange } = require('./twSqlApi');
+const { fetchDualRevenueMetrics, fetchBlendedShopifyRevenue } = require('./tripleWhaleSQL');
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -90,164 +91,34 @@ function normalizeRegion(country) {
   return REGION_MAP[upper] || upper;
 }
 
-// ─────────────────────────────────────────────────────────────────
-//  1. CHANNEL DAILY  (fixes the 6-day lag)
-// ─────────────────────────────────────────────────────────────────
 /**
- * Sync tw_channel_daily from TW ads_table, grouped by date+platform.
- * Replaces/fixes the lagged ETL.
+ * Sync tw_channel_daily — delegates to tripleWhaleSQL.refreshBrand (ads_table spend).
+ * @deprecated Prefer tw_refresh task; kept for manual backfill compatibility.
  */
 async function syncTWChannels(brand, startDate, endDate) {
-  const errors = [];
-  let written = 0;
-  const dr = chDateRange('date', startDate, endDate);
-
-  const sql = `
-    SELECT
-      date,
-      platform,
-      SUM(spend)                                      AS spend_1d,
-      SUM(revenue)                                    AS revenue_1d,
-      SUM(purchases)                                  AS purchases_1d,
-      SUM(revenue) / NULLIF(SUM(spend), 0)            AS roas_1d,
-      SUM(clicks)                                     AS clicks,
-      SUM(impressions)                                AS impressions,
-      SUM(purchases)                                  AS new_cust_orders,
-      SUM(spend) / NULLIF(SUM(purchases), 0)          AS cac
-    FROM ads_table
-    WHERE ${dr}
-      AND spend > 0
-    GROUP BY date, platform
-    ORDER BY date, platform
-  `;
-
-  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
-  if (!rows.length) {
-    console.log(`[twFullSync] syncTWChannels ${brand}: no rows for ${startDate}→${endDate}`);
-    return { rows: 0, errors };
+  const { refreshBrand } = require('./tripleWhaleSQL');
+  try {
+    const r = await refreshBrand(brand, startDate, endDate);
+    console.log(`[twFullSync] syncTWChannels ${brand}: delegated to refreshBrand (${r.channelRows} channel rows)`);
+    return { rows: r.channelRows, errors: [] };
+  } catch (e) {
+    return { rows: 0, errors: [`syncTWChannels ${brand}: ${e.message}`] };
   }
-
-  for (const r of rows) {
-    const date    = toDateStr(r.date);
-    const channel = normalizePlatform(r.platform);
-    try {
-      await pgRun(`
-        INSERT INTO tw_channel_daily
-          (brand, date, channel, spend_1d, revenue_1d, purchases_1d, roas_1d, new_cust_orders, cac)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-        ON CONFLICT (brand, date, channel) DO UPDATE SET
-          spend_1d     = EXCLUDED.spend_1d,
-          revenue_1d   = EXCLUDED.revenue_1d,
-          purchases_1d = EXCLUDED.purchases_1d,
-          roas_1d      = EXCLUDED.roas_1d,
-          new_cust_orders = EXCLUDED.new_cust_orders,
-          cac          = EXCLUDED.cac,
-          updated_at   = NOW()
-      `, [
-        brand, date, channel,
-        parseFloat(r.spend_1d || 0),
-        parseFloat(r.revenue_1d || 0),
-        parseInt(r.purchases_1d || 0),
-        r.roas_1d ? parseFloat(r.roas_1d) : null,
-        parseInt(r.new_cust_orders || 0),
-        r.cac ? parseFloat(r.cac) : null,
-      ]);
-      written++;
-    } catch (e) {
-      errors.push(`channel ${brand}/${date}/${channel}: ${e.message}`);
-    }
-  }
-
-  console.log(`[twFullSync] syncTWChannels ${brand}: ${written} rows upserted`);
-  return { rows: written, errors };
 }
 
-// ─────────────────────────────────────────────────────────────────
-//  2. GEO DAILY  (fixes the 6-day lag)
-// ─────────────────────────────────────────────────────────────────
+/**
+ * Sync tw_geo_daily — delegates to tripleWhaleSQL.refreshBrand (ads_table country spend).
+ * @deprecated Prefer tw_refresh task; kept for manual backfill compatibility.
+ */
 async function syncTWGeo(brand, startDate, endDate) {
-  const errors = [];
-  let written = 0;
-  const dr = chDateRange('date', startDate, endDate);
-
-  // blended_stats_tvf gives us revenue and spend broken down by country
-  const sql = `
-    SELECT
-      date,
-      country                                         AS region,
-      SUM(revenue)                                    AS revenue_actual,
-      SUM(spend)                                      AS spend_actual,
-      SUM(revenue) / NULLIF(SUM(spend), 0)            AS mer
-    FROM blended_stats_tvf('${startDate}', '${endDate}')
-    WHERE ${dr}
-      AND country IS NOT NULL
-      AND country != ''
-    GROUP BY date, country
-    HAVING SUM(revenue) + SUM(spend) > 0
-    ORDER BY date, country
-  `;
-
-  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
-  if (!rows.length) {
-    console.log(`[twFullSync] syncTWGeo ${brand}: no rows for ${startDate}→${endDate}`);
-    return { rows: 0, errors };
+  const { refreshBrand } = require('./tripleWhaleSQL');
+  try {
+    const r = await refreshBrand(brand, startDate, endDate);
+    console.log(`[twFullSync] syncTWGeo ${brand}: delegated to refreshBrand (${r.rows} summary rows)`);
+    return { rows: r.rows, errors: [] };
+  } catch (e) {
+    return { rows: 0, errors: [`syncTWGeo ${brand}: ${e.message}`] };
   }
-
-  // Also build TOTAL row per date
-  const dateMap = {};
-  for (const r of rows) {
-    const d = toDateStr(r.date);
-    if (!dateMap[d]) dateMap[d] = { revenue: 0, spend: 0 };
-    dateMap[d].revenue += parseFloat(r.revenue_actual || 0);
-    dateMap[d].spend   += parseFloat(r.spend_actual   || 0);
-  }
-
-  for (const r of rows) {
-    const date   = toDateStr(r.date);
-    const region = normalizeRegion(r.region);
-    try {
-      await pgRun(`
-        INSERT INTO tw_geo_daily
-          (brand, date, region, revenue_actual, spend_actual, mer)
-        VALUES ($1,$2,$3,$4,$5,$6)
-        ON CONFLICT (brand, date, region) DO UPDATE SET
-          revenue_actual = EXCLUDED.revenue_actual,
-          spend_actual   = EXCLUDED.spend_actual,
-          mer            = EXCLUDED.mer,
-          updated_at     = NOW()
-      `, [
-        brand, date, region,
-        parseFloat(r.revenue_actual || 0),
-        parseFloat(r.spend_actual   || 0),
-        r.mer ? parseFloat(r.mer)   : null,
-      ]);
-      written++;
-    } catch (e) {
-      errors.push(`geo ${brand}/${date}/${region}: ${e.message}`);
-    }
-  }
-
-  // Upsert TOTAL rows
-  for (const [date, t] of Object.entries(dateMap)) {
-    try {
-      const totalMer = t.spend > 0 ? t.revenue / t.spend : null;
-      await pgRun(`
-        INSERT INTO tw_geo_daily (brand, date, region, revenue_actual, spend_actual, mer)
-        VALUES ($1,$2,'TOTAL',$3,$4,$5)
-        ON CONFLICT (brand, date, region) DO UPDATE SET
-          revenue_actual = EXCLUDED.revenue_actual,
-          spend_actual   = EXCLUDED.spend_actual,
-          mer            = EXCLUDED.mer,
-          updated_at     = NOW()
-      `, [brand, date, t.revenue, t.spend, totalMer]);
-      written++;
-    } catch (e) {
-      errors.push(`geo TOTAL ${brand}/${date}: ${e.message}`);
-    }
-  }
-
-  console.log(`[twFullSync] syncTWGeo ${brand}: ${written} rows upserted`);
-  return { rows: written, errors };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -1028,65 +899,22 @@ async function syncTWBenchmarks(brand) {
 //  ads_table is intentionally used for spend so custom expenses marked as ad
 //  spend are excluded and the dashboard matches channel-reported ad spend.
 //
-//  For NOBL:
-//    revenue = blended_stats_tvf(include_amazon=TRUE).order_revenue
-//              = Shopify + Amazon, after discounts, before refunds
-//    spend   = ads_table.spend (channel-reported platforms only)
-//
-//  For FLO:
-//    revenue = blended_stats_tvf(include_amazon=TRUE).order_revenue
-//              = Gross Sales + Shipping + Taxes − Discounts
-//              = FLO US only. FLO EU is a separate store and is excluded.
+//  For NOBL / FLO:
+//    order_revenue         = Gross Product Sales + Shipping + Taxes − Discounts (TW Order Revenue)
+//    gross_minus_discounts = Gross Product Sales − Discounts (excludes shipping & taxes)
+//    spend                 = ads_table.spend (channel-reported platforms only)
 //
 //  shopify_revenue = blended_stats_tvf(include_amazon=FALSE).order_revenue
-//  amazon_revenue  = total − shopify
+//  amazon_revenue  = order_revenue − shopify
 //  total_sales     = order_revenue − refund_amount  (net)
 //
-//  This is an UPSERT — inserts row if missing, updates if present.
-//  Run this BEFORE tw_refresh so revenue is visible immediately.
+//  tw_refresh (tripleWhaleSQL) owns total_spend; this task updates revenue columns only.
 // ─────────────────────────────────────────────────────────────────
 async function syncTWOrderRevenue(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
   const refundsDr = chDateRange('refund_date', startDate, endDate);
 
-  // ── Query 1: Total order revenue (Shopify + Amazon) ─────────────
-  const allRevSql = `
-    SELECT
-      bst.event_date                              AS date,
-      COALESCE(SUM(bst.order_revenue), 0)         AS order_revenue
-    FROM blended_stats_tvf(include_amazon=TRUE) AS bst
-    WHERE bst.event_date >= '${startDate}'
-      AND bst.event_date <= '${endDate}'
-    GROUP BY bst.event_date
-    ORDER BY bst.event_date
-  `;
-
-  // ── Query 1b: Channel-reported ad spend (excludes custom expenses) ─────
-  const adSpendSql = `
-    SELECT
-      adt.event_date                              AS date,
-      COALESCE(SUM(adt.spend), 0)                 AS total_spend
-    FROM ads_table AS adt
-    WHERE adt.event_date >= toDate('${startDate}')
-      AND adt.event_date <= toDate('${endDate}')
-    GROUP BY adt.event_date
-    ORDER BY adt.event_date
-  `;
-
-  // ── Query 2: Shopify-only order revenue (derive Amazon split) ───
-  const shopifyRevSql = `
-    SELECT
-      bst.event_date                              AS date,
-      COALESCE(SUM(bst.order_revenue), 0)         AS shopify_revenue
-    FROM blended_stats_tvf(include_amazon=FALSE) AS bst
-    WHERE bst.event_date >= '${startDate}'
-      AND bst.event_date <= '${endDate}'
-    GROUP BY bst.event_date
-    ORDER BY bst.event_date
-  `;
-
-  // ── Query 3: Refunds (for net total_sales) ───────────────────────
   const refundsSql = `
     SELECT
       refund_date                                 AS date,
@@ -1098,29 +926,29 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
     ORDER BY refund_date
   `;
 
-  const [allRows, adSpendRows, shopifyRows, refundRows] = await Promise.all([
-    twSqlSafe(brand, allRevSql),
-    twSqlSafe(brand, adSpendSql),
-    twSqlSafe(brand, shopifyRevSql),
-    twSqlSafe(brand, refundsSql),
-  ]);
-
-  if (!allRows.length) {
-    console.log(`[twFullSync] syncTWOrderRevenue ${brand}: no rows for ${startDate}→${endDate}`);
+  let dualRevMap = {};
+  let shopifyRevMap = {};
+  let refundRows = [];
+  try {
+    [dualRevMap, shopifyRevMap, refundRows] = await Promise.all([
+      fetchDualRevenueMetrics(brand, startDate, endDate),
+      fetchBlendedShopifyRevenue(brand, startDate, endDate),
+      twSqlSafe(brand, refundsSql),
+    ]);
+  } catch (e) {
+    const msg = `syncTWOrderRevenue fetch ${brand}: ${e.message}`;
+    console.error('[twFullSync]', msg);
+    errors.push(msg);
     return { rows: 0, errors };
   }
 
-  // Build lookup maps
-  const shopifyMap = {};
-  for (const r of shopifyRows) {
-    const d = toDateStr(r.date || r.event_date);
-    shopifyMap[d] = parseFloat(r.shopify_revenue || 0);
-  }
-
-  const adSpendMap = {};
-  for (const r of adSpendRows) {
-    const d = toDateStr(r.date || r.event_date);
-    adSpendMap[d] = parseFloat(r.total_spend || 0);
+  const allDates = new Set([
+    ...Object.keys(dualRevMap),
+    ...Object.keys(shopifyRevMap),
+  ]);
+  if (!allDates.size) {
+    console.log(`[twFullSync] syncTWOrderRevenue ${brand}: no rows for ${startDate}→${endDate}`);
+    return { rows: 0, errors };
   }
 
   const refundMap = {};
@@ -1132,49 +960,50 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
     };
   }
 
-  for (const r of allRows) {
-    const date         = toDateStr(r.date || r.event_date);
-    const orderRevenue = parseFloat(r.order_revenue || 0);
-    const totalSpend   = parseFloat(adSpendMap[date] || 0);
-    const shopifyRev   = shopifyMap[date] !== undefined ? shopifyMap[date] : orderRevenue;
+  for (const date of [...allDates].sort()) {
+    const metrics      = dualRevMap[date] || { order_revenue: 0, gross_minus_discounts: 0 };
+    const orderRevenue = parseFloat(metrics.order_revenue || 0);
+    const gmd          = parseFloat(metrics.gross_minus_discounts || 0);
+    const shopifyRev   = shopifyRevMap[date] !== undefined
+      ? parseFloat(shopifyRevMap[date])
+      : orderRevenue;
     const amazonRev    = Math.max(0, orderRevenue - shopifyRev);
     const refunds      = refundMap[date] || { count: 0, amount: 0 };
     const totalSales   = Math.max(0, orderRevenue - refunds.amount);
 
     try {
-      // UPSERT — works whether or not tw_refresh has run yet
       await pgRun(`
         INSERT INTO tw_summary_daily
-          (brand, date, order_revenue, shopify_revenue, amazon_revenue,
-           total_sales, refund_amount, refund_count, total_spend,
+          (brand, date, order_revenue, gross_minus_discounts,
+           shopify_revenue, amazon_revenue,
+           total_sales, refund_amount, refund_count,
            total_revenue, total_orders)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$3,0)
         ON CONFLICT (brand, date) DO UPDATE SET
-          order_revenue   = EXCLUDED.order_revenue,
-          shopify_revenue = EXCLUDED.shopify_revenue,
-          amazon_revenue  = EXCLUDED.amazon_revenue,
-          total_sales     = EXCLUDED.total_sales,
-          total_revenue   = EXCLUDED.total_revenue,
-          refund_amount   = EXCLUDED.refund_amount,
-          refund_count    = EXCLUDED.refund_count,
-          total_spend     = CASE WHEN EXCLUDED.total_spend > 0
-                                 THEN EXCLUDED.total_spend
-                                 ELSE tw_summary_daily.total_spend END,
-          mer             = CASE
-            WHEN (CASE WHEN EXCLUDED.total_spend > 0 THEN EXCLUDED.total_spend ELSE tw_summary_daily.total_spend END) > 0
-            THEN EXCLUDED.total_revenue / (CASE WHEN EXCLUDED.total_spend > 0 THEN EXCLUDED.total_spend ELSE tw_summary_daily.total_spend END)
-            ELSE NULL
+          order_revenue         = EXCLUDED.order_revenue,
+          gross_minus_discounts = EXCLUDED.gross_minus_discounts,
+          shopify_revenue       = EXCLUDED.shopify_revenue,
+          amazon_revenue        = EXCLUDED.amazon_revenue,
+          total_sales           = EXCLUDED.total_sales,
+          total_revenue         = EXCLUDED.total_revenue,
+          refund_amount         = EXCLUDED.refund_amount,
+          refund_count          = EXCLUDED.refund_count,
+          total_spend           = tw_summary_daily.total_spend,
+          mer                   = CASE
+            WHEN tw_summary_daily.total_spend > 0
+            THEN EXCLUDED.total_revenue / tw_summary_daily.total_spend
+            ELSE tw_summary_daily.mer
           END,
-          updated_at      = NOW()
+          updated_at            = NOW()
       `, [
         brand, date,
         parseFloat(orderRevenue.toFixed(4)),
+        parseFloat(gmd.toFixed(4)),
         parseFloat(shopifyRev.toFixed(4)),
         parseFloat(amazonRev.toFixed(4)),
         parseFloat(totalSales.toFixed(4)),
         parseFloat(refunds.amount.toFixed(4)),
         refunds.count,
-        parseFloat(totalSpend.toFixed(4)),
       ]);
       written++;
     } catch (e) {

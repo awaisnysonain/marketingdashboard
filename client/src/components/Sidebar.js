@@ -326,7 +326,7 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
       <div style={{
         height: 'var(--topbar-h)',
         display: 'flex', alignItems: 'center',
-        padding: collapsed ? '0' : '0 14px',
+        padding: collapsed ? '0' : '0 12px',
         justifyContent: collapsed ? 'center' : 'flex-start',
         borderBottom: '1px solid var(--border)',
         flexShrink: 0, gap: 9,

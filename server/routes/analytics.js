@@ -1,6 +1,7 @@
 const express = require('express');
 const router  = express.Router();
 const { pgQuery } = require('../db/postgres');
+const { METRICS: REVENUE_METRICS } = require('../config/revenueMetrics');
 const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
 const { metaAdsDailySourceSql } = require('../etl/metaAdsSync');
 const { getNoblAirDataVersion } = require('../utils/noblAirDataVersion');
@@ -1480,6 +1481,7 @@ router.get('/overview', async (req, res) => {
                 total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
+                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales,
                 COALESCE(refund_amount, 0) AS refund_amount
          FROM nobl_brand_tw_summary_daily
@@ -1492,6 +1494,7 @@ router.get('/overview', async (req, res) => {
                 total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
+                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales,
                 COALESCE(refund_amount, 0) AS refund_amount
          FROM flo_brand_tw_summary_daily
@@ -1536,6 +1539,7 @@ router.get('/overview', async (req, res) => {
         date: d,
         nobl_revenue:        nRev,
         nobl_order_revenue:  parseFloat(n.order_revenue  || 0),
+        nobl_gross_minus_discounts: parseFloat(n.gross_minus_discounts || 0),
         nobl_shopify_revenue:parseFloat(n.shopify_revenue || 0),
         nobl_amazon_revenue: parseFloat(n.amazon_revenue  || 0),
         nobl_total_sales:    parseFloat(n.total_sales     || 0),
@@ -1546,6 +1550,7 @@ router.get('/overview', async (req, res) => {
         nobl_nc_orders:      parseInt(n.new_customer_orders || 0),
         flo_revenue:         fRev,
         flo_order_revenue:   parseFloat(f.order_revenue   || 0),
+        flo_gross_minus_discounts: parseFloat(f.gross_minus_discounts || 0),
         flo_shopify_revenue: parseFloat(f.shopify_revenue || 0),
         flo_amazon_revenue:  parseFloat(f.amazon_revenue  || 0),
         flo_total_sales:     parseFloat(f.total_sales     || 0),
@@ -1565,6 +1570,7 @@ router.get('/overview', async (req, res) => {
       total_spend:          (acc.total_spend          || 0) + r.total_spend,
       nobl_revenue:         (acc.nobl_revenue         || 0) + r.nobl_revenue,
       nobl_order_revenue:   (acc.nobl_order_revenue   || 0) + r.nobl_order_revenue,
+      nobl_gross_minus_discounts: (acc.nobl_gross_minus_discounts || 0) + r.nobl_gross_minus_discounts,
       nobl_shopify_revenue: (acc.nobl_shopify_revenue || 0) + r.nobl_shopify_revenue,
       nobl_amazon_revenue:  (acc.nobl_amazon_revenue  || 0) + r.nobl_amazon_revenue,
       nobl_total_sales:     (acc.nobl_total_sales     || 0) + r.nobl_total_sales,
@@ -1573,6 +1579,7 @@ router.get('/overview', async (req, res) => {
       nobl_nc_orders:       (acc.nobl_nc_orders       || 0) + r.nobl_nc_orders,
       flo_revenue:          (acc.flo_revenue          || 0) + r.flo_revenue,
       flo_order_revenue:    (acc.flo_order_revenue    || 0) + r.flo_order_revenue,
+      flo_gross_minus_discounts: (acc.flo_gross_minus_discounts || 0) + r.flo_gross_minus_discounts,
       flo_shopify_revenue:  (acc.flo_shopify_revenue  || 0) + r.flo_shopify_revenue,
       flo_amazon_revenue:   (acc.flo_amazon_revenue   || 0) + r.flo_amazon_revenue,
       flo_total_sales:      (acc.flo_total_sales      || 0) + r.flo_total_sales,
@@ -1590,7 +1597,7 @@ router.get('/overview', async (req, res) => {
     totals.flo_mer = totals.flo_spend > 0
       ? parseFloat((totals.flo_revenue / totals.flo_spend).toFixed(4)) : 0;
 
-    res.json({ rows, totals });
+    res.json({ rows, totals, revenue_metrics: REVENUE_METRICS });
   } catch (e) {
     console.error('[Analytics /overview]', e.message);
     res.status(500).json({ error: e.message });
@@ -1607,6 +1614,7 @@ router.get('/nobl/topline', async (req, res) => {
                 brand, total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
+                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
          FROM nobl_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
@@ -1641,6 +1649,7 @@ router.get('/nobl/topline', async (req, res) => {
       channels: fmtRows(channelsRes.rows),
       geo: fmtRows(geoRes.rows),
       subs: fmtRows(subsRes.rows),
+      revenue_metrics: REVENUE_METRICS,
     });
   } catch (e) {
     console.error('[Analytics /nobl/topline]', e.message);
@@ -1658,6 +1667,7 @@ router.get('/flo/topline', async (req, res) => {
                 brand, total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
+                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
          FROM flo_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
@@ -1692,6 +1702,7 @@ router.get('/flo/topline', async (req, res) => {
       channels: fmtRows(channelsRes.rows),
       geo: fmtRows(geoRes.rows),
       products: fmtRows(productsRes.rows),
+      revenue_metrics: REVENUE_METRICS,
     });
   } catch (e) {
     console.error('[Analytics /flo/topline]', e.message);

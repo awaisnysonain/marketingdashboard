@@ -155,9 +155,21 @@ export function isDateField(header){
 
 // ── Analytics API ─────────────────────────────────────────────────
 export const getOverview = (start, end) => fetch(`${B}/api/analytics/overview?start=${start}&end=${end}`).then(r=>r.json());
-export const getNoblTopline = (start, end) => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(r=>r.json());
-export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(r=>r.json());
-export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(r=>r.json());
+export const getNoblTopline = (start, end) => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(async r => {
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+  return data;
+});
+export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(async r => {
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+  return data;
+});
+export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(async r => {
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+  return data;
+});
 export const getNoblSubs = (start, end) =>
   fetchJson(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`, '/api/analytics/nobl/subscriptions');
 export const getSubscriptions = (start, end, brand = 'NOBL') =>

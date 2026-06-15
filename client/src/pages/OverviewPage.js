@@ -5,13 +5,11 @@ import {
 } from 'recharts';
 import { getOverview, getSyncStatus, triggerSync, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
-import DateRangePicker from '../components/DateRangePicker';
+import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
-
-function toISO(d) { return d.toISOString().slice(0, 10); }
-function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
+import { mtdRange } from '../utils/dateRange';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -21,36 +19,40 @@ function fmtDateLabel(s) {
 // column definitions for SheetTable
 const OVERVIEW_HEADERS = [
   L.date,
-  'NOBL sales', 'NOBL ad spend', 'NOBL sales per ad $', 'NOBL orders', 'NOBL new customers',
-  'FLO sales', 'FLO ad spend', 'FLO sales per ad $', 'FLO orders', 'FLO new customers',
-  'Total sales', 'Total ad spend', L.blendedMer,
+  'NOBL Gross − Discounts', 'NOBL Order Revenue', 'NOBL ad spend', 'NOBL sales per ad $', 'NOBL orders', 'NOBL new customers',
+  'FLO Gross − Discounts', 'FLO Order Revenue', 'FLO ad spend', 'FLO sales per ad $', 'FLO orders', 'FLO new customers',
+  'Total Gross − Discounts', 'Total Order Revenue', 'Total ad spend', L.blendedMer,
   L.subRevenue,
 ];
 
 function toTableRow(r) {
   const blendedMer = r.total_spend > 0 ? (r.total_revenue / r.total_spend) : null;
+  const totalGmd = (r.nobl_gross_minus_discounts || 0) + (r.flo_gross_minus_discounts || 0);
   return {
     [L.date]:           r.date,
-    'NOBL sales':   r.nobl_revenue,
-    'NOBL ad spend':     r.nobl_spend,
-    'NOBL sales per ad $':       r.nobl_mer,
-    'NOBL orders':    r.nobl_orders,
-    'NOBL new customers': r.nobl_nc_orders,
-    'FLO sales':    r.flo_revenue,
-    'FLO ad spend':      r.flo_spend,
-    'FLO sales per ad $':        r.flo_mer,
-    'FLO orders':     r.flo_orders,
-    'FLO new customers':  r.flo_nc_orders,
-    'Total sales':  r.total_revenue,
-    'Total ad spend':    r.total_spend,
-    [L.blendedMer]:    blendedMer,
-    [L.subRevenue]:    r.nobl_sub_revenue,
+    'NOBL Gross − Discounts': r.nobl_gross_minus_discounts,
+    'NOBL Order Revenue':     r.nobl_revenue,
+    'NOBL ad spend':          r.nobl_spend,
+    'NOBL sales per ad $':    r.nobl_mer,
+    'NOBL orders':            r.nobl_orders,
+    'NOBL new customers':     r.nobl_nc_orders,
+    'FLO Gross − Discounts':  r.flo_gross_minus_discounts,
+    'FLO Order Revenue':      r.flo_revenue,
+    'FLO ad spend':           r.flo_spend,
+    'FLO sales per ad $':     r.flo_mer,
+    'FLO orders':             r.flo_orders,
+    'FLO new customers':      r.flo_nc_orders,
+    'Total Gross − Discounts': totalGmd,
+    'Total Order Revenue':    r.total_revenue,
+    'Total ad spend':         r.total_spend,
+    [L.blendedMer]:           blendedMer,
+    [L.subRevenue]:           r.nobl_sub_revenue,
     _date: r.date,
   };
 }
 
 export default function OverviewPage({ showToast }) {
-  const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
+  const [range, setRange] = useState(mtdRange());
   const [data, setData]     = useState(null);
   const [syncData, setSyncData] = useState(null);
   const [loading, setLoading]   = useState(true);
@@ -104,33 +106,33 @@ export default function OverviewPage({ showToast }) {
   const tableRows = chartRows.map(toTableRow);
 
   return (
-    <div>
-      {/* ── header ── */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
-        <PageIntro title={PAGE.overview.title} desc={PAGE.overview.desc} />
-        <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-          <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="overview" />
-          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
-            {lastSyncLabel && (
-              <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text3)', background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:20, padding:'3px 10px' }}>
-                <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--success)', flexShrink:0 }} />
-                Last synced: {lastSyncLabel}
-              </span>
-            )}
-            <button onClick={handleSync} disabled={syncing} style={{
-              padding:'6px 14px', fontSize:12, fontWeight:600,
-              background:'var(--accent)', color:'#fff', border:'none', borderRadius:7,
-              cursor:syncing?'not-allowed':'pointer', opacity:syncing?.7:1,
-            }}>{syncing ? 'Syncing…' : 'Sync Now'}</button>
-          </div>
+    <div className="page-stack">
+      <PageFilterBar start={range.start} end={range.end} onChange={setRange}>
+        <div style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto' }}>
+          {lastSyncLabel && (
+            <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text3)', background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:20, padding:'3px 10px' }}>
+              <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--success)', flexShrink:0 }} />
+              Last synced: {lastSyncLabel}
+            </span>
+          )}
+          <button onClick={handleSync} disabled={syncing} style={{
+            padding:'6px 14px', fontSize:12, fontWeight:600,
+            background:'var(--accent)', color:'#fff', border:'none', borderRadius:7,
+            cursor:syncing?'not-allowed':'pointer', opacity:syncing?.7:1,
+          }}>{syncing ? 'Syncing…' : 'Sync Now'}</button>
         </div>
-      </div>
+      </PageFilterBar>
+
+      <PageIntro title={PAGE.overview.title} desc={PAGE.overview.desc} />
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
-          {/* ── KPI row ── */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12, marginBottom:24 }}>
-            <KpiCard label="Total sales" value={fmt$(totals.total_revenue || 0)} fullValue={fmt$(totals.total_revenue || 0)} tooltip={TIP.revenue} color="blue" />
+          <div className="page-kpi-grid">
+            <KpiCard label="Gross − Discounts (NOBL)" value={fmt$(totals.nobl_gross_minus_discounts || 0)} tooltip={TIP.grossMinusDiscounts} color="nobl" />
+            <KpiCard label="Order Revenue (NOBL)" value={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.orderRevenue} color="nobl" />
+            <KpiCard label="Gross − Discounts (FLO)" value={fmt$(totals.flo_gross_minus_discounts || 0)} tooltip={TIP.grossMinusDiscounts} color="flo" />
+            <KpiCard label="Order Revenue (FLO)" value={fmt$(totals.flo_revenue || 0)} tooltip={TIP.orderRevenue} color="flo" />
+            <KpiCard label="Total sales" value={fmt$(totals.total_revenue || 0)} fullValue={fmt$(totals.total_revenue || 0)} tooltip={TIP.orderRevenue} color="blue" />
             <KpiCard label="Total ad spend" value={fmt$(totals.total_spend || 0)} fullValue={fmt$(totals.total_spend || 0)} tooltip={TIP.spend} color="warn" />
             <KpiCard label={L.blendedMer} value={(totals.blended_mer || 0).toFixed(2) + 'x'} tooltip={TIP.mer} color="green" />
             <KpiCard label="NOBL sales" value={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.revenue} color="nobl" />
@@ -140,8 +142,7 @@ export default function OverviewPage({ showToast }) {
             <KpiCard label="NOBL subscription sales" value={fmt$(totals.nobl_sub_revenue || 0)} tooltip={TIP.subRevenue} color="purple" />
           </div>
 
-          {/* ── Charts row ── */}
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:20 }}>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
             <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
               <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Sales over time</div>
               <ResponsiveContainer width="100%" height={240}>

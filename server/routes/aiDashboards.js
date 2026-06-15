@@ -9,23 +9,25 @@ const SCHEMA_CONTEXT = `
 AVAILABLE DATABASE TABLES (PostgreSQL — use the EXACT names below):
 
 1. tw_summary_daily — Daily totals per brand (brand-level rollup, both NOBL and FLO)
-   Columns: date, brand ('NOBL'|'FLO'), total_revenue, total_spend, mer, total_orders,
-            new_customer_orders, returning_customer_orders, order_revenue,
-            shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
+   Columns: date, brand, order_revenue, gross_minus_discounts, total_revenue, total_spend, mer, total_orders,
+            new_customer_orders, returning_customer_orders, shopify_revenue, amazon_revenue, total_sales, refund_amount
+   ▸ order_revenue = Gross Product Sales + Shipping + Taxes − Discounts (use for MER)
+   ▸ gross_minus_discounts = Gross Product Sales − Discounts (excludes shipping & taxes)
    ▸ ALWAYS filter by brand (use filters.brand: 'NOBL' or 'FLO').
    ▸ NOBL already includes EU customers (one Shopify store, all regions).
-   ▸ total_revenue/order_revenue = canonical order revenue for dashboard KPIs.
    ▸ FLO totals are FLO US only. FLO EU is a separate store and is excluded.
 
 2. tw_channel_daily — Channel breakdown per brand per day
-   Columns: date, brand, channel ('META'|'GOOGLE'|'TIKTOK'|'SNAPCHAT'|'PINTEREST'|'APPLOVIN'|'BING'|'X'),
+   Columns: date, brand, channel ('META'|'GOOGLE'|'TIKTOK'|'SNAPCHAT'|'PINTEREST'|'APPLOVIN'|'BING'|'X'|'AMAZON'),
             spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac
+   ▸ spend_1d = ads_table channel-reported spend (canonical for spend/MER denominators).
    ▸ revenue_1d is Triple Attribution (1-day window) — matches TW dashboard.
    ▸ Do NOT sum revenue_1d across channels to get total revenue.
 
 3. tw_geo_daily — Geographic breakdown
-   Columns: date, brand, region ('US'|'CA'|'AUS'|'DUBAI'|'EU'|'TOTAL'),
+   Columns: date, brand, region ('US'|'CA'|'AUS'|'DUBAI'|'EU'|'OTHER'|'TOTAL'),
             revenue_actual, spend_actual, mer
+   ▸ spend_actual = ads_table country breakdown (US is actual US spend, not residual).
 
 4. tw_product_daily — FLO product lines (portable/wooden/metal). NOBL not populated here.
    Columns: date, brand, product_line, spend, revenue, new_cust_orders, ...meta_spend etc.
@@ -242,7 +244,7 @@ COMMON PATTERNS:
 // ── Allowed tables and their allowed columns ──────────────────────
 // Only real tables in PG. AI's selection is constrained to this map.
 const ALLOWED_TABLES = {
-  tw_summary_daily:        ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders','order_revenue','shopify_revenue','amazon_revenue','total_sales','refund_amount','refund_count'],
+  tw_summary_daily:        ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders','order_revenue','gross_minus_discounts','shopify_revenue','amazon_revenue','total_sales','refund_amount','refund_count'],
   tw_channel_daily:        ['date','brand','channel','spend_1d','revenue_1d','purchases_1d','roas_1d','spend_7d','new_cust_orders','cac','portable_cac','wooden_cac','metal_cac'],
   tw_store_summary_daily:  ['date','store_key','brand','total_revenue','total_spend','mer','total_orders'],
   tw_product_daily:        ['date','brand','product_line','spend','new_cust_orders','revenue','meta_spend','google_spend','tiktok_spend','snap_spend','pinterest_spend','bing_spend','applovin_spend'],

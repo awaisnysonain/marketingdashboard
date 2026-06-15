@@ -4,13 +4,11 @@ import {
 } from 'recharts';
 import { getChannels, fmt$ } from '../utils/api';
 import KpiCard from '../components/KpiCard';
-import DateRangePicker from '../components/DateRangePicker';
+import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
-
-function toISO(d) { return d.toISOString().slice(0, 10); }
-function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
+import { mtdRange } from '../utils/dateRange';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -26,7 +24,7 @@ const CHANNEL_COLORS = {
 const BRANDS = ['Both', 'NOBL', 'FLO'];
 
 export default function ChannelsPage({ showToast }) {
-  const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
+  const [range, setRange] = useState(mtdRange());
   const [brandFilter, setBrandFilter] = useState('Both');
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -59,7 +57,7 @@ export default function ChannelsPage({ showToast }) {
     total_revenue: v.revenue,
     avg_roas: v.roas_vals.length ? v.roas_vals.reduce((a,b)=>a+b,0)/v.roas_vals.length : 0,
     total_orders: v.orders,
-  })).sort((a,b) => b.total_spend - a.total_spend);
+  })).sort((a,b) => b.total_revenue - a.total_revenue);
 
   // Spend stacked bar: group by date, series by channel
   const dateMap = {};
@@ -88,29 +86,26 @@ export default function ChannelsPage({ showToast }) {
   }));
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <PageIntro title={PAGE.channels.title} desc={PAGE.channels.desc} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {BRANDS.map(b => (
-              <button key={b} onClick={() => setBrandFilter(b)} style={{
-                padding: '5px 12px', fontSize: 12, fontWeight: 600,
-                borderRadius: 6, border: '1px solid var(--border)',
-                background: brandFilter === b ? 'var(--accent)' : 'var(--bg2)',
-                color: brandFilter === b ? '#fff' : 'var(--text2)',
-                cursor: 'pointer',
-              }}>{b}</button>
-            ))}
-          </div>
-          <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="channels" />
+    <div className="page-stack">
+      <PageFilterBar start={range.start} end={range.end} onChange={setRange}>
+        <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
+          {BRANDS.map(b => (
+            <button key={b} onClick={() => setBrandFilter(b)} style={{
+              padding: '5px 12px', fontSize: 12, fontWeight: 600,
+              borderRadius: 6, border: '1px solid var(--border)',
+              background: brandFilter === b ? 'var(--accent)' : 'var(--bg3)',
+              color: brandFilter === b ? '#fff' : 'var(--text2)',
+              cursor: 'pointer',
+            }}>{b}</button>
+          ))}
         </div>
-      </div>
+      </PageFilterBar>
+
+      <PageIntro title={PAGE.channels.title} desc={PAGE.channels.desc} />
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
-          {/* KPI cards by channel */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
             {channelKpis.slice(0, 6).map(ch => (
               <div key={ch.channel} style={{
                 background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 12, padding: '14px 16px',

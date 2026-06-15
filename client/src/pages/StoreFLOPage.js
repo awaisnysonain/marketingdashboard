@@ -5,13 +5,10 @@ import {
 } from 'recharts';
 import { getStoreFlo, fmt$, fmtNum, fmtPct } from '../utils/api';
 import KpiCard from '../components/KpiCard';
-import DateRangePicker from '../components/DateRangePicker';
+import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
-
-/* ── helpers ──────────────────────────────────────────────────────── */
-function toISO(d) { return d.toISOString().slice(0, 10); }
-function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
+import { mtdRange } from '../utils/dateRange';
 function fmtLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -52,7 +49,7 @@ function merColor(v) {
    MAIN PAGE
 ════════════════════════════════════════════════════════════════════ */
 export default function StoreFLOPage({ showToast }) {
-  const [range, setRange]     = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
+  const [range, setRange]     = useState(mtdRange());
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
@@ -83,12 +80,13 @@ export default function StoreFLOPage({ showToast }) {
   }), { total:0, rebill:0, newSubRev:0, newSubCount:0 }), [subDaily]);
 
   const totals = useMemo(() => summary.reduce((a, r) => ({
-    revenue: a.revenue + (r.total_revenue || 0),
+    revenue: a.revenue + (r.order_revenue || r.total_revenue || 0),
+    gmd:     a.gmd     + (r.gross_minus_discounts || 0),
     spend:   a.spend   + (r.total_spend   || 0),
     orders:  a.orders  + (r.total_orders  || 0),
     nc:      a.nc      + (r.new_customer_orders      || 0),
     rc:      a.rc      + (r.returning_customer_orders || 0),
-  }), { revenue:0, spend:0, orders:0, nc:0, rc:0 }), [summary]);
+  }), { revenue:0, gmd:0, spend:0, orders:0, nc:0, rc:0 }), [summary]);
 
   const totalMer = mer(totals.revenue, totals.spend);
   const totalAov = totals.orders > 0 ? totals.revenue / totals.orders : 0;
@@ -151,9 +149,10 @@ export default function StoreFLOPage({ showToast }) {
   }), { sent:0, opened:0, clicked:0, revenue:0 }), [email]);
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
+    <div className="page-stack">
+      <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
+
+      <div className="page-header">
         <div>
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4 }}>
             <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:FLO_ACCENT }}>
@@ -165,17 +164,16 @@ export default function StoreFLOPage({ showToast }) {
             </span>
           </div>
           <p style={{ fontSize:13, color:'var(--text3)', margin:0 }}>
-            Complete store analytics · Portable · Wooden · Metal · {range.start} → {range.end}
+            {PAGE.storeFlo.desc} · {range.start} → {range.end}
           </p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="storeflo" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
-          {/* KPI Strip */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Total sales" value={fmt$(totals.revenue)} tooltip={TIP.revenue} color="teal"   />
+          <div className="page-kpi-grid">
+            <KpiCard label="Gross − Discounts" value={fmt$(totals.gmd)} tooltip={TIP.grossMinusDiscounts} color="teal" />
+            <KpiCard label="Order Revenue" value={fmt$(totals.revenue)} tooltip={TIP.orderRevenue} color="teal" />
             <KpiCard label="Total ad spend"   value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn"   />
             <KpiCard label={L.mer}           value={totalMer.toFixed(2)+'x'} tooltip={TIP.mer} color={totalMer>=2?'green':totalMer>=1.8?'warn':'red'} />
             <KpiCard label="Total orders"  value={fmtNum(totals.orders)} tooltip={TIP.orders} color="blue"   />
@@ -185,8 +183,7 @@ export default function StoreFLOPage({ showToast }) {
             <KpiCard label="Product Lines" value={coreProdAgg.length + ' lines'} color="teal"  />
           </div>
 
-          {/* Tabs */}
-          <div style={{ display:'flex', gap:2, marginBottom:20, borderBottom:'1px solid var(--border)' }}>
+          <div className="page-tabs">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)} style={{
                 padding:'8px 16px', fontSize:13, fontWeight:600, border:'none',
@@ -213,18 +210,19 @@ export default function StoreFLOPage({ showToast }) {
 /* ═══════════════════════════════════════════════════════════════════
    OVERVIEW TAB
 ════════════════════════════════════════════════════════════════════ */
-const OV_HEADERS = ['Date','Revenue','Spend','MER','Orders','NC Orders','RC Orders','NVP %','AOV'];
+const OV_HEADERS = ['Date','Gross − Discounts','Order Revenue','Spend','MER','Orders','NC Orders','RC Orders','NVP %','AOV'];
 function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
   const rows = summary.map(r => ({
-    Date:       r.date,
-    Revenue:    r.total_revenue,
-    Spend:      r.total_spend,
-    MER:        r.mer,
-    Orders:     r.total_orders,
-    'NC Orders':r.new_customer_orders,
-    'RC Orders':r.returning_customer_orders,
-    'NVP %':    r.nvp_pct,
-    AOV:        r.aov,
+    Date:                r.date,
+    'Gross − Discounts': r.gross_minus_discounts,
+    'Order Revenue':     r.order_revenue || r.total_revenue,
+    Spend:               r.total_spend,
+    MER:                 r.mer,
+    Orders:              r.total_orders,
+    'NC Orders':         r.new_customer_orders,
+    'RC Orders':         r.returning_customer_orders,
+    'NVP %':             r.nvp_pct,
+    AOV:                 r.aov,
   }));
   const chartData = [...summary].reverse();
 
@@ -246,7 +244,8 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
             <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtLabel}
               contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
             <Legend wrapperStyle={{ fontSize:12 }} />
-            <Area type="monotone" dataKey="total_revenue" name="Revenue" stroke={FLO_ACCENT} fill="url(#fGradRev)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={FLO_ACCENT} fill="url(#fGradRev)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="gross_minus_discounts" name="Gross − Discounts" stroke="#6366f1" fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
             <Area type="monotone" dataKey="total_spend"   name="Spend"   stroke={FLO_WARN}  fill="none" strokeWidth={2} strokeDasharray="4 2" dot={false} />
           </AreaChart>
         </ResponsiveContainer>

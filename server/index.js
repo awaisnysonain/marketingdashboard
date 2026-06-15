@@ -27,6 +27,7 @@ const syncEngine = require('./etl/syncEngine');
 const { ensureNoblAirRegionDailyTable } = require('./etl/noblAirAggregate');
 const { ensureNoblAirMetaAdDailyTable } = require('./etl/noblAirMetaAdDaily');
 const { ensureNoblAirTtpSnapshotTable } = require('./etl/noblAirTtpSnapshot');
+const { ensureBrandTwViews } = require('./etl/ensureBrandTwViews');
 const { isAuthBypassEnabled, getDevBypassUser, isAdminSession, effectiveUserId } = require('./auth');
 const twRouter    = require('./routes/triplewhale');
 const storeRouter = require('./routes/store');
@@ -303,6 +304,8 @@ async function initPostgresTables() {
     await ensureNoblAirRegionDailyTable();
     await ensureNoblAirMetaAdDailyTable();
     await ensureNoblAirTtpSnapshotTable();
+
+    await ensureBrandTwViews();
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_orders_detail (
@@ -845,23 +848,29 @@ EU contributes ~0.5–1% of NOBL revenue and appears as a region breakdown in tw
 PILATES FLO (pilatesflo.com): Pilates equipment — Portable Reformer, Home Reformer (metal), Studio Reformer (wooden). The dashboard's FLO totals are FLO US only. FLO EU is a separate Shopify store and is excluded from FLO total_revenue/total_spend.
 
 ━━━ DATABASE TABLES ━━━
-tw_summary_daily(id, brand, date, total_revenue, total_spend, mer, total_orders, new_customer_orders, returning_customer_orders, order_revenue, shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count)
+tw_summary_daily(id, brand, date, total_revenue, total_spend, mer, total_orders, new_customer_orders, returning_customer_orders, order_revenue, gross_minus_discounts, shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count)
   → brand = 'NOBL' or 'FLO' | date is a DATE column (use date BETWEEN $1::date AND $2::date)
-  → total_revenue/order_revenue = canonical dashboard revenue (Shopify+Amazon for NOBL; FLO US only for FLO)
+  → order_revenue/total_revenue = Gross Product Sales + Shipping + Taxes − Discounts (use for MER)
+  → gross_minus_discounts = Gross Product Sales − Discounts (excludes shipping & taxes)
+  → total_spend = SUM(ads_table.spend) via tw_refresh (tw_order_revenue does NOT overwrite spend)
   → Use COALESCE(order_revenue, total_revenue) only if you need compatibility with older rows
   → total_sales = order_revenue - refund_amount (net, after refunds)
   → amazon_revenue ≈ $10-15k/day for NOBL; shopify_revenue = rest
   → Note: order_revenue populated by tw_order_revenue ETL task (NULL until backfill runs)
 
 tw_channel_daily(id, brand, date, channel, spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac)
-  → channel values: 'META','GOOGLE','APPLOVIN','TIKTOK','SNAPCHAT','BING','PINTEREST','X'
+  → spend_1d = ads_table.spend by channel (facebook-ads→META, etc.; AMAZON included for NOBL)
+  → revenue_1d / purchases_1d = pixel_joined_tvf Triple Attribution 1_day (NOT ads_table revenue)
+  → channel values: 'META','GOOGLE','APPLOVIN','TIKTOK','SNAPCHAT','BING','PINTEREST','X','AMAZON'
   → Use MAX(date) to determine latest available data; do not assume wall-clock today has synced.
 
 tw_channel_daily_all(id, brand, date, tw_channel, spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac)
   → tw_channel values: 'facebook-ads','google-ads','applovin','tiktok-ads','snapchat-ads','bing','pinterest-ads','twitter-ads'
 
 tw_geo_daily(id, brand, date, region, revenue_actual, spend_actual, mer)
-  → region values: 'US','CA','AUS','DUBAI','EU','TOTAL'
+  → revenue_actual = Shopify orders_table by shipping country
+  → spend_actual = ads_table country breakdown (US/CA/AUS/Dubai/EU actual; OTHER = no country breakout)
+  → region values: 'US','CA','AUS','DUBAI','EU','OTHER','TOTAL'
   → Use this for regional MER, revenue by country
 
 tw_store_summary_daily(id, brand, store_key, shop_id, date, total_revenue, total_spend, mer)
@@ -934,10 +943,14 @@ tw_benchmarks(id, brand, date, vertical, revenue_tier, metric_name, metric_value
 For current dashboard tables, total_revenue and order_revenue are kept aligned for brand-level KPIs.
 
 order_revenue / total_revenue  (CANONICAL — USE for MER, AOV, all KPIs)
-  = SUM of all actual Shopify + Amazon orders (total_price), BEFORE refunds
-  = "Order Revenue" as shown in TW UI: "Revenue from orders after discounts, before refunds"
-  = Shopify + Amazon combined. shopify_revenue and amazon_revenue show the split.
+  = Gross Product Sales + Shipping + Taxes − Discounts
+  = Triple Whale "Order Revenue" — after discounts, before refunds
+  = Shopify + Amazon combined for NOBL. shopify_revenue and amazon_revenue show the split.
   ⚠️ FLO is FLO US only. Do not add FLO_EU unless the user explicitly asks for the separate EU store.
+
+gross_minus_discounts  (Shopify-style subtotal metric)
+  = Gross Product Sales − Discounts (excludes shipping & taxes)
+  = Show alongside order_revenue so users see both definitions
 
 total_sales
   = order_revenue - refund_amount (net revenue actually kept)
@@ -947,8 +960,8 @@ shopify_revenue  = Shopify-only orders (order_revenue minus Amazon)
 amazon_revenue   = Amazon channel only (NOBL has ~$10-15k/day from Amazon)
 
 ━━━ KEY METRICS & FORMULAS ━━━
-MER = SUM(total_revenue) / NULLIF(SUM(total_spend),0)  [target ≥2.0, red <1.8]
-ROAS = channel_revenue / channel_spend
+MER = SUM(order_revenue) / NULLIF(SUM(total_spend),0)  [target ≥2.0, red <1.8]
+ROAS = channel_revenue / channel_spend  (spend_1d from ads_table; revenue_1d from attribution)
 NC ROAS = new_customer_revenue / spend
 NVP% = new_visitors / total_visitors [target ≥50%]
 CAC = spend / new_customer_orders

@@ -4,11 +4,12 @@
  * approach (which gave inflated MTA numbers + missed EU + missed Amazon).
  *
  * Tables refreshed:
- *   tw_summary_daily     — total_revenue (= Shopify + Amazon for the selected brand),
- *                          total_spend (= ads_table channel-reported spend), order counts.
- *   tw_channel_daily     — per-channel spend / revenue using Triple Attribution +
- *                          1-day click window (matches the TW dashboard UI).
- *   tw_geo_daily         — per-region revenue + spend (US/CA/AUS/DUBAI/EU/TOTAL).
+ *   tw_summary_daily     — order_revenue (Gross+Ship+Tax−Disc), gross_minus_discounts,
+ *                          total_spend (= ads_table), order counts.
+ *   tw_channel_daily     — spend from ads_table by channel; revenue/orders from
+ *                          pixel_joined_tvf Triple Attribution + 1_day window.
+ *   tw_geo_daily         — revenue from orders_table; spend from ads_table country
+ *                          breakdown (US/CA/AUS/DUBAI/EU/OTHER/TOTAL).
  *   tw_product_daily     — FLO product-line breakdown (portable/wooden/metal).
  *
  * Timezone: America/New_York (matches Brad's reportTz; the date keys here are
@@ -17,6 +18,11 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 const { pgRun } = require('../db/postgres');
 const { twSqlQuery, brandCreds } = require('./twSqlApi');
+const {
+  sqlGrossMinusDiscounts,
+  sqlOrderRevenue,
+  sqlOrdersPlatformFilter,
+} = require('../config/revenueMetrics');
 
 const REPORT_TZ = 'America/New_York';
 const EU_EUR_TO_USD = 1.16;
@@ -31,14 +37,47 @@ const CHANNEL_MAP = {
   'bing':          'BING',
   'applovin':      'APPLOVIN',
   'twitter-ads':   'X',
+  'amazon':        'AMAZON',
 };
 
-// Per-brand config controls which sources contribute to total_revenue & total_spend.
-// FLO EU is a separate business unit and must not be included in FLO totals.
+const EU_COUNTRY_CODES = new Set([
+  'AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT',
+  'LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','CH','MC','NO',
+]);
+
+// Per-brand config — revenue vs spend EU shop are separate for NOBL.
 const BRAND_CONFIG = {
-  NOBL: { includeAmazon: true,  euBrand: null      /* main Shopify includes EU   */ },
-  FLO:  { includeAmazon: false, euBrand: null      /* FLO US only; exclude EU    */ },
+  NOBL: {
+    includeAmazon: true,
+    euBrand: null,           // main Shopify store revenue includes EU orders
+    euSpendBrand: 'NOBL_EU', // only added when TW shopId differs from main (see below)
+    includeXChannel: true,
+  },
+  FLO: {
+    includeAmazon: false,
+    euBrand: null,
+    euSpendBrand: null,      // FLO US only; exclude FLO EU spend
+    includeXChannel: false,
+  },
 };
+
+function mapCountryToSpendRegion(countryRaw) {
+  const c = String(countryRaw || '').toUpperCase().trim();
+  if (!c || c === 'UNKNOWN' || c === 'NULL') return 'OTHER';
+  if (c === 'US' || c === 'USA') return 'US';
+  if (c === 'CA' || c === 'CAN') return 'CA';
+  if (c === 'AU' || c === 'AUS') return 'AUS';
+  if (c === 'AE' || c === 'UAE') return 'DUBAI';
+  if (EU_COUNTRY_CODES.has(c)) return 'EU';
+  return 'OTHER';
+}
+
+function mapTwChannelToKey(twChannel, brand) {
+  const key = CHANNEL_MAP[String(twChannel || '').toLowerCase().trim()];
+  if (!key) return null;
+  if (key === 'X' && !BRAND_CONFIG[brand]?.includeXChannel) return null;
+  return key;
+}
 
 function nextYmd(ymd) {
   const d = new Date(ymd + 'T00:00:00Z');
@@ -86,6 +125,48 @@ async function fetchShopifyRevenue(brand, startYmd, endYmd) {
      GROUP BY ot.event_date ORDER BY ot.event_date`,
     { period: { startDate: startYmd, endDate: endYmd } });
   return indexByDate(rows, 'revenue');
+}
+
+/** Dual revenue metrics from orders_table (TW-aligned amazon fee adjustment when includeAmazon). */
+async function fetchDualRevenueMetrics(brand, startYmd, endYmd) {
+  const cfg = BRAND_CONFIG[brand];
+  if (!cfg) throw new Error('Unknown brand: ' + brand);
+  const gmdExpr = sqlGrossMinusDiscounts(cfg.includeAmazon);
+  const ordExpr = sqlOrderRevenue(cfg.includeAmazon);
+  const platformFilter = sqlOrdersPlatformFilter(cfg.includeAmazon);
+
+  const rows = await twSqlQuery(brand,
+    `SELECT ot.event_date AS event_date,
+            COALESCE(SUM(${gmdExpr}), 0) AS gross_minus_discounts,
+            COALESCE(SUM(${ordExpr}), 0) AS order_revenue
+     FROM orders_table AS ot
+     WHERE ${platformFilter}
+       AND ot.event_date >= DATE '${startYmd}' AND ot.event_date <= DATE '${endYmd}'
+     GROUP BY ot.event_date ORDER BY ot.event_date`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+
+  const out = {};
+  (rows || []).forEach(r => {
+    const ymd = String(r?.event_date || '').slice(0, 10);
+    if (!ymd) return;
+    out[ymd] = {
+      gross_minus_discounts: Number(r?.gross_minus_discounts || 0),
+      order_revenue:         Number(r?.order_revenue || 0),
+    };
+  });
+  return out;
+}
+
+/** Shopify-only order revenue from blended_stats (for amazon_revenue split). */
+async function fetchBlendedShopifyRevenue(brand, startYmd, endYmd) {
+  const rows = await twSqlQuery(brand,
+    `SELECT bst.event_date AS event_date,
+            COALESCE(SUM(bst.order_revenue), 0) AS shopify_revenue
+     FROM blended_stats_tvf(include_amazon=FALSE) AS bst
+     WHERE bst.event_date >= '${startYmd}' AND bst.event_date <= '${endYmd}'
+     GROUP BY bst.event_date ORDER BY bst.event_date`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+  return indexByDate(rows, 'shopify_revenue');
 }
 
 async function fetchAmazonRevenue(brand, startYmd, endYmd) {
@@ -167,11 +248,53 @@ async function fetchRegionRevenue(brand, startYmd, endYmd) {
   return out;
 }
 
-async function fetchChannelMetrics(brand, startYmd, endYmd) {
-  // pixel_joined_tvf with Triple Attribution + 1_day window — matches TW dashboard
+async function fetchChannelSpend(brand, startYmd, endYmd) {
+  // Channel-reported spend from ads_table — matches TW Ads dashboard.
+  const rows = await twSqlQuery(brand,
+    `SELECT adt.event_date AS event_date, adt.channel AS channel,
+            COALESCE(SUM(adt.spend), 0) AS spend
+     FROM ads_table AS adt
+     WHERE adt.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
+     GROUP BY adt.event_date, adt.channel
+     ORDER BY adt.event_date, adt.channel`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+  const out = {};
+  (rows || []).forEach(r => {
+    const ymd = String(r?.event_date || '').slice(0, 10);
+    const ch = mapTwChannelToKey(r.channel, brand);
+    if (!ymd || !ch) return;
+    if (!out[ymd]) out[ymd] = {};
+    out[ymd][ch] = (out[ymd][ch] || 0) + Number(r.spend || 0);
+  });
+  return out;
+}
+
+async function fetchRegionSpend(brand, startYmd, endYmd) {
+  // Country breakdown from ads_table — US/CA/AUS/Dubai/EU are actual, not residual.
+  const rows = await twSqlQuery(brand,
+    `SELECT adt.event_date AS event_date, adt.breakdown_value AS country,
+            COALESCE(SUM(adt.spend), 0) AS spend
+     FROM ads_table AS adt
+     WHERE adt.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
+       AND adt.breakdown_dimension = 'country'
+     GROUP BY adt.event_date, adt.breakdown_value
+     ORDER BY adt.event_date, adt.breakdown_value`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+  const out = {};
+  (rows || []).forEach(r => {
+    const ymd = String(r?.event_date || '').slice(0, 10);
+    if (!ymd) return;
+    if (!out[ymd]) out[ymd] = { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
+    const region = mapCountryToSpendRegion(r.country);
+    out[ymd][region] = (out[ymd][region] || 0) + Number(r.spend || 0);
+  });
+  return out;
+}
+
+async function fetchChannelAttribution(brand, startYmd, endYmd) {
+  // Revenue / orders from pixel_joined — spend intentionally excluded (ads_table only).
   const rows = await twSqlQuery(brand,
     `SELECT pjt.event_date AS event_date, pjt.channel AS channel,
-            COALESCE(SUM(pjt.spend), 0) AS spend,
             COALESCE(SUM(pjt.order_revenue), 0) AS revenue,
             COALESCE(SUM(pjt.orders_quantity), 0) AS purchases,
             COALESCE(SUM(pjt.new_customer_orders), 0) AS new_customer_orders
@@ -182,6 +305,11 @@ async function fetchChannelMetrics(brand, startYmd, endYmd) {
      GROUP BY pjt.event_date, pjt.channel ORDER BY pjt.event_date`,
     { period: { startDate: startYmd, endDate: endYmd } });
   return rows || [];
+}
+
+/** @deprecated use fetchChannelAttribution + fetchChannelSpend */
+async function fetchChannelMetrics(brand, startYmd, endYmd) {
+  return fetchChannelAttribution(brand, startYmd, endYmd);
 }
 
 async function fetchFloProductDaily(brand, startYmd, endYmd) {
@@ -335,113 +463,178 @@ async function refreshBrand(brand, startYmd, endYmd) {
   console.log(`[TW SQL] ${brand} ${startYmd} → ${endYmd}`);
 
   // Sequential TW fetches — parallel calls were triggering TW 429/500 during cron.
-  const shopRev = await fetchShopifyRevenue(brand, startYmd, endYmd);
+  const dualRev = await fetchDualRevenueMetrics(brand, startYmd, endYmd);
+  const shopRev = await fetchBlendedShopifyRevenue(brand, startYmd, endYmd);
   const amzRev = cfg.includeAmazon ? await fetchAmazonRevenue(brand, startYmd, endYmd) : {};
   const spend = await fetchBlendedSpend(brand, startYmd, endYmd);
   const orders = await fetchOrderCounts(brand, startYmd, endYmd);
   const regionRev = await fetchRegionRevenue(brand, startYmd, endYmd);
-  const channelRows = await fetchChannelMetrics(brand, startYmd, endYmd);
+  const regionSp = await fetchRegionSpend(brand, startYmd, endYmd);
+  const channelSpend = await fetchChannelSpend(brand, startYmd, endYmd);
+  const channelAttr = await fetchChannelAttribution(brand, startYmd, endYmd);
 
-  // Optional EU shop support. FLO EU is intentionally excluded from FLO totals;
-  // NOBL EU is also not added here because NOBL's main shop already includes EU.
+  // Optional EU shop — revenue via euBrand, ad spend via euSpendBrand (NOBL only).
   let euRev = {};
   let euSpend = {};
   if (cfg.euBrand) {
     try {
       const er = await fetchShopifyRevenue(cfg.euBrand, startYmd, endYmd);
-      const es = await fetchBlendedSpend(cfg.euBrand, startYmd, endYmd);
-      euRev   = scaleMap(er, EU_EUR_TO_USD);
-      euSpend = scaleMap(es, EU_EUR_TO_USD);
+      euRev = scaleMap(er, EU_EUR_TO_USD);
     } catch (e) {
-      console.warn(`[TW SQL] ${brand} EU fetch failed: ${e.message}`);
+      console.warn(`[TW SQL] ${brand} EU revenue fetch failed: ${e.message}`);
+    }
+  }
+  if (cfg.euSpendBrand) {
+    try {
+      const mainCreds = brandCreds(brand);
+      const euCreds = brandCreds(cfg.euSpendBrand);
+      // Skip when EU workspace points at the same shop (would double-count spend).
+      if (euCreds.shopId && euCreds.shopId !== mainCreds.shopId) {
+        const es = await fetchBlendedSpend(cfg.euSpendBrand, startYmd, endYmd);
+        euSpend = scaleMap(es, EU_EUR_TO_USD);
+      }
+    } catch (e) {
+      console.warn(`[TW SQL] ${brand} EU spend fetch failed: ${e.message}`);
     }
   }
 
   // Combine per-day
   const allDates = new Set();
-  [shopRev, amzRev, spend, orders, regionRev, euRev, euSpend].forEach(m =>
+  [dualRev, shopRev, amzRev, spend, orders, regionRev, regionSp, channelSpend, euRev, euSpend].forEach(m =>
     Object.keys(m).forEach(d => allDates.add(d)));
   eachDay(startYmd, endYmd, d => allDates.add(d));
 
   let written = 0;
   for (const date of [...allDates].sort()) {
-    const shopVal  = Number(shopRev[date]  || 0);
-    const amzVal   = Number(amzRev[date]   || 0);
-    const euVal    = Number(euRev[date]    || 0);
-    const totalRev = shopVal + amzVal + euVal;
+    const metrics  = dualRev[date] || { gross_minus_discounts: 0, order_revenue: 0 };
+    const orderRev = Number(metrics.order_revenue || 0);
+    const gmd      = Number(metrics.gross_minus_discounts || 0);
+    const shopVal  = Number(shopRev[date] || orderRev);
+    const amzVal   = cfg.includeAmazon
+      ? Math.max(0, orderRev - shopVal)
+      : 0;
+    const totalRev = orderRev;
     const totalSp  = Number(spend[date] || 0) + Number(euSpend[date] || 0);
     const ord      = orders[date] || { total_orders: 0, new_customer_orders: 0 };
     const reg      = regionRev[date] || { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
+    const regSp    = regionSp[date] || { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
 
-    // EU region is only a geo breakdown; separate EU stores are not included
-    // in the brand-level FLO total.
+    // EU shop ad spend rolls into EU region bucket when NOBL_EU is configured.
+    const euSpendVal = Number(euSpend[date] || 0);
+    if (euSpendVal > 0) regSp.EU = (regSp.EU || 0) + euSpendVal;
+
+    // Spend with no country breakout (TW "No country breakout" row).
+    const breakdownSum = (regSp.US || 0) + (regSp.CA || 0) + (regSp.AUS || 0)
+      + (regSp.DUBAI || 0) + (regSp.EU || 0) + (regSp.OTHER || 0);
+    const unallocated = Math.max(0, totalSp - breakdownSum);
+    if (unallocated > 0) regSp.OTHER = (regSp.OTHER || 0) + unallocated;
+
     const regionEUForGeo = reg.EU;
 
     const mer = totalSp > 0 ? totalRev / totalSp : null;
     await pgRun(`
       INSERT INTO tw_summary_daily (
         brand, date,
-        total_revenue, order_revenue, shopify_revenue, amazon_revenue,
+        total_revenue, order_revenue, gross_minus_discounts,
+        shopify_revenue, amazon_revenue,
         total_sales, refund_amount, total_spend, mer,
         total_orders, new_customer_orders, returning_customer_orders
       ) VALUES (
-        $1, $2, $3::numeric, $4::numeric, $5::numeric, $6::numeric,
-        $7::numeric, 0::numeric, $8::numeric, $9::numeric,
-        $10::int, $11::int, $12::int
+        $1, $2, $3::numeric, $4::numeric, $5::numeric, $6::numeric, $7::numeric,
+        $8::numeric, 0::numeric, $9::numeric, $10::numeric,
+        $11::int, $12::int, $13::int
       )
       ON CONFLICT (brand, date) DO UPDATE SET
-        total_revenue   = EXCLUDED.total_revenue,
-        order_revenue   = EXCLUDED.order_revenue,
-        shopify_revenue = EXCLUDED.shopify_revenue,
-        amazon_revenue  = EXCLUDED.amazon_revenue,
-        total_sales     = EXCLUDED.total_sales,
-        total_spend     = EXCLUDED.total_spend,
-        mer             = EXCLUDED.mer,
-        total_orders    = EXCLUDED.total_orders,
+        total_revenue         = EXCLUDED.total_revenue,
+        order_revenue         = EXCLUDED.order_revenue,
+        gross_minus_discounts = EXCLUDED.gross_minus_discounts,
+        shopify_revenue       = EXCLUDED.shopify_revenue,
+        amazon_revenue        = EXCLUDED.amazon_revenue,
+        total_sales           = EXCLUDED.total_sales,
+        total_spend           = EXCLUDED.total_spend,
+        mer                   = EXCLUDED.mer,
+        total_orders          = EXCLUDED.total_orders,
         new_customer_orders       = EXCLUDED.new_customer_orders,
         returning_customer_orders = EXCLUDED.returning_customer_orders,
-        updated_at      = NOW()
+        updated_at            = NOW()
     `, [
       brand, date,
-      totalRev,                                 // $3 total_revenue
-      totalRev,                                 // $4 order_revenue (same)
-      shopVal,                                  // $5 shopify_revenue (raw Shopify SQL)
-      amzVal,                                   // $6 amazon_revenue
-      totalRev,                                 // $7 total_sales (we use the same; we don't have refunds yet)
-      totalSp,                                  // $8 total_spend
-      mer,                                      // $9 mer
-      ord.total_orders,                         // $10
-      ord.new_customer_orders,                  // $11
-      Math.max(0, ord.total_orders - ord.new_customer_orders), // $12
+      totalRev,                                 // $3 total_revenue (= order_revenue)
+      orderRev,                                 // $4 order_revenue
+      gmd,                                      // $5 gross_minus_discounts
+      shopVal,                                  // $6 shopify_revenue
+      amzVal,                                   // $7 amazon_revenue
+      totalRev,                                 // $8 total_sales (refunds not in this ETL path)
+      totalSp,                                  // $9 total_spend
+      mer,                                      // $10 mer
+      ord.total_orders,                         // $11
+      ord.new_customer_orders,                  // $12
+      Math.max(0, ord.total_orders - ord.new_customer_orders), // $13
     ]);
     written++;
 
-    // Geo upsert
-    const regions = {
-      US:    reg.US,
-      CA:    reg.CA,
-      AUS:   reg.AUS,
-      DUBAI: reg.DUBAI,
-      EU:    regionEUForGeo,
-      TOTAL: totalRev,
+    // Geo upsert — revenue from orders_table, spend from ads_table country breakdown.
+    const geoRows = {
+      US:    { revenue: reg.US,    spend: regSp.US },
+      CA:    { revenue: reg.CA,    spend: regSp.CA },
+      AUS:   { revenue: reg.AUS,   spend: regSp.AUS },
+      DUBAI: { revenue: reg.DUBAI, spend: regSp.DUBAI },
+      EU:    { revenue: regionEUForGeo, spend: regSp.EU },
+      OTHER: { revenue: reg.OTHER || 0, spend: regSp.OTHER || 0 },
+      TOTAL: { revenue: totalRev,  spend: totalSp },
     };
-    for (const [region, revenue] of Object.entries(regions)) {
+    for (const [region, vals] of Object.entries(geoRows)) {
+      const sp = Number(vals.spend || 0);
+      const rv = Number(vals.revenue || 0);
+      const geoMer = sp > 0 ? rv / sp : null;
       await pgRun(`
-        INSERT INTO tw_geo_daily (brand, date, region, revenue_actual, spend_actual)
-        VALUES ($1, $2, $3, $4, NULL)
+        INSERT INTO tw_geo_daily (brand, date, region, revenue_actual, spend_actual, mer)
+        VALUES ($1, $2, $3, $4, $5, $6)
         ON CONFLICT (brand, date, region) DO UPDATE SET
           revenue_actual = EXCLUDED.revenue_actual,
+          spend_actual   = EXCLUDED.spend_actual,
+          mer            = EXCLUDED.mer,
           updated_at     = NOW()
-      `, [brand, date, region, revenue]);
+      `, [brand, date, region, rv, sp, geoMer]);
     }
   }
 
-  // Channel upsert (Triple Attribution + 1_day)
-  let chWritten = 0;
-  for (const row of channelRows) {
+  // Channel upsert — spend from ads_table, revenue/orders from Triple Attribution.
+  await pgRun(
+    `DELETE FROM tw_channel_daily WHERE brand = $1 AND date >= $2::date AND date <= $3::date`,
+    [brand, startYmd, endYmd],
+  );
+
+  const channelMerged = new Map();
+  function chKey(date, channel) { return `${date}|${channel}`; }
+  function ensureCh(date, channel) {
+    const k = chKey(date, channel);
+    if (!channelMerged.has(k)) {
+      channelMerged.set(k, {
+        date, channel, spend: 0, revenue: 0, purchases: 0, new_customer_orders: 0,
+      });
+    }
+    return channelMerged.get(k);
+  }
+
+  const daySpend = channelSpend;
+  for (const [date, byCh] of Object.entries(daySpend)) {
+    for (const [channel, sp] of Object.entries(byCh)) {
+      ensureCh(date, channel).spend = Number(sp || 0);
+    }
+  }
+  for (const row of channelAttr) {
     const date = String(row.event_date || '').slice(0, 10);
-    const channelKey = CHANNEL_MAP[row.channel];
+    const channelKey = mapTwChannelToKey(row.channel, brand);
     if (!date || !channelKey) continue;
+    const out = ensureCh(date, channelKey);
+    out.revenue = Number(row.revenue || 0);
+    out.purchases = Number(row.purchases || 0);
+    out.new_customer_orders = Number(row.new_customer_orders || 0);
+  }
+
+  let chWritten = 0;
+  for (const row of channelMerged.values()) {
     const sp = Number(row.spend || 0);
     const rv = Number(row.revenue || 0);
     const purch = Number(row.purchases || 0);
@@ -460,7 +653,7 @@ async function refreshBrand(brand, startYmd, endYmd) {
         cac             = EXCLUDED.cac,
         updated_at      = NOW()
     `, [
-      brand, date, channelKey,
+      brand, row.date, row.channel,
       sp, rv, purch,
       sp > 0 ? rv / sp : null,
       nc,
@@ -527,5 +720,8 @@ async function refreshSummary(brand, startDate, endDate) {
 module.exports = {
   refreshBrand, refreshSummary,
   fetchShopifyRevenue, fetchAmazonRevenue, fetchBlendedSpend, fetchAdSpend,
-  fetchChannelMetrics, fetchRegionRevenue, fetchFloProductDaily,
+  fetchDualRevenueMetrics, fetchBlendedShopifyRevenue,
+  fetchChannelAttribution, fetchChannelSpend, fetchChannelMetrics,
+  fetchRegionRevenue, fetchRegionSpend, fetchFloProductDaily,
+  CHANNEL_MAP, mapTwChannelToKey, mapCountryToSpendRegion,
 };

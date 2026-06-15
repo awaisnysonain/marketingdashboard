@@ -75,6 +75,8 @@ export const L = {
 export const TIP = {
   spend: 'Money you paid to run ads in the selected dates.',
   revenue: 'Money from orders in the selected dates (after discounts where noted).',
+  grossMinusDiscounts: 'Product gross sales minus discounts only. Excludes shipping and taxes (Shopify-style subtotal).',
+  orderRevenue: 'Gross Product Sales + Shipping + Taxes − Discounts. Triple Whale Order Revenue — used for MER.',
   mer: 'How much you earned in sales for each $1 spent on ads. Higher is better.',
   roas: 'Sales divided by ad spend for this ad or channel.',
   aov: 'Average amount per order.',
@@ -242,6 +244,14 @@ export function plainHeader(header) {
 
 /** Hover hint on table column headers (key = display label) */
 export const COLUMN_TIP = {
+  'Gross − Discounts': TIP.grossMinusDiscounts,
+  'Gross − Disc': TIP.grossMinusDiscounts,
+  'Order Revenue': TIP.orderRevenue,
+  'NOBL Gross − Discounts': TIP.grossMinusDiscounts,
+  'NOBL Order Revenue': TIP.orderRevenue,
+  'FLO Gross − Discounts': TIP.grossMinusDiscounts,
+  'Total Gross − Discounts': TIP.grossMinusDiscounts,
+  'Total Order Revenue': TIP.orderRevenue,
   [L.spend]: TIP.spend,
   [L.revenue]: TIP.revenue,
   [L.mer]: TIP.mer,

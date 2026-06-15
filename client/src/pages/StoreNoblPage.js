@@ -5,14 +5,10 @@ import {
 } from 'recharts';
 import { getStoreNobl, fmt$, fmtNum, fmtPct } from '../utils/api';
 import KpiCard from '../components/KpiCard';
-import DateRangePicker from '../components/DateRangePicker';
+import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
-import PageIntro from '../components/PageIntro';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
-
-/* ── helpers ──────────────────────────────────────────────────────── */
-function toISO(d) { return d.toISOString().slice(0, 10); }
-function startOfMonthISO() { const d = new Date(); d.setDate(1); return toISO(d); }
+import { mtdRange } from '../utils/dateRange';
 function fmtLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -51,7 +47,7 @@ function merColor(v) {
    MAIN PAGE
 ════════════════════════════════════════════════════════════════════ */
 export default function StoreNoblPage({ showToast }) {
-  const [range, setRange]   = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
+  const [range, setRange]   = useState(mtdRange());
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState(null);
@@ -75,12 +71,13 @@ export default function StoreNoblPage({ showToast }) {
   const email     = data?.email      || [];
 
   const totals = useMemo(() => summary.reduce((a, r) => ({
-    revenue: a.revenue + (r.total_revenue || 0),
+    revenue: a.revenue + (r.order_revenue || r.total_revenue || 0),
+    gmd:     a.gmd     + (r.gross_minus_discounts || 0),
     spend:   a.spend   + (r.total_spend   || 0),
     orders:  a.orders  + (r.total_orders  || 0),
     nc:      a.nc      + (r.new_customer_orders      || 0),
     rc:      a.rc      + (r.returning_customer_orders || 0),
-  }), { revenue:0, spend:0, orders:0, nc:0, rc:0 }), [summary]);
+  }), { revenue:0, gmd:0, spend:0, orders:0, nc:0, rc:0 }), [summary]);
 
   const totalMer = mer(totals.revenue, totals.spend);
   const totalAov = totals.orders > 0 ? totals.revenue / totals.orders : 0;
@@ -131,9 +128,10 @@ export default function StoreNoblPage({ showToast }) {
   }), { sent:0, opened:0, clicked:0, revenue:0 }), [email]);
 
   return (
-    <div>
-      {/* Header */}
-      <div style={{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
+    <div className="page-stack">
+      <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
+
+      <div className="page-header">
         <div>
           <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4 }}>
             <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:NOBL_ACCENT }}>
@@ -148,13 +146,11 @@ export default function StoreNoblPage({ showToast }) {
             {PAGE.storeNobl.desc} · {range.start} → {range.end}
           </p>
         </div>
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} scope="storenobl" />
       </div>
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
-          {/* EU notice */}
-          <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 14px', marginBottom:16,
+          <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 14px',
             background:'rgba(99,102,241,.07)', border:'1px solid rgba(99,102,241,.2)', borderRadius:8, fontSize:12 }}>
             <span style={{ color:NOBL_ACCENT, fontWeight:700 }}>ℹ EU included</span>
             <span style={{ color:'var(--text3)' }}>
@@ -162,9 +158,9 @@ export default function StoreNoblPage({ showToast }) {
             </span>
           </div>
 
-          {/* KPI Strip */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label="Total sales"  value={fmt$(totals.revenue)} tooltip={TIP.revenue} color="nobl"   />
+          <div className="page-kpi-grid">
+            <KpiCard label="Gross − Discounts" value={fmt$(totals.gmd)} tooltip={TIP.grossMinusDiscounts} color="nobl" />
+            <KpiCard label="Order Revenue" value={fmt$(totals.revenue)} tooltip={TIP.orderRevenue} color="nobl" />
             <KpiCard label="Total ad spend"    value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn"   />
             <KpiCard label={L.mer}            value={totalMer.toFixed(2)+'x'} tooltip={TIP.mer} color={totalMer>=2?'green':totalMer>=1.8?'warn':'red'} />
             <KpiCard label="Total orders"   value={fmtNum(totals.orders)} tooltip={TIP.orders} color="blue"   />
@@ -174,8 +170,7 @@ export default function StoreNoblPage({ showToast }) {
             <KpiCard label={L.activeSubs}    value={fmtNum(subStats.active||0)} tooltip={TIP.activeSubs} color="nobl"   />
           </div>
 
-          {/* Tabs */}
-          <div style={{ display:'flex', gap:2, marginBottom:20, borderBottom:'1px solid var(--border)' }}>
+          <div className="page-tabs">
             {TABS.map(t => (
               <button key={t.id} onClick={() => setTab(t.id)} style={{
                 padding:'8px 16px', fontSize:13, fontWeight:600, border:'none',
@@ -201,18 +196,19 @@ export default function StoreNoblPage({ showToast }) {
 /* ═══════════════════════════════════════════════════════════════════
    OVERVIEW TAB
 ════════════════════════════════════════════════════════════════════ */
-const OV_HEADERS = ['Date','Revenue','Spend','MER','Orders','NC Orders','RC Orders','NVP %','AOV'];
+const OV_HEADERS = ['Date','Gross − Discounts','Order Revenue','Spend','MER','Orders','NC Orders','RC Orders','NVP %','AOV'];
 function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
   const rows = summary.map(r => ({
-    Date:       r.date,
-    Revenue:    r.total_revenue,
-    Spend:      r.total_spend,
-    MER:        r.mer,
-    Orders:     r.total_orders,
-    'NC Orders':r.new_customer_orders,
-    'RC Orders':r.returning_customer_orders,
-    'NVP %':    r.nvp_pct,
-    AOV:        r.aov,
+    Date:                r.date,
+    'Gross − Discounts': r.gross_minus_discounts,
+    'Order Revenue':     r.order_revenue || r.total_revenue,
+    Spend:               r.total_spend,
+    MER:                 r.mer,
+    Orders:              r.total_orders,
+    'NC Orders':         r.new_customer_orders,
+    'RC Orders':         r.returning_customer_orders,
+    'NVP %':             r.nvp_pct,
+    AOV:                 r.aov,
   }));
 
   // chart data reversed for chronological order
@@ -237,7 +233,8 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
             <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtLabel}
               contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
             <Legend wrapperStyle={{ fontSize:12 }} />
-            <Area type="monotone" dataKey="total_revenue" name="Revenue" stroke={NOBL_ACCENT} fill="url(#nGradRev)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={NOBL_ACCENT} fill="url(#nGradRev)" strokeWidth={2} dot={false} />
+            <Area type="monotone" dataKey="gross_minus_discounts" name="Gross − Discounts" stroke="#8b5cf6" fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
             <Area type="monotone" dataKey="total_spend"   name="Spend"   stroke={NOBL_WARN}  fill="none" strokeWidth={2} strokeDasharray="4 2" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
@@ -393,7 +390,6 @@ const GEO_DAILY_HEADERS = ['Date','Region','Revenue','Spend','MER'];
 
 function RegionsTab({ geo, geoAgg }) {
   const totalRev = geoAgg.reduce((s,r) => s + r.revenue, 0);
-  const EU_GEO_ORDER = ['US','EU','CA','AUS','DUBAI'];
 
   const aggRows = geoAgg.map(r => ({
     Region:      r.region,
@@ -411,11 +407,8 @@ function RegionsTab({ geo, geoAgg }) {
     MER:    r.mer,
   }));
 
-  // Sort geoAgg by EU_GEO_ORDER for cards
-  const sortedGeo = [...geoAgg].sort((a,b) => {
-    const ia = EU_GEO_ORDER.indexOf(a.region); const ib = EU_GEO_ORDER.indexOf(b.region);
-    return (ia<0?99:ia) - (ib<0?99:ib);
-  });
+  // Regions sorted by revenue (descending)
+  const sortedGeo = geoAgg;
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>

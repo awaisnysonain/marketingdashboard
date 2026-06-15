@@ -520,9 +520,9 @@ async function runSync(options = {}) {
     }
   }
 
-  // ── TW Order Revenue — real Shopify+Amazon order_revenue (fixes attribution gap) ──
-  // This is the canonical revenue metric: all paid orders before refunds.
-  // MER = order_revenue / total_spend (NOT total_revenue which is TW attributed)
+  // ── TW Order Revenue — canonical revenue split (Shopify + Amazon) ──
+  // Does NOT overwrite total_spend; tw_refresh owns ads_table spend.
+  // MER = order_revenue / total_spend (spend from tw_refresh)
   if (tasks.includes('tw_order_revenue')) {
     for (const brand of brands) {
       const chunks = weeklyChunks(startDate, endDate);

@@ -1,47 +1,63 @@
 import React from 'react';
+import { toISO, mtdStartFor, ytdStartFor, yesterdayISO } from '../utils/dateRange';
 
 /**
- * DateRangePicker
- * --------------------------------------------------------
- * Quick MTD/YTD buttons + manual custom date inputs.
+ * DateRangePicker — quick presets + custom date inputs.
+ * MTD/YTD use start of month/year through the selected end date.
  */
 
-function toISO(d) { return d.toISOString().slice(0, 10); }
-function ytdStart() { return `${new Date().getFullYear()}-01-01`; }
-function mtdStart() {
-  const d = new Date();
-  d.setDate(1);
-  return toISO(d);
-}
-
 const QUICK_BTNS = [
-  { label: 'MTD',   getRange: () => ({ start: mtdStart(),         end: toISO(new Date()) }) },
-  { label: 'YTD',   getRange: () => ({ start: ytdStart(),         end: toISO(new Date()) }) },
+  {
+    label: 'Yesterday',
+    getRange: () => {
+      const y = yesterdayISO();
+      return { start: y, end: y };
+    },
+    match: (start, end) => {
+      const y = yesterdayISO();
+      return start === y && end === y;
+    },
+  },
+  {
+    label: 'MTD',
+    getRange: (end) => ({ start: mtdStartFor(end), end: end || toISO(new Date()) }),
+    match: (start, end) => start === mtdStartFor(end) && end.length === 10,
+  },
+  {
+    label: 'YTD',
+    getRange: (end) => ({ start: ytdStartFor(end), end: end || toISO(new Date()) }),
+    match: (start, end) => start === ytdStartFor(end) && end.length === 10,
+  },
 ];
 
+function detectActivePreset(start, end) {
+  for (const btn of QUICK_BTNS) {
+    if (btn.match(start, end)) return btn.label;
+  }
+  if (start === end && start.length === 10) return 'Single day';
+  return null;
+}
+
 export default function DateRangePicker({ start, end, onChange }) {
+  const activeLabel = detectActivePreset(start, end);
+  const isSingleDay = start === end && start.length === 10;
+
   function handleQuick(btn) {
-    onChange(btn.getRange());
+    onChange(btn.getRange(end));
   }
 
   function handleStartChange(e) {
-    onChange({ start: e.target.value, end });
+    const newStart = e.target.value;
+    onChange({ start: newStart, end: newStart > end ? newStart : end });
   }
+
   function handleEndChange(e) {
     onChange({ start, end: e.target.value });
   }
 
-  // Determine active quick button
-  const todayISO = toISO(new Date());
-  const activeLabel = QUICK_BTNS.find(b => {
-    const r = b.getRange();
-    return r.start === start && (r.end === end || (end === todayISO && r.end === todayISO));
-  })?.label;
-
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-      {/* Quick range buttons */}
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+    <div className="date-range-picker">
+      <div className="date-range-picker__presets">
         {QUICK_BTNS.map(btn => {
           const isActive = activeLabel === btn.label;
           return (
@@ -49,52 +65,32 @@ export default function DateRangePicker({ start, end, onChange }) {
               type="button"
               key={btn.label}
               onClick={() => handleQuick(btn)}
-              style={{
-                padding: '5px 10px',
-                fontSize: 12,
-                fontWeight: 600,
-                borderRadius: 6,
-                border: '1px solid var(--border)',
-                background: isActive ? 'var(--accent)' : 'var(--bg2)',
-                color: isActive ? '#fff' : 'var(--text2)',
-                cursor: 'pointer',
-                transition: 'background .15s, color .15s, border-color .15s',
-                lineHeight: 1,
-                position: 'relative',
-              }}
+              className={`date-range-picker__btn${isActive ? ' date-range-picker__btn--active' : ''}`}
             >
               {btn.label}
             </button>
           );
         })}
+        {isSingleDay && !QUICK_BTNS.some(b => b.label === activeLabel) && (
+          <span className="date-range-picker__hint">Single day</span>
+        )}
       </div>
 
-      {/* Custom date inputs */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+      <div className="date-range-picker__inputs">
         <input
-          type="date" value={start}
+          type="date"
+          value={start}
           onChange={handleStartChange}
-          style={{
-            padding: '5px 8px', fontSize: 12, borderRadius: 6,
-            border: '1px solid var(--border)',
-            background: 'var(--bg2)',
-            color: 'var(--text)',
-            cursor: 'pointer',
-            outline: 'none',
-          }}
+          className="date-range-picker__input"
+          aria-label="Start date"
         />
-        <span style={{ fontSize: 12, color: 'var(--text3)' }}>→</span>
+        <span className="date-range-picker__sep">→</span>
         <input
-          type="date" value={end}
+          type="date"
+          value={end}
           onChange={handleEndChange}
-          style={{
-            padding: '5px 8px', fontSize: 12, borderRadius: 6,
-            border: '1px solid var(--border)',
-            background: 'var(--bg2)',
-            color: 'var(--text)',
-            cursor: 'pointer',
-            outline: 'none',
-          }}
+          className="date-range-picker__input"
+          aria-label="End date"
         />
       </div>
     </div>

@@ -1,15 +1,9 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import PageIntro from '../components/PageIntro';
+import PageFilterBar from '../components/PageFilterBar';
 import KpiCard from '../components/KpiCard';
-import DateRangePicker from '../components/DateRangePicker';
 import { getChannels, fmt$, fmtFull$, fmtNum, fmtFullNum } from '../utils/api';
-
-function toISO(d) { return d.toISOString().slice(0, 10); }
-function mtdRange() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  return { start: toISO(start), end: toISO(now) };
-}
+import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -82,7 +76,7 @@ export default function FloChannelDailyPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [range, setRange] = useState(mtdRange);
+  const [range, setRange] = useState(mtdRange());
   const [activeChannel, setActiveChannel] = useState(null);
 
   const load = useCallback(() => {
@@ -103,7 +97,11 @@ export default function FloChannelDailyPage() {
       chTotals[r.channel].revenue += Number(r.revenue_1d) || 0;
       chTotals[r.channel].purchases += Number(r.purchases_1d) || 0;
     }
-    return { channelNames: [...chSet].sort(), dates: [...dateSet].sort(), byDateCh, chKpi: chTotals };
+    const channelRev = {};
+    for (const r of rows) {
+      channelRev[r.channel] = (channelRev[r.channel] || 0) + (Number(r.revenue_1d) || 0);
+    }
+    return { channelNames: sortByRevenueDesc(chSet, channelRev), dates: [...dateSet].sort(), byDateCh, chKpi: chTotals };
   }, [rows]);
 
   useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
@@ -112,11 +110,9 @@ export default function FloChannelDailyPage() {
   const roas = t.spend > 0 ? t.revenue / t.spend : 0;
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
-        <PageIntro title="FLO Channel Level Daily" desc="Per-channel daily performance metrics for Pilates FLO — Spend, Revenue, Purchases, ROAS, CAC across all paid channels." />
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
-      </div>
+    <div className="page-stack">
+      <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
+      <PageIntro title="FLO Channel Level Daily" desc="Per-channel daily performance metrics for Pilates FLO — Spend, Revenue, Purchases, ROAS, CAC across all paid channels." />
 
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>

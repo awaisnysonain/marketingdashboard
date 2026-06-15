@@ -140,7 +140,8 @@ function TrendChart({ data, metric, color, formatY, refVal }) {
 // ── Channel spend bar ─────────────────────────────────────────────────────────
 function SpendBar({ channels }) {
   if (!channels?.length) return <div style={{ height:160, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', fontSize:12 }}>No data</div>;
-  const data = channels.map(c => ({
+  const sorted = [...channels].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  const data = sorted.map(c => ({
     name: CHANNEL_META[c.channel]?.label || c.channel,
     spend: Math.round(c.spend||0),
     roas: parseFloat((c.roas||0).toFixed(2)),
@@ -172,11 +173,13 @@ function GeoCards({ geo, loading, brand }) {
   const isNobl = brand === 'nobl';
   let regions = (geo||[]).filter(g => g.region !== 'TOTAL');
 
-  // For NOBL: sort in preferred order and guarantee EU is always shown (even if $0)
+  // For NOBL: ensure all key regions appear, then sort by revenue descending
   if (isNobl) {
     const regionMap = Object.fromEntries(regions.map(r => [r.region, r]));
     regions = NOBL_REGIONS_ORDER.map(k => regionMap[k] || { region:k, revenue:0, spend:0, mer:0, mer_status:'gray' });
   }
+
+  regions = [...regions].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
 
   if (!regions.length) return <div style={{ color:'var(--text3)', fontSize:13, padding:'12px 0' }}>No regional data</div>;
 
@@ -245,6 +248,8 @@ function ChannelTable({ channels, loading }) {
   if (loading) return <div style={{ padding:16 }}>{[...Array(4)].map((_,i)=><div key={i} style={{ marginBottom:8 }}><Skeleton h={36}/></div>)}</div>;
   if (!channels?.length) return <div style={{ padding:'20px 16px', color:'var(--text3)', fontSize:13 }}>No channel data for this date</div>;
 
+  const sortedChannels = [...channels].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+
   const cols = [
     { h:'Channel',   render:(ch)=>(
       <span style={{ display:'flex', alignItems:'center', gap:8 }}>
@@ -272,7 +277,7 @@ function ChannelTable({ channels, loading }) {
           </tr>
         </thead>
         <tbody>
-          {channels.map((ch,i)=>(
+          {sortedChannels.map((ch,i)=>(
             <tr key={ch.channel} style={{ background: i%2?'var(--bg3)':'transparent', transition:'background .15s' }}>
               {cols.map(c=>(
                 <td key={c.h} style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap', verticalAlign:'middle' }}>
@@ -350,7 +355,7 @@ export default function LivePage() {
   useEffect(() => { loadTrend(); }, [loadTrend]);
 
   const sum       = live?.summary;
-  const channels  = live?.channels || [];
+  const channels  = [...(live?.channels || [])].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
   const geo       = live?.geo      || [];
   const trendArr  = trend?.trend   || [];
   const euContrib = live?.eu_contribution || null;
@@ -477,7 +482,8 @@ export default function LivePage() {
           </div>
         ) : sum ? (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12 }}>
-            <KpiCard label="Total sales"   value={sum.total_revenue}        format="currency" icon="💰"/>
+            <KpiCard label="Gross − Discounts" value={sum.gross_minus_discounts} format="currency" icon="📊" tooltip="Product gross minus discounts (excludes shipping & taxes)"/>
+            <KpiCard label="Order Revenue"   value={sum.order_revenue || sum.total_revenue} format="currency" icon="💰" tooltip="Gross + Shipping + Taxes − Discounts (MER basis)"/>
             <KpiCard label="Total ad spend"     value={sum.total_spend}          format="currency" icon="📣"/>
             <KpiCard label="Sales per ad $"             value={sum.mer}                  format="ratio"    icon="⚡" status={sum.mer_status}
               sub={sum.mer_status==='green'?'✓ On target (≥2.0)':sum.mer_status==='yellow'?'Near target — needs ≥2.0':'⚠ Below target — needs ≥2.0'}/>

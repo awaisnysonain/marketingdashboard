@@ -382,21 +382,10 @@ function Layout({ appUser }) {
           dynamicTabs={dynamicTabs}
         />
 
-        <main style={{ flex:1, overflowY: isBuilderRoute ? 'hidden' : 'auto', overflowX:'hidden', background:'var(--bg)', display:'flex', flexDirection:'column' }}>
+        <main className={`app-main${isBuilderRoute ? ' app-main--fill' : ''}`}>
           <div
             key={location.pathname}
-            style={{
-              width: '100%',
-              maxWidth: isBuilderRoute ? 'none' : 1600,
-              margin: isBuilderRoute ? 0 : '0 auto',
-              boxSizing: 'border-box',
-              padding: isBuilderRoute ? 0 : '20px 24px',
-              flex: isBuilderRoute ? 1 : undefined,
-              minHeight: isBuilderRoute ? 0 : undefined,
-              display: isBuilderRoute ? 'flex' : 'block',
-              flexDirection: isBuilderRoute ? 'column' : undefined,
-              animation:'fadein .2s ease',
-            }}
+            className={isBuilderRoute ? 'page-content page-content--fill' : 'page-content'}
           >
             <ErrorBoundary key={location.pathname}>
               <Outlet context={{ showToast, dynamicTabs, onDashboardCreated: handleDashboardCreated }} />

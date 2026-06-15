@@ -1,15 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import PageIntro from '../components/PageIntro';
+import PageFilterBar from '../components/PageFilterBar';
 import KpiCard from '../components/KpiCard';
-import DateRangePicker from '../components/DateRangePicker';
 import { getFloTopline, fmt$, fmtFull$, fmtNum, fmtFullNum } from '../utils/api';
-
-function toISO(d) { return d.toISOString().slice(0, 10); }
-function mtdRange() {
-  const now = new Date();
-  const start = new Date(now.getFullYear(), now.getMonth(), 1);
-  return { start: toISO(start), end: toISO(now) };
-}
+import { TIP } from '../copy/plainLanguage';
+import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -53,7 +48,8 @@ function fmtVal(v, type) {
 }
 
 const SUMMARY_METRICS = [
-  { key: 'total_revenue',             label: 'Revenue',          type: '$' },
+  { key: 'gross_minus_discounts',     label: 'Gross − Disc',     type: '$', tip: TIP.grossMinusDiscounts },
+  { key: 'order_revenue',             label: 'Order Revenue',    type: '$', tip: TIP.orderRevenue },
   { key: 'total_spend',               label: 'Spend',            type: '$' },
   { key: 'mer',                       label: 'MER',              type: 'x' },
   { key: 'total_orders',              label: 'Orders',           type: 'num' },
@@ -98,11 +94,11 @@ function VerticalTable({ dates, getRow, metrics }) {
               letterSpacing: '.05em', whiteSpace: 'nowrap', position: 'sticky', left: 0,
               background: 'var(--bg3)', zIndex: 2, minWidth: 90,
             }}>Date</th>
-            {metrics.map((m, i) => (
-              <th key={i} style={{
+            {metrics.map((m) => (
+              <th key={m.key} title={m.tip || undefined} style={{
                 padding: '9px 12px', textAlign: 'right', borderBottom: '2px solid var(--border)',
                 color: 'var(--text3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-                letterSpacing: '.05em', whiteSpace: 'nowrap',
+                letterSpacing: '.05em', whiteSpace: 'nowrap', cursor: m.tip ? 'help' : undefined,
               }}>{m.label}</th>
             ))}
           </tr>
@@ -158,7 +154,7 @@ export default function FloToplinePage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [range, setRange] = useState(mtdRange);
+  const [range, setRange] = useState(mtdRange());
   const [activeView, setActiveView] = useState('summary');
   const [activeChannel, setActiveChannel] = useState(null);
   const [activeRegion, setActiveRegion] = useState(null);
@@ -175,17 +171,36 @@ export default function FloToplinePage() {
   const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, productNames, productByDatePr, kpi } = useMemo(() => {
     if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, productNames: [], productByDatePr: {}, kpi: {} };
     const summaryByDate = {};
-    let totalRev = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
-    for (const r of (data.summary || [])) { summaryByDate[r.date] = r; totalRev += Number(r.total_revenue) || 0; totalSpend += Number(r.total_spend) || 0; totalOrders += Number(r.total_orders) || 0; totalNew += Number(r.new_customer_orders) || 0; }
-    const chSet = new Set(), channelByDateCh = {};
-    for (const r of (data.channels || [])) { chSet.add(r.channel); channelByDateCh[`${r.date}|${r.channel}`] = r; }
-    const rgSet = new Set(), geoByDateRg = {};
-    for (const r of (data.geo || [])) { rgSet.add(r.region); geoByDateRg[`${r.date}|${r.region}`] = r; }
-    const prSet = new Set(), productByDatePr = {};
-    for (const r of (data.products || [])) { prSet.add(r.product_line); productByDatePr[`${r.date}|${r.product_line}`] = r; }
+    let totalRev = 0, totalGmd = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
+    for (const r of (data.summary || [])) {
+      summaryByDate[r.date] = r;
+      totalRev += Number(r.order_revenue || r.total_revenue) || 0;
+      totalGmd += Number(r.gross_minus_discounts) || 0;
+      totalSpend += Number(r.total_spend) || 0;
+      totalOrders += Number(r.total_orders) || 0;
+      totalNew += Number(r.new_customer_orders) || 0;
+    }
+    const chSet = new Set(), channelByDateCh = {}, channelRev = {};
+    for (const r of (data.channels || [])) {
+      chSet.add(r.channel);
+      channelByDateCh[`${r.date}|${r.channel}`] = r;
+      channelRev[r.channel] = (channelRev[r.channel] || 0) + (Number(r.revenue_1d) || 0);
+    }
+    const rgSet = new Set(), geoByDateRg = {}, regionRev = {};
+    for (const r of (data.geo || [])) {
+      rgSet.add(r.region);
+      geoByDateRg[`${r.date}|${r.region}`] = r;
+      regionRev[r.region] = (regionRev[r.region] || 0) + (Number(r.revenue_actual || r.revenue) || 0);
+    }
+    const prSet = new Set(), productByDatePr = {}, productRev = {};
+    for (const r of (data.products || [])) {
+      prSet.add(r.product_line);
+      productByDatePr[`${r.date}|${r.product_line}`] = r;
+      productRev[r.product_line] = (productRev[r.product_line] || 0) + (Number(r.revenue) || 0);
+    }
     const allDates = [...new Set([...(data.summary || []).map(r => r.date), ...(data.channels || []).map(r => r.date)])].sort();
     const mer = totalSpend > 0 ? totalRev / totalSpend : 0;
-    return { dates: allDates, summaryByDate, channelNames: [...chSet].sort(), channelByDateCh, regionNames: [...rgSet].sort(), geoByDateRg, productNames: [...prSet].sort(), productByDatePr, kpi: { totalRev, totalSpend, mer, totalOrders, totalNew } };
+    return { dates: allDates, summaryByDate, channelNames: sortByRevenueDesc(chSet, channelRev), channelByDateCh, regionNames: sortByRevenueDesc(rgSet, regionRev), geoByDateRg, productNames: sortByRevenueDesc(prSet, productRev), productByDatePr, kpi: { totalRev, totalGmd, totalSpend, mer, totalOrders, totalNew } };
   }, [data]);
 
   useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
@@ -200,23 +215,23 @@ export default function FloToplinePage() {
   ];
 
   return (
-    <div>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 18 }}>
-        <PageIntro title="FLO Topline" desc="Daily topline performance for Pilates FLO — revenue, spend, MER, channel breakdowns, geo splits, and product line data." />
-        <DateRangePicker start={range.start} end={range.end} onChange={setRange} />
-      </div>
+    <div className="page-stack">
+      <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
+
+      <PageIntro title="FLO Topline" desc="Daily topline performance for Pilates FLO — revenue, spend, MER, channel breakdowns, geo splits, and product line data." />
 
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12, marginBottom: 20 }}>
-            <KpiCard label="Total Revenue" value={fmt$(kpi.totalRev)} fullValue={fmtFull$(kpi.totalRev)} />
-            <KpiCard label="Total Spend" value={fmt$(kpi.totalSpend)} fullValue={fmtFull$(kpi.totalSpend)} />
-            <KpiCard label="MER" value={kpi.mer.toFixed(2) + 'x'} />
-            <KpiCard label="Total Orders" value={fmtNum(kpi.totalOrders)} fullValue={fmtFullNum(kpi.totalOrders)} />
-            <KpiCard label="New Customers" value={fmtNum(kpi.totalNew)} fullValue={fmtFullNum(kpi.totalNew)} />
+          <div className="page-kpi-grid">
+            <KpiCard label="Gross − Discounts" value={fmt$(kpi.totalGmd)} fullValue={fmtFull$(kpi.totalGmd)} tooltip={TIP.grossMinusDiscounts} />
+            <KpiCard label="Order Revenue" value={fmt$(kpi.totalRev)} fullValue={fmtFull$(kpi.totalRev)} tooltip={TIP.orderRevenue} />
+            <KpiCard label="Total Spend" value={fmt$(kpi.totalSpend)} fullValue={fmtFull$(kpi.totalSpend)} tooltip={TIP.spend} />
+            <KpiCard label="MER" value={kpi.mer.toFixed(2) + 'x'} tooltip={TIP.mer} />
+            <KpiCard label="Total Orders" value={fmtNum(kpi.totalOrders)} fullValue={fmtFullNum(kpi.totalOrders)} tooltip={TIP.orders} />
+            <KpiCard label="New Customers" value={fmtNum(kpi.totalNew)} fullValue={fmtFullNum(kpi.totalNew)} tooltip={TIP.ncOrders} />
           </div>
 
-          <div style={{ display: 'flex', gap: 8, marginBottom: 18, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
+          <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
             {VIEWS.map(v => <PillTab key={v.id} label={v.label} active={activeView === v.id} onClick={() => setActiveView(v.id)} />)}
           </div>
 

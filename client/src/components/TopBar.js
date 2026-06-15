@@ -68,7 +68,7 @@ export default function TopBar({
     <header style={{
       height: 'var(--topbar-h)',
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '0 18px',
+      padding: '0 var(--page-px)',
       background: 'var(--bg2)',
       borderBottom: '1px solid var(--border)',
       position: 'sticky', top: 0, zIndex: 300,
