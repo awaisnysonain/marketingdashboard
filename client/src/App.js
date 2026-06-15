@@ -57,9 +57,9 @@ const TAB_TO_PATH = {
   'Meta Ads':             '/meta-ads',
   'Subscriptions':        '/subscriptions',
   'Live Data':            '/live',
-  'FLO Topline':          '/flo-topline',
   'NOBL Topline':         '/nobl-topline',
   'NOBL Channel Level Daily': '/nobl-channel-daily',
+  'FLO Topline':          '/flo-topline',
   'FLO Channel Level Daily':  '/flo-channel-daily',
   'Forecast Engine':      '/forecast-engine',
   'NOBL Air Performance': '/nobl-air-performance',
@@ -84,9 +84,9 @@ function pathToActiveTab(pathname, dynamicTabs) {
   if (pathname.startsWith('/meta-ads')) return 'Meta Ads';
   if (pathname.startsWith('/subscriptions')) return 'Subscriptions';
   if (pathname.startsWith('/live')) return 'Live Data';
-  if (pathname.startsWith('/flo-topline')) return 'FLO Topline';
   if (pathname.startsWith('/nobl-topline')) return 'NOBL Topline';
   if (pathname.startsWith('/nobl-channel-daily')) return 'NOBL Channel Level Daily';
+  if (pathname.startsWith('/flo-topline')) return 'FLO Topline';
   if (pathname.startsWith('/flo-channel-daily')) return 'FLO Channel Level Daily';
   if (pathname.startsWith('/forecast-engine')) return 'Forecast Engine';
   if (pathname.startsWith('/nobl-air-performance')) return 'NOBL Air Performance';
@@ -199,9 +199,9 @@ function AppRoot() {
         <Route path="/meta-ads"             element={<PageHost Comp={MetaAdsPage} />} />
         <Route path="/subscriptions"        element={<PageHost Comp={SubsPage} />} />
         <Route path="/live"                 element={<PageHost Comp={LivePage} />} />
-        <Route path="/flo-topline"            element={<PageHost Comp={FloToplinePage} />} />
         <Route path="/nobl-topline"           element={<PageHost Comp={NoblToplinePage} />} />
         <Route path="/nobl-channel-daily"     element={<PageHost Comp={NoblChannelDailyPage} />} />
+        <Route path="/flo-topline"            element={<PageHost Comp={FloToplinePage} />} />
         <Route path="/flo-channel-daily"      element={<PageHost Comp={FloChannelDailyPage} />} />
         <Route path="/forecast-engine"      element={<PageHost Comp={ForecastEnginePage} />} />
         <Route path="/nobl-air-performance" element={<PageHost Comp={NoblAirPerformancePage} />} />

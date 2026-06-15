@@ -10,9 +10,9 @@ export const CORE_TABS = [
 ];
 
 const FIXED_DASHBOARD_TABS = [
-  { id: 'FLO Topline',             icon: Icons.BarChart3,  label: 'FLO Topline' },
   { id: 'NOBL Topline',            icon: Icons.BarChart3,  label: 'NOBL Topline' },
   { id: 'NOBL Channel Level Daily', icon: Icons.Layers,    label: 'NOBL Channel Daily' },
+  { id: 'FLO Topline',             icon: Icons.BarChart3,  label: 'FLO Topline' },
   { id: 'FLO Channel Level Daily',  icon: Icons.Layers,    label: 'FLO Channel Daily' },
   { id: 'Forecast Engine',         icon: Icons.TrendingUp, label: 'Sales forecast' },
   { id: 'NOBL Air Performance',    icon: Icons.Activity,   label: 'NOBL Air Performance' },

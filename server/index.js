@@ -1977,7 +1977,14 @@ Remember: use the EXACT column names from the tab data above. Generate configs f
 
 // ── Serve React ─────────────────────────────────────────────────
 const clientBuild = path.join(__dirname,'../client/build');
-app.use(express.static(clientBuild));
+app.use(express.static(clientBuild, {
+  setHeaders(res, filePath) {
+    // Always revalidate index.html so new hashed JS/CSS bundles load after deploy
+    if (filePath.endsWith(`${path.sep}index.html`) || filePath.endsWith('/index.html')) {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 app.get('*', (req, res) => res.sendFile(path.join(clientBuild, 'index.html')));
 
 // ── Start ────────────────────────────────────────────────────────

@@ -1,32 +1,35 @@
 import React from 'react';
-import { toISO, mtdStartFor, ytdStartFor, yesterdayISO } from '../utils/dateRange';
+import { mtdRange, ytdRange, yesterdayRange } from '../utils/dateRange';
 
 /**
  * DateRangePicker — quick presets + custom date inputs.
- * MTD/YTD use start of month/year through the selected end date.
+ * MTD/YTD always reset to the current calendar month/year through today.
  */
 
 const QUICK_BTNS = [
   {
     label: 'Yesterday',
-    getRange: () => {
-      const y = yesterdayISO();
-      return { start: y, end: y };
-    },
+    getRange: () => yesterdayRange(),
     match: (start, end) => {
-      const y = yesterdayISO();
-      return start === y && end === y;
+      const y = yesterdayRange();
+      return start === y.start && end === y.end;
     },
   },
   {
     label: 'MTD',
-    getRange: (end) => ({ start: mtdStartFor(end), end: end || toISO(new Date()) }),
-    match: (start, end) => start === mtdStartFor(end) && end.length === 10,
+    getRange: () => mtdRange(),
+    match: (start, end) => {
+      const m = mtdRange();
+      return start === m.start && end === m.end;
+    },
   },
   {
     label: 'YTD',
-    getRange: (end) => ({ start: ytdStartFor(end), end: end || toISO(new Date()) }),
-    match: (start, end) => start === ytdStartFor(end) && end.length === 10,
+    getRange: () => ytdRange(),
+    match: (start, end) => {
+      const y = ytdRange();
+      return start === y.start && end === y.end;
+    },
   },
 ];
 
@@ -43,7 +46,7 @@ export default function DateRangePicker({ start, end, onChange }) {
   const isSingleDay = start === end && start.length === 10;
 
   function handleQuick(btn) {
-    onChange(btn.getRange(end));
+    onChange(btn.getRange());
   }
 
   function handleStartChange(e) {
