@@ -72,10 +72,15 @@ const TAB_TO_PATH = {
 };
 
 const TAB_DISPLAY_NAMES = {
-  'Store:NOBL': 'NOBL Travel',
-  'Store:FLO':  'Pilates FLO',
-  'App:NOBL':   'Nobl',
-  'App:FLO':    'Flo',
+  'Live Data':                "Today's snapshot",
+  'Meta Ads':                 'Facebook ads',
+  'Forecast Engine':          'Sales forecast',
+  'NOBL Channel Level Daily': 'NOBL Channel Daily',
+  'FLO Channel Level Daily':  'FLO Channel Daily',
+  'Store:NOBL':               'NOBL Travel',
+  'Store:FLO':                'Pilates FLO',
+  'App:NOBL':                 'Nobl app',
+  'App:FLO':                  'Flo app',
 };
 
 function pathToActiveTab(pathname, dynamicTabs) {

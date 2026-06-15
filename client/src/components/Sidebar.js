@@ -1,33 +1,39 @@
 import React, { useState } from 'react';
 import { Icons, sheetIcon } from './Icons';
 
-export const CORE_TABS = [
-  { id: 'Overview',      icon: Icons.LayoutDashboard, label: 'Overview'       },
-  { id: 'Channels',      icon: Icons.BarChart2,       label: 'Channels'       },
-  { id: 'Meta Ads',      icon: Icons.Crosshair,       label: 'Facebook ads'   },
-  { id: 'Subscriptions', icon: Icons.CreditCard,      label: 'Subscriptions'  },
-  { id: 'Live Data',     icon: Icons.Zap,             label: "Today's snapshot" },
+/* ── Navigation sections (tab ids must match App.js TAB_TO_PATH) ─── */
+
+const OVERVIEW_TABS = [
+  { id: 'Overview',  icon: Icons.LayoutDashboard, label: 'Overview',           title: 'All brands — high-level KPIs and trends' },
+  { id: 'Live Data', icon: Icons.Zap,             label: "Today's snapshot",   title: 'Real-time sales snapshot for today' },
 ];
 
-const FIXED_DASHBOARD_TABS = [
-  { id: 'NOBL Topline',            icon: Icons.BarChart3,  label: 'NOBL Topline' },
-  { id: 'NOBL Channel Level Daily', icon: Icons.Layers,    label: 'NOBL Channel Daily' },
-  { id: 'FLO Topline',             icon: Icons.BarChart3,  label: 'FLO Topline' },
-  { id: 'FLO Channel Level Daily',  icon: Icons.Layers,    label: 'FLO Channel Daily' },
-  { id: 'Forecast Engine',         icon: Icons.TrendingUp, label: 'Sales forecast' },
-  { id: 'NOBL Air Performance',    icon: Icons.Activity,   label: 'NOBL Air Performance' },
+const NOBL_TRAVEL_TABS = [
+  { id: 'NOBL Topline',             icon: Icons.BarChart3, label: 'NOBL Topline',       title: 'Daily revenue, spend, and MER for NOBL Travel' },
+  { id: 'NOBL Channel Level Daily', icon: Icons.Layers,    label: 'NOBL Channel Daily', title: 'Channel-by-channel daily breakdown — NOBL Travel' },
+  { id: 'Store:NOBL',               icon: Icons.Store,     label: 'NOBL Travel',        title: 'Full store view — channels, products, subs, email' },
 ];
 
-// Dedicated store pages — full per-store data (channels, regions, products, subs, email)
-export const STORE_TABS = [
-  { id: 'Store:NOBL', icon: Icons.Store, label: 'NOBL Travel'  },
-  { id: 'Store:FLO',  icon: Icons.Store, label: 'Pilates FLO'  },
+const PILATES_FLO_TABS = [
+  { id: 'FLO Topline',              icon: Icons.BarChart3, label: 'FLO Topline',        title: 'Daily revenue, spend, and MER for Pilates FLO' },
+  { id: 'FLO Channel Level Daily',  icon: Icons.Layers,    label: 'FLO Channel Daily',  title: 'Channel-by-channel daily breakdown — Pilates FLO' },
+  { id: 'Store:FLO',                icon: Icons.Store,     label: 'Pilates FLO',        title: 'Full store view — channels, products, subs, email' },
 ];
 
-// Mobile app analytics
-export const APPLICATION_TABS = [
-  { id: 'App:NOBL', icon: Icons.Smartphone, label: 'Nobl' },
-  { id: 'App:FLO',  icon: Icons.Smartphone, label: 'Flo'  },
+const MARKETING_TABS = [
+  { id: 'Channels',      icon: Icons.BarChart2,  label: 'Channels',       title: 'Paid media overview — Meta, Google, TikTok, and more' },
+  { id: 'Meta Ads',      icon: Icons.Crosshair,  label: 'Facebook ads',   title: 'Facebook & Instagram campaign performance' },
+  { id: 'Subscriptions', icon: Icons.CreditCard, label: 'Subscriptions',  title: 'Subscription revenue, MRR, and cohort trends' },
+];
+
+const NOBL_AIR_TABS = [
+  { id: 'NOBL Air Performance', icon: Icons.Activity,   label: 'NOBL Air Performance', title: 'Air product attach rate, revenue, and conversion' },
+  { id: 'Forecast Engine',      icon: Icons.TrendingUp, label: 'Sales forecast',       title: 'Plan vs actual and full-year sales projection' },
+];
+
+const APPLICATION_TABS = [
+  { id: 'App:NOBL', icon: Icons.Smartphone, label: 'Nobl app', title: 'NOBL mobile app — revenue and subscriptions' },
+  { id: 'App:FLO',  icon: Icons.Smartphone, label: 'Flo app',  title: 'Pilates FLO app — revenue and product performance' },
 ];
 
 /* ── Confirm delete dialog ─────────────────────────────────────────── */
@@ -189,7 +195,7 @@ function ShareModal({ label, onCancel }) {
 }
 
 /* ── Nav item ──────────────────────────────────────────────────────── */
-function NavItem({ id, label, icon: IconComp, active, collapsed, onClick, onDelete, onRename, onDuplicate, isDynamic }) {
+function NavItem({ id, label, icon: IconComp, title: hint, active, collapsed, onClick, onDelete, onRename, onDuplicate, isDynamic }) {
   const [hov, setHov] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmId, setConfirmId] = useState(null);
@@ -223,7 +229,7 @@ function NavItem({ id, label, icon: IconComp, active, collapsed, onClick, onDele
       >
         <button
           onClick={() => onClick(id)}
-          title={collapsed ? label : undefined}
+          title={collapsed ? label : (hint || label)}
           style={{
             width: '100%',
             display: 'flex', alignItems: 'center',
@@ -289,12 +295,14 @@ function NavItem({ id, label, icon: IconComp, active, collapsed, onClick, onDele
 }
 
 /* ── Section label ─────────────────────────────────────────────────── */
-function SectionLabel({ label, collapsed, action }) {
+function SectionLabel({ label, collapsed, action, first }) {
   if (collapsed) return <div style={{ height: 1, background: 'var(--border)', margin: '10px 0' }} />;
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: '14px 10px 4px',
+      padding: first ? '10px 10px 4px' : '14px 10px 4px',
+      borderTop: first ? 'none' : '1px solid var(--border)',
+      marginTop: first ? 0 : 2,
     }}>
       <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text4)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
         {label}
@@ -304,11 +312,23 @@ function SectionLabel({ label, collapsed, action }) {
   );
 }
 
+function NavSection({ label, tabs, collapsed, active, onChange, action, first }) {
+  return (
+    <>
+      <SectionLabel label={label} collapsed={collapsed} action={action} first={first} />
+      <div>
+        {tabs.map(tab => (
+          <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
+        ))}
+      </div>
+    </>
+  );
+}
+
 /* ── Main sidebar ──────────────────────────────────────────────────── */
 export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard, onDeleteDynamic, onRenameDynamic, onDuplicateDynamic, collapsed, onCollapse }) {
   const dynDashboards = (dynamicTabs || []).filter(t => t.type === 'dashboard');
   const dynSheets     = (dynamicTabs || []).filter(t => t.type === 'sheet');
-  const storeActive   = STORE_TABS.some(t => t.id === active);
 
   return (
     <aside style={{
@@ -351,39 +371,23 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
       <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: collapsed ? '8px 0' : '4px 0' }}
         className="hide-scrollbar">
 
-        {/* Core pages */}
-        {!collapsed && <SectionLabel label="Analytics" collapsed={false} />}
         {collapsed && <div style={{ height: 8 }} />}
-        <div>
-          {CORE_TABS.map(tab => (
-            <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
-          ))}
-        </div>
 
-        {/* Stores */}
-        <SectionLabel label="Stores" collapsed={collapsed} />
-        <div>
-          {STORE_TABS.map(tab => (
-            <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
-          ))}
-        </div>
+        <NavSection label="Overview & Live" tabs={OVERVIEW_TABS} collapsed={collapsed} active={active} onChange={onChange} first />
+        <NavSection label="NOBL Travel" tabs={NOBL_TRAVEL_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="Pilates FLO" tabs={PILATES_FLO_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="Marketing" tabs={MARKETING_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="NOBL Air" tabs={NOBL_AIR_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="Mobile apps" tabs={APPLICATION_TABS} collapsed={collapsed} active={active} onChange={onChange} />
 
-        {/* Applications */}
-        <SectionLabel label="Application" collapsed={collapsed} />
-        <div>
-          {APPLICATION_TABS.map(tab => (
-            <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
-          ))}
-        </div>
-
-        {/* Dashboards */}
+        {/* Custom dashboards & sheets */}
         <SectionLabel
-          label="Dashboards"
+          label="Custom"
           collapsed={collapsed}
           action={!collapsed && (
             <button
               onClick={onAddDashboard}
-              title="New dashboard"
+              title="Build a new custom dashboard with AI"
               style={{
                 display: 'flex', alignItems: 'center', gap: 3,
                 padding: '2px 7px', fontSize: 11,
@@ -400,9 +404,6 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
         />
 
         <div>
-          {FIXED_DASHBOARD_TABS.map(tab => (
-            <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
-          ))}
           {dynDashboards.length === 0 && !collapsed && (
             <button
               onClick={onAddDashboard}
@@ -426,6 +427,7 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
               key={tab.id} id={tab.id}
               label={tab.label || tab.id}
               icon={Icons.LayoutGrid}
+              title="Custom dashboard — built with AI Builder"
               active={active} collapsed={collapsed}
               onClick={onChange}
               onDelete={onDeleteDynamic}
@@ -436,16 +438,23 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
           ))}
         </div>
 
-        {/* Sheets */}
         {dynSheets.length > 0 && (
           <>
-            <SectionLabel label="Sheets" collapsed={collapsed} />
+            {!collapsed && (
+              <div style={{ padding: '8px 10px 2px', borderTop: dynDashboards.length > 0 ? 'none' : '1px solid var(--border)', marginTop: dynDashboards.length > 0 ? 0 : 2 }}>
+                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text4)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
+                  Sheets
+                </span>
+              </div>
+            )}
+            {collapsed && <div style={{ height: 1, background: 'var(--border)', margin: '10px 0' }} />}
             <div>
               {dynSheets.map(tab => (
                 <NavItem
                   key={tab.id} id={tab.id}
                   label={tab.label || tab.id}
                   icon={sheetIcon(tab.label || tab.id)}
+                  title="Custom spreadsheet — built with AI Builder"
                   active={active} collapsed={collapsed}
                   onClick={onChange}
                   onDelete={onDeleteDynamic}

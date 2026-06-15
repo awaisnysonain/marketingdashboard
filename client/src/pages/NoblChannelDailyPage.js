@@ -1,9 +1,15 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  AreaChart, Area, BarChart, Bar,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
+} from 'recharts';
 import PageIntro from '../components/PageIntro';
 import PageFilterBar from '../components/PageFilterBar';
 import KpiCard from '../components/KpiCard';
+import ChartCard from '../components/ChartCard';
 import { getChannels, fmt$, fmtFull$, fmtNum, fmtFullNum } from '../utils/api';
 import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
+import { NOBL_ACCENT, TOOLTIP_STYLE, CHART_GRID, mer, chColor } from '../utils/chartHelpers';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -87,8 +93,9 @@ export default function NoblChannelDailyPage() {
   }, [range]);
   useEffect(() => { load(); }, [load]);
 
-  const { channelNames, dates, byDateCh, chKpi } = useMemo(() => {
+  const { channelNames, dates, byDateCh, chKpi, spendChartData, revChartData, channelTotals } = useMemo(() => {
     const chSet = new Set(), dateSet = new Set(), byDateCh = {}, chTotals = {};
+    const dateMapSpend = {}, dateMapRev = {};
     for (const r of rows) {
       chSet.add(r.channel); dateSet.add(r.date);
       byDateCh[`${r.date}|${r.channel}`] = r;
@@ -96,12 +103,28 @@ export default function NoblChannelDailyPage() {
       chTotals[r.channel].spend += Number(r.spend_1d) || 0;
       chTotals[r.channel].revenue += Number(r.revenue_1d) || 0;
       chTotals[r.channel].purchases += Number(r.purchases_1d) || 0;
+      if (!dateMapSpend[r.date]) dateMapSpend[r.date] = { date: r.date };
+      if (!dateMapRev[r.date]) dateMapRev[r.date] = { date: r.date };
+      dateMapSpend[r.date][r.channel] = (dateMapSpend[r.date][r.channel] || 0) + (Number(r.spend_1d) || 0);
+      dateMapRev[r.date][r.channel] = (dateMapRev[r.date][r.channel] || 0) + (Number(r.revenue_1d) || 0);
     }
     const channelRev = {};
     for (const r of rows) {
       channelRev[r.channel] = (channelRev[r.channel] || 0) + (Number(r.revenue_1d) || 0);
     }
-    return { channelNames: sortByRevenueDesc(chSet, channelRev), dates: [...dateSet].sort(), byDateCh, chKpi: chTotals };
+    const sortDates = (a, b) => String(a.date).localeCompare(String(b.date));
+    const channelTotals = Object.entries(chTotals)
+      .map(([channel, v]) => ({ channel, ...v, roas: mer(v.revenue, v.spend) }))
+      .sort((a, b) => b.revenue - a.revenue);
+    return {
+      channelNames: sortByRevenueDesc(chSet, channelRev),
+      dates: [...dateSet].sort(),
+      byDateCh,
+      chKpi: chTotals,
+      spendChartData: Object.values(dateMapSpend).sort(sortDates),
+      revChartData: Object.values(dateMapRev).sort(sortDates),
+      channelTotals,
+    };
   }, [rows]);
 
   useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
@@ -125,6 +148,69 @@ export default function NoblChannelDailyPage() {
             <KpiCard label="Total Revenue" value={fmt$(t.revenue)} fullValue={fmtFull$(t.revenue)} />
             <KpiCard label="Avg ROAS" value={roas.toFixed(2) + 'x'} />
             <KpiCard label="Total Purchases" value={fmtNum(t.purchases)} fullValue={fmtFullNum(t.purchases)} />
+          </div>
+
+          <ChartCard title="Daily Spend by Channel" subtitle="Stacked area — all channels">
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={spendChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {channelNames.map((ch) => (
+                  <Area key={ch} type="monotone" dataKey={ch} name={ch} stackId="spend" stroke={chColor(ch)} fill={chColor(ch)} fillOpacity={0.65} strokeWidth={1} />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <ChartCard title="Daily Revenue by Channel" subtitle="Attribution revenue_1d">
+            <ResponsiveContainer width="100%" height={260}>
+              <AreaChart data={revChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                {channelNames.map((ch) => (
+                  <Area key={ch} type="monotone" dataKey={ch} name={ch} stackId="rev" stroke={chColor(ch)} fill={chColor(ch)} fillOpacity={0.65} strokeWidth={1} />
+                ))}
+              </AreaChart>
+            </ResponsiveContainer>
+          </ChartCard>
+
+          <div style={CHART_GRID}>
+            <ChartCard title="Period Totals by Channel" subtitle="Spend vs revenue">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={channelTotals} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                  <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                  <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="spend" name="Spend" radius={[4, 4, 0, 0]}>
+                    {channelTotals.map((e, i) => <Cell key={i} fill={chColor(e.channel, '#f59e0b')} />)}
+                  </Bar>
+                  <Bar dataKey="revenue" name="Revenue" radius={[4, 4, 0, 0]}>
+                    {channelTotals.map((e, i) => <Cell key={i} fill={chColor(e.channel)} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+            <ChartCard title="ROAS by Channel" subtitle="Period attribution">
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={channelTotals} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                  <YAxis tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 11 }} width={44} stroke="var(--border2)" />
+                  <Tooltip formatter={(v) => [v.toFixed(2) + 'x', 'ROAS']} contentStyle={TOOLTIP_STYLE} />
+                  <Bar dataKey="roas" name="ROAS" radius={[4, 4, 0, 0]}>
+                    {channelTotals.map((e, i) => <Cell key={i} fill={chColor(e.channel, NOBL_ACCENT)} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
           </div>
 
           <Card title={activeChannel} subtitle={`${dates.length} days`}>

@@ -2,16 +2,21 @@ import React, { useState } from 'react';
 import { Icons } from './Icons';
 
 const PAGE_INFO = {
-  'Overview':      'All brands — real-time analytics',
-  'NOBL Air':      'nobltravel.com — revenue, spend & subscriptions',
-  'NOBL Travel':   'nobltravel.com — revenue, spend & subscriptions',
-  'Pilates FLO':   'pilatesflo.com — product & channel performance',
-  'App:NOBL':      'NOBL mobile app — revenue & subscriptions',
-  'App:FLO':       'Pilates FLO app — revenue & product performance',
-  'Store:NOBL':    'nobltravel.com — revenue, spend & subscriptions',
-  'Store:FLO':     'pilatesflo.com — product & channel performance',
-  'Channels':      'META · Google · TikTok · Snapchat · more',
-  'Subscriptions': 'Appstle — subscription revenue & MRR',
+  'Overview':                 'All brands — high-level KPIs and trends',
+  'Live Data':                'Real-time sales snapshot for today',
+  'Channels':                 'Paid media overview — Meta, Google, TikTok, and more',
+  'Meta Ads':                 'Facebook & Instagram campaign performance',
+  'Subscriptions':            'Subscription revenue, MRR, and cohort trends',
+  'NOBL Topline':             'Daily revenue, spend, and MER for NOBL Travel',
+  'NOBL Channel Level Daily': 'Channel-by-channel daily breakdown — NOBL Travel',
+  'FLO Topline':              'Daily revenue, spend, and MER for Pilates FLO',
+  'FLO Channel Level Daily':  'Channel-by-channel daily breakdown — Pilates FLO',
+  'NOBL Air Performance':     'Air product attach rate, revenue, and conversion',
+  'Forecast Engine':          'Plan vs actual and full-year sales projection',
+  'Store:NOBL':               'Full store view — channels, products, subs, email',
+  'Store:FLO':                'Full store view — channels, products, subs, email',
+  'App:NOBL':                 'NOBL mobile app — revenue and subscriptions',
+  'App:FLO':                  'Pilates FLO app — revenue and product performance',
 };
 
 function HeaderBtn({ icon: Ic, label, onClick, danger, title: ttl, disabled, active, small }) {

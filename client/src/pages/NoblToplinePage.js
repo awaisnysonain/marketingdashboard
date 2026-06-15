@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  AreaChart, Area, BarChart, Bar, Line, ComposedChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
+} from 'recharts';
 import PageIntro from '../components/PageIntro';
 import PageFilterBar from '../components/PageFilterBar';
 import KpiCard from '../components/KpiCard';
+import ChartCard from '../components/ChartCard';
 import { getNoblTopline, fmt$, fmtFull$, fmtNum, fmtFullNum } from '../utils/api';
 import { TIP } from '../copy/plainLanguage';
 import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
+import {
+  NOBL_ACCENT, NOBL_WARN, GEO_COL, TOOLTIP_STYLE, CHART_GRID, mer, chColor,
+} from '../utils/chartHelpers';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -166,8 +174,8 @@ export default function NoblToplinePage() {
   }, [range]);
   useEffect(() => { load(); }, [load]);
 
-  const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, subsByDate, kpi } = useMemo(() => {
-    if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, subsByDate: {}, kpi: {} };
+  const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, subsByDate, kpi, chartData, chAgg, geoAgg, subChartData } = useMemo(() => {
+    if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, subsByDate: {}, kpi: {}, chartData: [], chAgg: [], geoAgg: [], subChartData: [] };
     const summaryByDate = {};
     let totalRev = 0, totalGmd = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
     for (const r of (data.summary || [])) {
@@ -194,8 +202,67 @@ export default function NoblToplinePage() {
     let totalSubRev = 0;
     for (const r of (data.subs || [])) { subsByDate[r.date] = r; totalSubRev += Number(r.sub_revenue_actual) || 0; }
     const allDates = [...new Set([...(data.summary || []).map(r => r.date), ...(data.channels || []).map(r => r.date)])].sort();
-    const mer = totalSpend > 0 ? totalRev / totalSpend : 0;
-    return { dates: allDates, summaryByDate, channelNames: sortByRevenueDesc(chSet, channelRev), channelByDateCh, regionNames: sortByRevenueDesc(rgSet, regionRev), geoByDateRg, subsByDate, kpi: { totalRev, totalGmd, totalSpend, mer, totalOrders, totalNew, totalSubRev } };
+    const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
+
+    const chartData = allDates.map((d) => {
+      const r = summaryByDate[d] || {};
+      const rev = Number(r.order_revenue || r.total_revenue) || 0;
+      const spend = Number(r.total_spend) || 0;
+      return {
+        date: d,
+        order_revenue: rev,
+        gross_minus_discounts: Number(r.gross_minus_discounts) || 0,
+        total_spend: spend,
+        mer: Number(r.mer) || mer(rev, spend),
+      };
+    });
+
+    const chMap = {};
+    for (const r of (data.channels || [])) {
+      if (!chMap[r.channel]) chMap[r.channel] = { channel: r.channel, spend: 0, revenue: 0 };
+      chMap[r.channel].spend += Number(r.spend_1d) || 0;
+      chMap[r.channel].revenue += Number(r.revenue_1d) || 0;
+    }
+    const chAgg = Object.values(chMap)
+      .map((v) => ({ ...v, roas: mer(v.revenue, v.spend) }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const geoMap = {};
+    for (const r of (data.geo || [])) {
+      if (!geoMap[r.region]) geoMap[r.region] = { region: r.region, revenue: 0, spend: 0 };
+      geoMap[r.region].revenue += Number(r.revenue_actual || r.revenue) || 0;
+      geoMap[r.region].spend += Number(r.spend_actual || r.spend) || 0;
+    }
+    const geoAgg = Object.values(geoMap)
+      .map((v) => ({ ...v, mer: mer(v.revenue, v.spend) }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const subChartData = allDates
+      .filter((d) => subsByDate[d])
+      .map((d) => {
+        const r = subsByDate[d];
+        return {
+          date: d,
+          sub_revenue: Number(r.sub_revenue_actual) || 0,
+          rebill_revenue: Number(r.rebill_revenue) || 0,
+          new_sub_revenue: Number(r.new_sub_revenue) || 0,
+        };
+      });
+
+    return {
+      dates: allDates,
+      summaryByDate,
+      channelNames: sortByRevenueDesc(chSet, channelRev),
+      channelByDateCh,
+      regionNames: sortByRevenueDesc(rgSet, regionRev),
+      geoByDateRg,
+      subsByDate,
+      kpi: { totalRev, totalGmd, totalSpend, mer: periodMer, totalOrders, totalNew, totalSubRev },
+      chartData,
+      chAgg,
+      geoAgg,
+      subChartData,
+    };
   }, [data]);
 
   useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
@@ -231,13 +298,80 @@ export default function NoblToplinePage() {
           </div>
 
           {activeView === 'summary' && (
-            <Card title="Daily Summary" subtitle={`${dates.length} days`}>
-              <VerticalTable dates={dates} getRow={d => summaryByDate[d]} metrics={SUMMARY_METRICS} />
-            </Card>
+            <>
+              <div style={CHART_GRID}>
+                <ChartCard title="Revenue & Gross − Discounts" subtitle="Daily trend">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <AreaChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <defs>
+                        <linearGradient id="noblGradRev" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={NOBL_ACCENT} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={NOBL_ACCENT} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={NOBL_ACCENT} fill="url(#noblGradRev)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="gross_minus_discounts" name="Gross − Discounts" stroke="#8b5cf6" strokeWidth={2} dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                <ChartCard title="Spend vs Revenue" subtitle="MER context">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={NOBL_ACCENT} fill="rgba(99,102,241,.12)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="total_spend" name="Spend" stroke={NOBL_WARN} strokeWidth={2} strokeDasharray="5 3" dot={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
+              <Card title="Daily Summary" subtitle={`${dates.length} days`}>
+                <VerticalTable dates={dates} getRow={d => summaryByDate[d]} metrics={SUMMARY_METRICS} />
+              </Card>
+            </>
           )}
 
           {activeView === 'channels' && (
             <>
+              <div style={CHART_GRID}>
+                <ChartCard title="Channel Revenue" subtitle="Period totals, sorted by revenue">
+                  <ResponsiveContainer width="100%" height={Math.max(180, chAgg.length * 36)}>
+                    <BarChart data={chAgg} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                      <XAxis type="number" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} stroke="var(--border2)" />
+                      <YAxis dataKey="channel" type="category" tick={{ fontSize: 11, fontWeight: 600 }} width={72} stroke="var(--border2)" />
+                      <Tooltip formatter={(v) => [fmt$(v), 'Revenue']} contentStyle={TOOLTIP_STYLE} />
+                      <Bar dataKey="revenue" name="Revenue" radius={[0, 4, 4, 0]} maxBarSize={20}>
+                        {chAgg.map((e, i) => <Cell key={i} fill={chColor(e.channel)} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                <ChartCard title="Spend & ROAS by Channel" subtitle="Period totals">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <ComposedChart data={chAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis yAxisId="left" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} width={70} stroke="var(--border2)" />
+                      <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 10 }} width={44} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [n === 'ROAS' ? v.toFixed(2) + 'x' : fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar yAxisId="left" dataKey="spend" name="Spend" radius={[4, 4, 0, 0]}>
+                        {chAgg.map((e, i) => <Cell key={i} fill={chColor(e.channel, NOBL_WARN)} />)}
+                      </Bar>
+                      <Line yAxisId="right" type="monotone" dataKey="roas" name="ROAS" stroke={NOBL_ACCENT} strokeWidth={2} dot={{ r: 3 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
                 {channelNames.map(ch => <PillTab key={ch} label={ch} active={activeChannel === ch} onClick={() => setActiveChannel(ch)} />)}
               </div>
@@ -249,6 +383,36 @@ export default function NoblToplinePage() {
 
           {activeView === 'geo' && (
             <>
+              <div style={CHART_GRID}>
+                <ChartCard title="Revenue by Region" subtitle="Period totals">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="revenue" name="Revenue" radius={[4, 4, 0, 0]}>
+                        {geoAgg.map((e, i) => <Cell key={i} fill={GEO_COL[i % GEO_COL.length]} />)}
+                      </Bar>
+                      <Bar dataKey="spend" name="Spend" radius={[4, 4, 0, 0]} fill="rgba(245,158,11,.7)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                <ChartCard title="Regional MER" subtitle="Revenue ÷ spend">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 11 }} width={44} stroke="var(--border2)" />
+                      <Tooltip formatter={(v) => [v.toFixed(2) + 'x', 'MER']} contentStyle={TOOLTIP_STYLE} />
+                      <Bar dataKey="mer" name="MER" radius={[4, 4, 0, 0]}>
+                        {geoAgg.map((e, i) => <Cell key={i} fill={GEO_COL[i % GEO_COL.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
                 {regionNames.map(r => <PillTab key={r} label={r} active={activeRegion === r} onClick={() => setActiveRegion(r)} />)}
               </div>
@@ -259,9 +423,27 @@ export default function NoblToplinePage() {
           )}
 
           {activeView === 'subs' && (
-            <Card title="NOBL Air Subscriptions" subtitle={`${dates.length} days`}>
-              <VerticalTable dates={dates} getRow={d => subsByDate[d]} metrics={SUB_METRICS} />
-            </Card>
+            <>
+              {subChartData.length > 0 && (
+                <ChartCard title="Subscription Revenue Trend" subtitle="Daily sub, rebill & new sub revenue">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <AreaChart data={subChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Area type="monotone" dataKey="sub_revenue" name="Sub Revenue" stackId="sub" stroke={NOBL_ACCENT} fill="rgba(99,102,241,.35)" strokeWidth={1.5} />
+                      <Area type="monotone" dataKey="rebill_revenue" name="Rebill Rev" stackId="sub" stroke="#14b8a6" fill="rgba(20,184,166,.35)" strokeWidth={1.5} />
+                      <Area type="monotone" dataKey="new_sub_revenue" name="New Sub Rev" stackId="sub" stroke="#8b5cf6" fill="rgba(139,92,246,.35)" strokeWidth={1.5} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              )}
+              <Card title="NOBL Air Subscriptions" subtitle={`${dates.length} days`}>
+                <VerticalTable dates={dates} getRow={d => subsByDate[d]} metrics={SUB_METRICS} />
+              </Card>
+            </>
           )}
         </>
       )}

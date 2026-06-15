@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  AreaChart, Area, BarChart, Bar, Line, ComposedChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
+} from 'recharts';
 import PageIntro from '../components/PageIntro';
 import PageFilterBar from '../components/PageFilterBar';
 import KpiCard from '../components/KpiCard';
+import ChartCard from '../components/ChartCard';
 import { getFloTopline, fmt$, fmtFull$, fmtNum, fmtFullNum } from '../utils/api';
 import { TIP } from '../copy/plainLanguage';
 import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
+import {
+  FLO_ACCENT, FLO_WARN, GEO_COL, PROD_COL, TOOLTIP_STYLE, CHART_GRID, mer, chColor,
+} from '../utils/chartHelpers';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -168,8 +176,8 @@ export default function FloToplinePage() {
   }, [range]);
   useEffect(() => { load(); }, [load]);
 
-  const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, productNames, productByDatePr, kpi } = useMemo(() => {
-    if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, productNames: [], productByDatePr: {}, kpi: {} };
+  const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, productNames, productByDatePr, kpi, chartData, chAgg, geoAgg, prodAgg } = useMemo(() => {
+    if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, productNames: [], productByDatePr: {}, kpi: {}, chartData: [], chAgg: [], geoAgg: [], prodAgg: [] };
     const summaryByDate = {};
     let totalRev = 0, totalGmd = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
     for (const r of (data.summary || [])) {
@@ -199,8 +207,67 @@ export default function FloToplinePage() {
       productRev[r.product_line] = (productRev[r.product_line] || 0) + (Number(r.revenue) || 0);
     }
     const allDates = [...new Set([...(data.summary || []).map(r => r.date), ...(data.channels || []).map(r => r.date)])].sort();
-    const mer = totalSpend > 0 ? totalRev / totalSpend : 0;
-    return { dates: allDates, summaryByDate, channelNames: sortByRevenueDesc(chSet, channelRev), channelByDateCh, regionNames: sortByRevenueDesc(rgSet, regionRev), geoByDateRg, productNames: sortByRevenueDesc(prSet, productRev), productByDatePr, kpi: { totalRev, totalGmd, totalSpend, mer, totalOrders, totalNew } };
+    const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
+
+    const chartData = allDates.map((d) => {
+      const r = summaryByDate[d] || {};
+      const rev = Number(r.order_revenue || r.total_revenue) || 0;
+      const spend = Number(r.total_spend) || 0;
+      return {
+        date: d,
+        order_revenue: rev,
+        gross_minus_discounts: Number(r.gross_minus_discounts) || 0,
+        total_spend: spend,
+        mer: Number(r.mer) || mer(rev, spend),
+      };
+    });
+
+    const chMap = {};
+    for (const r of (data.channels || [])) {
+      if (!chMap[r.channel]) chMap[r.channel] = { channel: r.channel, spend: 0, revenue: 0 };
+      chMap[r.channel].spend += Number(r.spend_1d) || 0;
+      chMap[r.channel].revenue += Number(r.revenue_1d) || 0;
+    }
+    const chAgg = Object.values(chMap)
+      .map((v) => ({ ...v, roas: mer(v.revenue, v.spend) }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const geoMap = {};
+    for (const r of (data.geo || [])) {
+      if (!geoMap[r.region]) geoMap[r.region] = { region: r.region, revenue: 0, spend: 0 };
+      geoMap[r.region].revenue += Number(r.revenue_actual || r.revenue) || 0;
+      geoMap[r.region].spend += Number(r.spend_actual || r.spend) || 0;
+    }
+    const geoAgg = Object.values(geoMap)
+      .map((v) => ({ ...v, mer: mer(v.revenue, v.spend) }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const prodMap = {};
+    for (const r of (data.products || [])) {
+      const pl = r.product_line;
+      if (!prodMap[pl]) prodMap[pl] = { line: pl, spend: 0, revenue: 0 };
+      prodMap[pl].spend += Number(r.spend) || 0;
+      prodMap[pl].revenue += Number(r.revenue) || 0;
+    }
+    const prodAgg = Object.values(prodMap)
+      .map((v) => ({ ...v, mer: mer(v.revenue, v.spend) }))
+      .sort((a, b) => b.revenue - a.revenue);
+
+    return {
+      dates: allDates,
+      summaryByDate,
+      channelNames: sortByRevenueDesc(chSet, channelRev),
+      channelByDateCh,
+      regionNames: sortByRevenueDesc(rgSet, regionRev),
+      geoByDateRg,
+      productNames: sortByRevenueDesc(prSet, productRev),
+      productByDatePr,
+      kpi: { totalRev, totalGmd, totalSpend, mer: periodMer, totalOrders, totalNew },
+      chartData,
+      chAgg,
+      geoAgg,
+      prodAgg,
+    };
   }, [data]);
 
   useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
@@ -236,12 +303,79 @@ export default function FloToplinePage() {
           </div>
 
           {activeView === 'summary' && (
-            <Card title="Daily Summary" subtitle={`${dates.length} days`}>
-              <VerticalTable dates={dates} getRow={d => summaryByDate[d]} metrics={SUMMARY_METRICS} />
-            </Card>
+            <>
+              <div style={CHART_GRID}>
+                <ChartCard title="Revenue & Gross − Discounts" subtitle="Daily trend">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <AreaChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <defs>
+                        <linearGradient id="floGradRev" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor={FLO_ACCENT} stopOpacity={0.3} />
+                          <stop offset="95%" stopColor={FLO_ACCENT} stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={FLO_ACCENT} fill="url(#floGradRev)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="gross_minus_discounts" name="Gross − Discounts" stroke="#6366f1" strokeWidth={2} dot={false} />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                <ChartCard title="Spend vs Revenue" subtitle="MER context">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={FLO_ACCENT} fill="rgba(20,184,166,.12)" strokeWidth={2} dot={false} />
+                      <Line type="monotone" dataKey="total_spend" name="Spend" stroke={FLO_WARN} strokeWidth={2} strokeDasharray="5 3" dot={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
+              <Card title="Daily Summary" subtitle={`${dates.length} days`}>
+                <VerticalTable dates={dates} getRow={d => summaryByDate[d]} metrics={SUMMARY_METRICS} />
+              </Card>
+            </>
           )}
           {activeView === 'channels' && (
             <>
+              <div style={CHART_GRID}>
+                <ChartCard title="Channel Revenue" subtitle="Period totals, sorted by revenue">
+                  <ResponsiveContainer width="100%" height={Math.max(180, chAgg.length * 36)}>
+                    <BarChart data={chAgg} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                      <XAxis type="number" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} stroke="var(--border2)" />
+                      <YAxis dataKey="channel" type="category" tick={{ fontSize: 11, fontWeight: 600 }} width={72} stroke="var(--border2)" />
+                      <Tooltip formatter={(v) => [fmt$(v), 'Revenue']} contentStyle={TOOLTIP_STYLE} />
+                      <Bar dataKey="revenue" name="Revenue" radius={[0, 4, 4, 0]} maxBarSize={20}>
+                        {chAgg.map((e, i) => <Cell key={i} fill={chColor(e.channel, FLO_ACCENT)} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                <ChartCard title="Spend & ROAS by Channel" subtitle="Period totals">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <ComposedChart data={chAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis yAxisId="left" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} width={70} stroke="var(--border2)" />
+                      <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 10 }} width={44} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [n === 'ROAS' ? v.toFixed(2) + 'x' : fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar yAxisId="left" dataKey="spend" name="Spend" radius={[4, 4, 0, 0]}>
+                        {chAgg.map((e, i) => <Cell key={i} fill={chColor(e.channel, FLO_WARN)} />)}
+                      </Bar>
+                      <Line yAxisId="right" type="monotone" dataKey="roas" name="ROAS" stroke={FLO_ACCENT} strokeWidth={2} dot={{ r: 3 }} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
                 {channelNames.map(ch => <PillTab key={ch} label={ch} active={activeChannel === ch} onClick={() => setActiveChannel(ch)} />)}
               </div>
@@ -252,6 +386,36 @@ export default function FloToplinePage() {
           )}
           {activeView === 'geo' && (
             <>
+              <div style={CHART_GRID}>
+                <ChartCard title="Revenue by Region" subtitle="Period totals">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="revenue" name="Revenue" radius={[4, 4, 0, 0]}>
+                        {geoAgg.map((e, i) => <Cell key={i} fill={GEO_COL[i % GEO_COL.length]} />)}
+                      </Bar>
+                      <Bar dataKey="spend" name="Spend" radius={[4, 4, 0, 0]} fill="rgba(245,158,11,.7)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                <ChartCard title="Regional MER" subtitle="Revenue ÷ spend">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 11 }} width={44} stroke="var(--border2)" />
+                      <Tooltip formatter={(v) => [v.toFixed(2) + 'x', 'MER']} contentStyle={TOOLTIP_STYLE} />
+                      <Bar dataKey="mer" name="MER" radius={[4, 4, 0, 0]}>
+                        {geoAgg.map((e, i) => <Cell key={i} fill={GEO_COL[i % GEO_COL.length]} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
                 {regionNames.map(r => <PillTab key={r} label={r} active={activeRegion === r} onClick={() => setActiveRegion(r)} />)}
               </div>
@@ -262,6 +426,36 @@ export default function FloToplinePage() {
           )}
           {activeView === 'products' && (
             <>
+              <div style={CHART_GRID}>
+                <ChartCard title="Product Line Revenue" subtitle="Period totals">
+                  <ResponsiveContainer width="100%" height={Math.max(160, prodAgg.length * 40)}>
+                    <BarChart data={prodAgg} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
+                      <XAxis type="number" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} stroke="var(--border2)" />
+                      <YAxis dataKey="line" type="category" tick={{ fontSize: 11, fontWeight: 600 }} width={80} stroke="var(--border2)" />
+                      <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
+                      <Legend wrapperStyle={{ fontSize: 12 }} />
+                      <Bar dataKey="revenue" name="Revenue" radius={[0, 4, 4, 0]} maxBarSize={18}>
+                        {prodAgg.map((e, i) => <Cell key={i} fill={PROD_COL[e.line] || FLO_ACCENT} />)}
+                      </Bar>
+                      <Bar dataKey="spend" name="Spend" radius={[0, 4, 4, 0]} maxBarSize={18} fill="rgba(245,158,11,.65)" />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+                <ChartCard title="Product Line MER" subtitle="Revenue ÷ spend">
+                  <ResponsiveContainer width="100%" height={240}>
+                    <BarChart data={prodAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                      <XAxis dataKey="line" tick={{ fontSize: 11 }} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 11 }} width={44} stroke="var(--border2)" />
+                      <Tooltip formatter={(v) => [v.toFixed(2) + 'x', 'MER']} contentStyle={TOOLTIP_STYLE} />
+                      <Bar dataKey="mer" name="MER" radius={[4, 4, 0, 0]}>
+                        {prodAgg.map((e, i) => <Cell key={i} fill={PROD_COL[e.line] || FLO_ACCENT} />)}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </ChartCard>
+              </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
                 {productNames.map(p => <PillTab key={p} label={p} active={activeProduct === p} onClick={() => setActiveProduct(p)} />)}
               </div>
