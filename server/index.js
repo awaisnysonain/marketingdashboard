@@ -1358,11 +1358,11 @@ app.use('/api/sync/status', requireAppAuth, syncStatusRouter);
 app.use('/api/tw',    requireAppAuth, twRouter);
 app.use('/api/store', requireAppAuth, storeRouter);
 
-// ── Daily cron: 11:00 AM Asia/Karachi (Pakistan Standard Time) ──────────────
-// Each run:
+// ── Daily cron: 11:00 AM Asia/Karachi (Pakistan Standard Time, UTC+5) ─────
+// Each run syncs through yesterday (PKT calendar date):
 //   1. Auto-cleanup any stuck "running" entries from previous failures
-//   2. Find missing days in the last 14d and include them in the range
-//   3. Run ALL 9 ETL tasks
+//   2. Find missing days in the last 7d and include them in the range
+//   3. Run ALL 10 ETL tasks
 //   4. Email muhammad.awais@nysonian.com on errors / stuck runs / missing data
 //   5. Full timeout protection (60-min hard cap on the whole run)
 //
@@ -1370,7 +1370,7 @@ app.use('/api/store', requireAppAuth, storeRouter);
 //   - Per-task try/catch — one failure doesn't block the rest
 //   - Hard 60-min wall-clock timeout — won't sit "running" forever
 //   - Stale "running" entries (>3h old) get auto-marked errored on cron startup
-//   - Post-run validation: if today's date isn't present in tw_summary_daily for both
+//   - Post-run validation: if yesterday's date isn't present in tw_summary_daily for both
 //     brands, fire a critical alert
 const ALL_DAILY_TASKS = [
   'klaviyo',
@@ -1396,6 +1396,7 @@ try {
   const cron = require('node-cron');
   const { pgQuery, pgRun } = require('./db/postgres');
   const { sendAlert, ensureSchema: ensureAlertsSchema } = require('./etl/alerts');
+  const { CRON_TZ, pakistanTodayStr, pakistanYesterdayStr, addDaysStr } = require('./utils/pakistanTime');
 
   // Initialize alerts table on boot
   ensureAlertsSchema().catch(e => console.warn('[Alerts] schema init failed:', e.message));
@@ -1454,14 +1455,13 @@ try {
       // Step 0: clean up any stuck runs first
       await cleanupStuckRuns();
 
-      const today = new Date();
-      const yStr = new Date(today.getTime() - 86400000).toISOString().slice(0, 10);
+      const yStr = pakistanYesterdayStr();
 
-      // Step 1: find missing days in the last 14 (we'll catch holes)
+      // Step 1: find missing days in the last 7 (we'll catch holes)
       let missing = [];
       try {
         const lookback = 7;
-        const startBack = new Date(today.getTime() - lookback * 86400000).toISOString().slice(0, 10);
+        const startBack = addDaysStr(pakistanTodayStr(), -lookback);
         const r = await pgQuery(`
           WITH days AS (SELECT generate_series($1::date, $2::date, '1 day')::date AS d)
           SELECT d FROM days
@@ -1544,12 +1544,12 @@ try {
     }
   }
 
-  // Schedule: 11:00 AM Asia/Karachi every day (Pakistan Standard Time)
+  // Schedule: 11:00 AM Pakistan time every day — syncs through yesterday (PKT)
   cron.schedule('0 11 * * *', () => {
     runDailySync().catch(e => console.error('[Cron unhandled]', e));
-  }, { timezone: 'Asia/Karachi' });
+  }, { timezone: CRON_TZ });
 
-  console.log('[Cron] Scheduled: 11:00 AM Asia/Karachi (PKT) daily — 9 tasks with 14-day backfill window');
+  console.log(`[Cron] Scheduled: 11:00 AM ${CRON_TZ} (PKT, UTC+5) daily — syncs yesterday, 10 tasks, 7-day backfill`);
 
   // ── Manual sync trigger — admin only, single-flight, rate-limited ────────
   // Tracks per-user manual triggers in this Map; purges every hour
@@ -1619,7 +1619,8 @@ try {
       running: cronRunning,
       last_run_at: lastCronRunAt,
       last_status: lastCronStatus,
-      next_scheduled: 'Daily at 11:00 AM Asia/Karachi (Pakistan time)',
+      next_scheduled: 'Daily at 11:00 AM Asia/Karachi (PKT, UTC+5) — syncs yesterday',
+      sync_end_date: pakistanYesterdayStr(),
     });
   });
 } catch(e) {

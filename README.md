@@ -46,7 +46,7 @@ Other one-off backfill scripts live in `server/scripts/` — see comments at the
 
 ## Daily sync
 
-The server runs an in-process cron at **11:00 AM Asia/Karachi** every day. Tasks:
+The server runs an in-process cron at **11:00 AM Asia/Karachi (PKT, UTC+5)** every day and syncs **yesterday's** data. Tasks:
 
 `klaviyo`, `tw_refresh`, `tw_order_revenue`, `meta_ads`, `tw_ads`, `tw_air_attribution`, `shopify_orders`, `appstle_contracts`, `nobl_air_aggregate`, `product_daily`
 

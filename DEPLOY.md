@@ -94,7 +94,8 @@ sudo certbot --nginx -d dashboard.nysonian.com
 
 The app schedules sync internally via `node-cron` — no system crontab needed.
 
-- **When:** 11:00 AM Asia/Karachi every day
+- **When:** 11:00 AM Asia/Karachi (Pakistan Standard Time, UTC+5) every day
+- **Data window:** syncs through **yesterday** (PKT calendar date)
 - **Timeout:** 90-minute hard cap on the full run
 - **Backfill window:** fills missing days in the last 7 days automatically
 - **Stuck runs:** entries in `running` for >3 hours are auto-marked errored on the next run
