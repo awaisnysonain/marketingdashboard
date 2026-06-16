@@ -3,6 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell
 } from 'recharts';
+import { fmt$, fmtNum, fmtRatio, fmtPct } from '../utils/api';
 
 const CHART_COLORS = ['#6366f1','#22c55e','#f59e0b','#ef4444','#3b82f6','#ec4899','#14b8a6','#f97316'];
 
@@ -10,10 +11,11 @@ function fmtVal(v) {
   if (v == null || v === '') return '—';
   const n = parseFloat(v);
   if (isNaN(n)) return String(v);
-  if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(2) + 'M';
-  if (Math.abs(n) >= 1000) return n % 1 === 0 ? n.toLocaleString() : '$' + (n/1000).toFixed(1) + 'K';
-  if (Math.abs(n) < 10 && String(v).includes('.')) return n.toFixed(2) + (String(v).includes('%') ? '%' : 'x');
-  return n.toFixed(n % 1 ? 1 : 0);
+  if (String(v).includes('%')) return fmtPct(n);
+  if (String(v).includes('x')) return fmtRatio(n);
+  if (Math.abs(n) >= 1 || String(v).includes('$')) return fmt$(n);
+  if (Math.abs(n) < 10 && String(v).includes('.')) return fmtRatio(n);
+  return fmtNum(n);
 }
 
 function QueryTable({ columns, rows }) {

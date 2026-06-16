@@ -8,7 +8,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { executeDashboard, fmt$ } from '../utils/api';
+import { executeDashboard, fmt$, fmtNum, fmtPct, fmtRatio } from '../utils/api';
 import { Icons } from '../components/Icons';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 
@@ -46,24 +46,21 @@ function fmtV(v, fmt) {
   if (fmt === 'currency') {
     const n = parseNum(v);
     if (n === null) return s;
-    return Math.abs(n) >= 1e6 ? `$${(n/1e6).toFixed(2)}M`
-      : Math.abs(n) >= 1e3 ? `$${(n/1e3).toFixed(1)}K`
-      : fmt$(n);
+    return fmt$(n);
   }
   if (fmt === 'percent') {
     if (s.endsWith('%')) return s;
     const n = parseNum(v);
     if (n === null) return s;
-    // If stored as decimal (e.g. 0.035 = 3.5%), convert; if already in percent scale (e.g. 2.74), show as-is
-    return Math.abs(n) <= 2 ? `${(n*100).toFixed(1)}%` : `${n.toFixed(2)}x`;
+    return Math.abs(n) <= 2 ? fmtPct(n) : fmtRatio(n);
   }
   if (fmt === 'number') {
     const n = parseNum(v);
-    return n !== null ? n.toLocaleString(undefined, { maximumFractionDigits: 2 }) : s;
+    return n !== null ? fmtNum(n) : s;
   }
   if (fmt === 'date') return fmtDate(v);
   const n = parseNum(v);
-  if (n !== null) return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
+  if (n !== null) return fmtNum(n);
   return s;
 }
 
@@ -229,10 +226,8 @@ function SmartChart({ headers, rows, detected, title, maxSeries = 3 }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
             <XAxis dataKey={dateCol} tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)"
               tickFormatter={v => fmtDate(v)}/>
-            <YAxis tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)" width={62}
-              tickFormatter={v => fmt1==='currency'
-                ? (Math.abs(v)>=1e6?`$${(v/1e6).toFixed(1)}M`:Math.abs(v)>=1e3?`$${(v/1e3).toFixed(0)}K`:String(v))
-                : (Math.abs(v)>=1e6?`${(v/1e6).toFixed(1)}M`:Math.abs(v)>=1e3?`${(v/1e3).toFixed(0)}K`:String(v))}/>
+            <YAxis tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)" width={88}
+              tickFormatter={v => fmt1 === 'currency' ? fmt$(v) : fmtNum(v)}/>
             <Tooltip contentStyle={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,fontSize:12}}
               formatter={(v,n) => [fmtV(v, formatMap[n]||'number'), n]}
               labelFormatter={l => fmtDate(l)}/>
@@ -267,9 +262,7 @@ function SmartChart({ headers, rows, detected, title, maxSeries = 3 }) {
           <BarChart data={catData} layout="vertical" margin={{top:4,right:12,left:90,bottom:4}}>
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
             <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)"
-              tickFormatter={v => fmt1==='currency'
-                ? (Math.abs(v)>=1e6?`$${(v/1e6).toFixed(1)}M`:Math.abs(v)>=1e3?`$${(v/1e3).toFixed(0)}K`:String(v))
-                : String(v)}/>
+              tickFormatter={v => fmt1 === 'currency' ? fmt$(v) : fmtNum(v)}/>
             <YAxis type="category" dataKey={catCol} width={85} tick={{fontSize:10,fill:'var(--text2)'}} stroke="var(--border2)"
               tickFormatter={v=>String(v).slice(0,14)}/>
             <Tooltip contentStyle={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,fontSize:12}}
@@ -512,10 +505,10 @@ function ChartViz({ section, data, type }) {
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
         <XAxis dataKey={xField} tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)"
           tickFormatter={v=>/^\d{4}-\d{2}/.test(String(v))?fmtDate2(v):v}/>
-        <YAxis tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)" width={56}
-          tickFormatter={v=>Math.abs(v)>=1e6?`$${(v/1e6).toFixed(1)}M`:Math.abs(v)>=1e3?`$${(v/1e3).toFixed(0)}K`:String(v)}/>
+        <YAxis tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)" width={88}
+          tickFormatter={v => fmt$(v)}/>
         <Tooltip contentStyle={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,fontSize:12}}
-          formatter={(v,n)=>[typeof v==='number'?v.toLocaleString():v,n]}
+          formatter={(v,n)=>[typeof v==='number'?fmtNum(v):v,n]}
           labelFormatter={l=>/^\d{4}-\d{2}/.test(String(l))?fmtDate2(l):l}/>
         <Legend wrapperStyle={{fontSize:11}}/>
         {series.map((s,i)=>{

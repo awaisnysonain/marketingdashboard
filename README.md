@@ -1,161 +1,87 @@
 # NOBL Air Executive Dashboard
 
-A full-stack web application that reads your Google Sheet (populated by the NOBL Air Apps Script) and renders a live executive dashboard with charts, tables, row highlights, and annotations.
+Full-stack analytics dashboard for **NOBL Air** and **Pilates FLO**. Data is synced from Triple Whale, Shopify, Appstle, Klaviyo, and Meta into PostgreSQL, then served to a React frontend.
 
 ## Architecture
 
 ```
-Apps Script (runs daily 7am PT)
-    ↓ writes to
-Google Sheets (20+ tabs)
-    ↓ read via OAuth2
-Express Server (Node.js on your VPS)
-    ↓ serves
-React Frontend (charts, tables, annotations)
-    ↓ saves to
-SQLite (highlights, annotations, sessions)
+Triple Whale / Shopify / Appstle / Klaviyo / Meta APIs
+    ↓  daily cron + manual sync (server/etl/syncEngine.js)
+PostgreSQL (tw_*, shopify_*, nobl_air_*, flo_appstle_*, etc.)
+    ↓  REST API (server/routes/analytics.js)
+React frontend (client/)
+    ↓  sessions, comments, AI dashboards
+PostgreSQL (users, session, ai_dashboards, …)
 ```
 
----
+Auth is handled via the Nysonik ERP token flow in production. Local dev skips auth when `NODE_ENV !== production`.
 
-## 1. Google Cloud Setup
-
-1. Go to https://console.cloud.google.com
-2. Create a new project (e.g. "nobl-dashboard")
-3. Enable the **Google Sheets API**:
-   - APIs & Services → Enable APIs → search "Google Sheets API" → Enable
-4. Create OAuth2 credentials:
-   - APIs & Services → Credentials → Create Credentials → OAuth 2.0 Client ID
-   - Application type: **Web application**
-   - Name: NOBL Dashboard
-   - Authorised redirect URIs: `http://YOUR_VPS_IP:3001/auth/callback`
-     - Also add `http://localhost:3001/auth/callback` for local dev
-5. Copy your **Client ID** and **Client Secret**
-
----
-
-## 2. Server Setup (VPS)
+## Quick start (local)
 
 ```bash
-# Install Node 18+
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Clone / upload project
-scp -r nobl-dashboard/ user@YOUR_VPS:/home/user/
-
-# On the VPS:
-cd nobl-dashboard
-
-# Copy and fill in env
-cp .env.example .env
-nano .env
+cp .env.example .env          # fill in DB + API keys
+npm run setup                 # install deps + build client
+npm run dev                   # nodemon on :3001
 ```
 
-Fill in `.env`:
-```
-GOOGLE_CLIENT_ID=<from Google Cloud>
-GOOGLE_CLIENT_SECRET=<from Google Cloud>
-GOOGLE_REDIRECT_URI=http://YOUR_VPS_IP:3001/auth/callback
-SPREADSHEET_ID=1IuLZJg2c5HP8cmh8R5JjVSOILr_dnMqka0rkqk4ilw0
-PORT=3001
-SESSION_SECRET=<any 64 random chars>
-CACHE_TTL_SECONDS=300
-REFRESH_CRON=0 8 * * *
-```
+In another terminal:
 
 ```bash
-# Install and build everything
-npm run setup
-
-# Start the server
-npm start
+cd client && npm start        # React dev server on :3000 (proxies API to :3001)
 ```
 
----
+Production build: `npm start` serves the built React app from `client/build/`.
 
-## 3. First-time Authentication
+## npm scripts
 
-1. Open `http://YOUR_VPS_IP:3001` in your browser
-2. Click **"Sign in with Google"**
-3. Authorize access to Google Sheets (read-only)
-4. You'll be redirected back — data loads automatically
+| Script | Description |
+|--------|-------------|
+| `npm start` | Run production server |
+| `npm run dev` | Run server with nodemon |
+| `npm run build` | Build React client |
+| `npm run setup` | Install all deps + build client |
+| `npm run backfill:tw` | Manual Triple Whale SQL backfill (`server/scripts/backfillTwSql.js`) |
 
-Tokens are saved in SQLite and survive restarts. You only need to auth once.
+Other one-off backfill scripts live in `server/scripts/` — see comments at the top of each file.
 
----
+## Daily sync
 
-## 4. Run as a Service (PM2)
+The server runs an in-process cron at **11:00 AM Asia/Karachi** every day. Tasks:
 
-```bash
-# Install PM2
-sudo npm install -g pm2
+`klaviyo`, `tw_refresh`, `tw_order_revenue`, `meta_ads`, `tw_ads`, `tw_air_attribution`, `shopify_orders`, `appstle_contracts`, `nobl_air_aggregate`, `product_daily`
 
-# Start the app
-pm2 start server/index.js --name nobl-dashboard
+Admins can also trigger sync from the UI (**Sync now**) or `POST /api/sync/trigger-daily`.
 
-# Auto-restart on reboot
-pm2 startup
-pm2 save
+Details: [DEPLOY.md](./DEPLOY.md)
+
+## Documentation
+
+| File | Contents |
+|------|----------|
+| [DEPLOY.md](./DEPLOY.md) | Production deploy, PM2, nginx, alerts, health checks |
+| [docs/SUBSCRIPTIONS_README.md](./docs/SUBSCRIPTIONS_README.md) | NOBL/FLO subscription ETL and API |
+
+## Project layout
+
+```
+client/          React frontend
+server/
+  index.js       Express app, cron, auth
+  routes/        API routes (analytics, sync, AI, comments)
+  etl/           Sync jobs and aggregations
+  scripts/       Manual backfill utilities
+  db/            Postgres connection + schema helpers
+data/            Runtime logs (gitignored); legacy nobl.db if present
 ```
 
----
+## Environment
 
-## 5. Auto-refresh Schedule
+Copy `.env.example` → `.env`. Required for a working deploy:
 
-The server automatically refreshes data from Google Sheets on a cron schedule.
+- **Database:** `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`
+- **Triple Whale:** `NOBL_TW_*`, `FLO_TW_*` (and EU keys for NOBL)
+- **Shopify:** `NOBL_SHOPIFY_*`, `FLO_SHOPIFY_*`
+- **Appstle:** `APPSTLE_API_KEY`, `FLO_APPSTLE_API_KEY`
+- **Session:** `SESSION_SECRET`
 
-Default: **every day at 8:00 AM** (server timezone), which is after the Apps Script runs at 7:00 AM PT.
-
-Change via `.env`:
-```
-REFRESH_CRON=0 8 * * *    # 8am every day
-REFRESH_CRON=0 */2 * * *  # every 2 hours
-REFRESH_CRON=*/30 * * * * # every 30 minutes
-```
-
-You can also manually refresh any time via the **Refresh** button in the top bar.
-
----
-
-## 6. Dashboard Features
-
-| Feature | How to use |
-|---|---|
-| Highlight a row | Click the small dot on the left of any row → cycles yellow → green → red → blue → off |
-| Annotate a row | Right-click any row → modal opens → write note + choose color → Save |
-| View annotation | The colored dot on the right of a row shows there's a note. Hover to preview. |
-| Refresh data | Click **Refresh** button in top bar |
-| Change date range | Use 7d / 30d / 90d / All buttons on Daily Trend page |
-| Search tables | Type in the search box above any table |
-| FB data | Expand the collapsible sections on the Channels page |
-
----
-
-## 7. Pages
-
-- **Summary** — KPI cards, 30-day order/revenue trends, TTP funnel by tier
-- **Daily Trend** — Dual-axis chart + full Daily Input table with date range filter
-- **Subscriptions** — TTP by tier (chart + table), cohort analysis, weekly trends
-- **Channels** — Channel cards, attach rate chart, FB campaigns/adsets
-- **Forecast** — Monthly revenue forecast table + charts (green=actual, yellow=current month)
-- **Raw Tables** — Browse any sheet tab with search, highlight, and annotate
-
-Subscription ETL and frontend logic for both NOBL and FLO is documented in `docs/SUBSCRIPTIONS_README.md`.
-
----
-
-## 8. Troubleshooting
-
-**"Not authenticated" error after restart**
-- Tokens are saved in `data/nobl.db`. If deleted, re-authenticate at `/auth/login`.
-
-**Sheet tab not found**
-- Check the tab name matches exactly (case-sensitive). Edit `TABS` array in `server/index.js`.
-
-**Stale data**
-- Click Refresh in the top bar, or wait for the cron job.
-- Reduce `CACHE_TTL_SECONDS` in `.env` for more frequent auto-refresh.
-
-**Port already in use**
-- Change `PORT` in `.env` and update `GOOGLE_REDIRECT_URI` to match.
+See `.env.example` for the full list including optional Meta, Klaviyo, OpenAI, and alert settings.

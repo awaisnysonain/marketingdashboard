@@ -60,72 +60,61 @@ export const addAnnotation = body => fetch(`${B}/api/annotations`,{method:'POST'
 export const updateAnnotation = (id,body) => fetch(`${B}/api/annotations/${id}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 export const deleteAnnotation = id => fetch(`${B}/api/annotations/${id}`,{method:'DELETE'}).then(r=>r.json());
 
+export const getComments = (pageKey) => fetch(`${B}/api/comments?page_key=${encodeURIComponent(pageKey)}`, { credentials: 'include' }).then(async (r) => {
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+  return data;
+});
+export const createComment = (body) => fetch(`${B}/api/comments`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) }).then(async (r) => {
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+  return data;
+});
+export const updateComment = (id, body) => fetch(`${B}/api/comments/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include', body: JSON.stringify(body) }).then(async (r) => {
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+  return data;
+});
+export const deleteComment = (id) => fetch(`${B}/api/comments/${id}`, { method: 'DELETE', credentials: 'include' }).then(async (r) => {
+  const data = await r.json();
+  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+  return data;
+});
+
 export const setHighlight = body => fetch(`${B}/api/highlights`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 export const removeHighlight = body => fetch(`${B}/api/highlights`,{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}).then(r=>r.json());
 
-const COMPACT_UNITS = [
-  { value: 1e12, suffix: 'T' },
-  { value: 1e9, suffix: 'B' },
-  { value: 1e6, suffix: 'M' },
-  { value: 1e3, suffix: 'K' },
-];
+const INT_OPTS = { minimumFractionDigits: 0, maximumFractionDigits: 0 };
 
-function stripTrailingZeros(s) {
-  return String(s).replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
-}
-
-function formatCompactValue(value, { prefix = '', minForCompact = 1000, compactDigits = 1, smallDigits = 0 } = {}) {
-  const v = Number(value);
-  if (!Number.isFinite(v)) return '—';
+export function fmt$(n) {
+  const v = parseFloat(n);
+  if (isNaN(v)) return '—';
   const sign = v < 0 ? '-' : '';
-  const abs = Math.abs(v);
-  const unit = COMPACT_UNITS.find(u => abs >= u.value && abs >= minForCompact);
-  if (unit) {
-    const scaled = abs / unit.value;
-    const maxDigits = typeof compactDigits === 'function' ? compactDigits(scaled, unit.suffix) : compactDigits;
-    return `${sign}${prefix}${stripTrailingZeros(scaled.toFixed(maxDigits))}${unit.suffix}`;
-  }
-  return `${sign}${prefix}${abs.toLocaleString(undefined, {
-    minimumFractionDigits: smallDigits,
-    maximumFractionDigits: smallDigits,
-  })}`;
+  return `${sign}$${Math.round(Math.abs(v)).toLocaleString(undefined, INT_OPTS)}`;
 }
 
-export function fmt$(n){
-  const v=parseFloat(n);
-  if(isNaN(v)) return '—';
-  return formatCompactValue(v, {
-    prefix: '$',
-    compactDigits: (scaled) => scaled >= 100 ? 1 : 2,
-    smallDigits: 2,
-  });
-}
-
-// Handles both decimal fractions (0.326 → 32.6%) and already-percent values (32.6 → 32.6%)
-export function fmtPct(n){
-  const v=parseFloat(n);
-  if(isNaN(v)) return '—';
-  // Values stored as decimals (0.0–1.0 range)
+// Handles both decimal fractions (0.326 → 33%) and already-percent values (32.6 → 33%)
+export function fmtPct(n) {
+  const v = parseFloat(n);
+  if (isNaN(v)) return '—';
   const pct = Math.abs(v) <= 1.5 ? v * 100 : v;
-  return `${pct.toFixed(1)}%`;
+  return `${Math.round(pct)}%`;
 }
 
-export function fmtNum(n){
-  const v=Math.round(parseFloat(n)||0);
-  return formatCompactValue(v, { compactDigits: 1, smallDigits: 0 });
+export function fmtRatio(n) {
+  const v = parseFloat(n);
+  if (isNaN(v)) return '—';
+  return `${v.toFixed(2)}x`;
 }
 
-export function fmtFullNum(n){
-  const v=Math.round(parseFloat(n)||0);
-  return v.toLocaleString();
+export function fmtNum(n) {
+  const v = Math.round(parseFloat(n) || 0);
+  if (isNaN(v)) return '—';
+  return v.toLocaleString(undefined, INT_OPTS);
 }
 
-export function fmtFull$(n){
-  const v=parseFloat(n);
-  if(isNaN(v)) return '—';
-  const sign = v < 0 ? '-' : '';
-  return `${sign}$${Math.abs(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
+export const fmtFullNum = fmtNum;
+export const fmtFull$ = fmt$;
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -139,14 +128,23 @@ export function fmtDate(val){
 
 export function isPercent(header){
   const h=String(header).toLowerCase();
-  return h.includes('rate')||h.includes('%')||h.includes('pct')||h.includes('conv');
+  if (h.includes('%') || h.includes('pct')) return true;
+  if (/attach|ttp|nvp|activation/.test(h)) return true;
+  if (h.includes('rate') && !h.includes('operating')) return true;
+  return false;
 }
 export function isCurrency(header){
   const h=String(header).toLowerCase();
+  if (/^cac$|customer acquisition/.test(h)) return true;
   return h.includes('revenue')||h.includes('gross')||h.includes('sales')||
     h.includes('amount')||h.includes('rev')||h.startsWith('$')||h.includes('price')||
-    h.includes('spend')||h.includes('cost')||h.includes('cac')||h.includes('aov')||
-    h.includes('ltv')||h.includes('budget')||h.includes('profit')||h.includes('margin');
+    h.includes('spend')||h.includes('cost')||h.includes('aov')||
+    h.includes('ltv')||h.includes('budget')||h.includes('profit')||h.includes('margin')||
+    h.includes('refund')||h.includes('discount');
+}
+export function isRatio(header){
+  const h=String(header).toLowerCase();
+  return h.includes('roas')||h.includes('mer')||h.includes('sales per ad');
 }
 export function isDateField(header){
   const h=String(header).toLowerCase();
@@ -312,12 +310,13 @@ export function fmtCell(val,header){
   if(isDateField(h)&&DATE_RE.test(s)) return fmtDate(val);
   // Percent columns
   if(isPercent(h)) return fmtPct(val);
+  if(isRatio(h)) return fmtRatio(val);
   // Currency columns
   if(isCurrency(h)) return fmt$(val);
   const n=Number(s.trim());
   if(s.trim()!==''&&Number.isFinite(n)){
-    if(Number.isInteger(n)&&n>999) return fmtNum(n);
-    if(!Number.isInteger(n)) return n.toLocaleString(undefined,{maximumFractionDigits:2});
+    if(Number.isInteger(n)) return fmtNum(n);
+    return n.toLocaleString(undefined, INT_OPTS);
   }
   return s;
 }

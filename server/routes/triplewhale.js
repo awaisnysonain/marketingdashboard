@@ -118,7 +118,6 @@ router.get('/live', async (req, res) => {
     // ── 1. Summary (tw_summary_daily has orders; always recalculate MER) ────────
     const summaryR = await pgQuery(
       `SELECT COALESCE(order_revenue, total_revenue) AS order_revenue,
-              COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
               total_revenue, total_spend,
               total_orders, new_customer_orders, returning_customer_orders
        FROM tw_summary_daily
@@ -154,7 +153,6 @@ router.get('/live', async (req, res) => {
 
     const sum = summaryR.rows[0] || {};
     const totalRevenue = parseFloat(sum.order_revenue || sum.total_revenue || 0);
-    const grossMinusDiscounts = parseFloat(sum.gross_minus_discounts || 0);
     const totalSpend   = parseFloat(sum.total_spend   || 0);
     const totalOrders  = parseInt(sum.total_orders    || 0);
     const ncOrders     = parseInt(sum.new_customer_orders || 0);
@@ -225,7 +223,6 @@ router.get('/live', async (req, res) => {
       summary: {
         total_revenue:       totalRevenue,
         order_revenue:       totalRevenue,
-        gross_minus_discounts: grossMinusDiscounts,
         total_spend:         totalSpend,
         mer:                 merVal,
         mer_status:          classify(merVal, THRESHOLDS.mer.global),

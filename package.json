@@ -1,12 +1,13 @@
 {
   "name": "nobl-air-dashboard",
   "version": "1.0.0",
-  "description": "NOBL Air executive dashboard — reads Google Sheets, serves React frontend",
+  "description": "NOBL Air & Pilates FLO executive dashboard — PostgreSQL analytics with React frontend",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "dev": "nodemon server/index.js",
     "build": "cd client && npm run build",
+    "backfill:tw": "node server/scripts/backfillTwSql.js",
     "setup": "npm install && cd client && npm install && npm run build"
   },
   "dependencies": {

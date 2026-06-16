@@ -12,8 +12,7 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test:dateRange": "node scripts/testDateRange.js"
+    "build": "react-scripts build"
   },
   "proxy": "http://localhost:3001",
   "browserslist": {

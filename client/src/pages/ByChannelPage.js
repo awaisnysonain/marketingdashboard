@@ -77,14 +77,14 @@ export default function ByChannelPage(){
           </div>
         </Section>
 
-        <Section title={`${L.attachRate} vs avg (${avgPct.toFixed(1)}%)`}>
+        <Section title={`${L.attachRate} vs avg (${fmtPct(avgPct)})`}>
           <div style={{...CARD,padding:'16px'}}>
             <ResponsiveContainer width="100%" height={260}>
               <BarChart data={chartData} layout="vertical" barSize={18}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" horizontal={false}/>
                 <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
                 <YAxis dataKey="channel" type="category" tick={{fontSize:11,fill:'var(--text2)'}} tickLine={false} axisLine={false} width={100}/>
-                <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <ReferenceLine x={avgPct} stroke="var(--warn)" strokeDasharray="4 2" label={{value:'avg',position:'top',fontSize:10,fill:'var(--warn)'}}/>
                 <Bar dataKey="attach" name={L.attachRate} radius={[0,4,4,0]}>
                   {chartData.map((d,i)=><Cell key={i} fill={d.attach>=avgPct?'var(--success)':'var(--danger)'}/>)}

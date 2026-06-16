@@ -3,11 +3,14 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getOverview, getSyncStatus, triggerSync, fmt$ } from '../utils/api';
+import { getOverview, getSyncStatus, triggerSync, fmt$, fmtRatio } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
+import { CommentProvider } from '../components/CommentProvider';
+import { commentTargetKey } from '../utils/commentKeys';
+import { dailyCellKey, dailyCellLabel } from '../utils/sheetComments';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 import { mtdRange } from '../utils/dateRange';
 function fmtDateLabel(s) {
@@ -19,30 +22,26 @@ function fmtDateLabel(s) {
 // column definitions for SheetTable
 const OVERVIEW_HEADERS = [
   L.date,
-  'NOBL Gross − Discounts', 'NOBL Order Revenue', 'NOBL ad spend', 'NOBL sales per ad $', 'NOBL orders', 'NOBL new customers',
-  'FLO Gross − Discounts', 'FLO Order Revenue', 'FLO ad spend', 'FLO sales per ad $', 'FLO orders', 'FLO new customers',
-  'Total Gross − Discounts', 'Total Order Revenue', 'Total ad spend', L.blendedMer,
+  'NOBL Order Revenue', 'NOBL ad spend', 'NOBL sales per ad $', 'NOBL orders', 'NOBL new customers',
+  'FLO Order Revenue', 'FLO ad spend', 'FLO sales per ad $', 'FLO orders', 'FLO new customers',
+  'Total Order Revenue', 'Total ad spend', L.blendedMer,
   L.subRevenue,
 ];
 
 function toTableRow(r) {
   const blendedMer = r.total_spend > 0 ? (r.total_revenue / r.total_spend) : null;
-  const totalGmd = (r.nobl_gross_minus_discounts || 0) + (r.flo_gross_minus_discounts || 0);
   return {
     [L.date]:           r.date,
-    'NOBL Gross − Discounts': r.nobl_gross_minus_discounts,
     'NOBL Order Revenue':     r.nobl_revenue,
     'NOBL ad spend':          r.nobl_spend,
     'NOBL sales per ad $':    r.nobl_mer,
     'NOBL orders':            r.nobl_orders,
     'NOBL new customers':     r.nobl_nc_orders,
-    'FLO Gross − Discounts':  r.flo_gross_minus_discounts,
     'FLO Order Revenue':      r.flo_revenue,
     'FLO ad spend':           r.flo_spend,
     'FLO sales per ad $':     r.flo_mer,
     'FLO orders':             r.flo_orders,
     'FLO new customers':      r.flo_nc_orders,
-    'Total Gross − Discounts': totalGmd,
     'Total Order Revenue':    r.total_revenue,
     'Total ad spend':         r.total_spend,
     [L.blendedMer]:           blendedMer,
@@ -106,6 +105,7 @@ export default function OverviewPage({ showToast }) {
   const tableRows = chartRows.map(toTableRow);
 
   return (
+    <CommentProvider pageKey="overview">
     <div className="page-stack">
       <PageFilterBar start={range.start} end={range.end} onChange={setRange}>
         <div style={{ display:'flex', alignItems:'center', gap:8, marginLeft:'auto' }}>
@@ -128,18 +128,16 @@ export default function OverviewPage({ showToast }) {
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
           <div className="page-kpi-grid">
-            <KpiCard label="Gross − Discounts (NOBL)" value={fmt$(totals.nobl_gross_minus_discounts || 0)} tooltip={TIP.grossMinusDiscounts} color="nobl" />
-            <KpiCard label="Order Revenue (NOBL)" value={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.orderRevenue} color="nobl" />
-            <KpiCard label="Gross − Discounts (FLO)" value={fmt$(totals.flo_gross_minus_discounts || 0)} tooltip={TIP.grossMinusDiscounts} color="flo" />
-            <KpiCard label="Order Revenue (FLO)" value={fmt$(totals.flo_revenue || 0)} tooltip={TIP.orderRevenue} color="flo" />
-            <KpiCard label="Total sales" value={fmt$(totals.total_revenue || 0)} fullValue={fmt$(totals.total_revenue || 0)} tooltip={TIP.orderRevenue} color="blue" />
-            <KpiCard label="Total ad spend" value={fmt$(totals.total_spend || 0)} fullValue={fmt$(totals.total_spend || 0)} tooltip={TIP.spend} color="warn" />
-            <KpiCard label={L.blendedMer} value={(totals.blended_mer || 0).toFixed(2) + 'x'} tooltip={TIP.mer} color="green" />
-            <KpiCard label="NOBL sales" value={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.revenue} color="nobl" />
-            <KpiCard label="NOBL orders" value={(totals.nobl_orders || 0).toLocaleString()} tooltip={TIP.orders} color="nobl" />
-            <KpiCard label="FLO sales" value={fmt$(totals.flo_revenue || 0)} tooltip={TIP.revenue} color="flo" />
-            <KpiCard label="FLO orders" value={(totals.flo_orders || 0).toLocaleString()} tooltip={TIP.orders} color="flo" />
-            <KpiCard label="NOBL subscription sales" value={fmt$(totals.nobl_sub_revenue || 0)} tooltip={TIP.subRevenue} color="purple" />
+            <KpiCard label="Order Revenue (NOBL)" value={fmt$(totals.nobl_revenue || 0)} fullValue={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_revenue'), targetLabel: 'NOBL Order Revenue' }} />
+            <KpiCard label="Order Revenue (FLO)" value={fmt$(totals.flo_revenue || 0)} fullValue={fmt$(totals.flo_revenue || 0)} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('flo_revenue'), targetLabel: 'FLO Order Revenue' }} />
+            <KpiCard label="Total sales" value={fmt$(totals.total_revenue || 0)} fullValue={fmt$(totals.total_revenue || 0)} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_revenue'), targetLabel: 'Total Sales' }} />
+            <KpiCard label="Total ad spend" value={fmt$(totals.total_spend || 0)} fullValue={fmt$(totals.total_spend || 0)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
+            <KpiCard label={L.blendedMer} value={fmtRatio(totals.blended_mer || 0)} copyValue={(totals.blended_mer || 0).toFixed(4)} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('blended_mer'), targetLabel: L.blendedMer }} />
+            <KpiCard label="NOBL sales" value={fmt$(totals.nobl_revenue || 0)} fullValue={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_sales'), targetLabel: 'NOBL Sales' }} />
+            <KpiCard label="NOBL orders" value={(totals.nobl_orders || 0).toLocaleString()} fullValue={String(totals.nobl_orders || 0)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_orders'), targetLabel: 'NOBL Orders' }} />
+            <KpiCard label="FLO sales" value={fmt$(totals.flo_revenue || 0)} fullValue={fmt$(totals.flo_revenue || 0)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('flo_sales'), targetLabel: 'FLO Sales' }} />
+            <KpiCard label="FLO orders" value={(totals.flo_orders || 0).toLocaleString()} fullValue={String(totals.flo_orders || 0)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('flo_orders'), targetLabel: 'FLO Orders' }} />
+            <KpiCard label="NOBL subscription sales" value={fmt$(totals.nobl_sub_revenue || 0)} fullValue={fmt$(totals.nobl_sub_revenue || 0)} tooltip={TIP.subRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_sub_revenue'), targetLabel: 'NOBL Subscription Sales' }} />
           </div>
 
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
@@ -203,11 +201,14 @@ export default function OverviewPage({ showToast }) {
               defaultSortDir="desc"
               searchable={true}
               stickyFirstCol={false}
+              getCellCommentKey={(row, h) => dailyCellKey('daily', row, h)}
+              getCellCommentLabel={(row, h) => dailyCellLabel(h, row)}
             />
           </div>
         </>
       )}
     </div>
+    </CommentProvider>
   );
 }
 

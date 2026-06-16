@@ -49,7 +49,7 @@ export default function DailyTrendPage(){
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
               <XAxis dataKey="date" tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={interval}/>
               <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
-              <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+              <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
               <Area type="monotone" dataKey="attach" name={L.attachRate} stroke="var(--accent)" fill="url(#gAttach)" strokeWidth={2} dot={false}/>
             </AreaChart>
           </ResponsiveContainer>
@@ -69,7 +69,7 @@ export default function DailyTrendPage(){
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="date" tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={interval}/>
-                <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}k`:`$${v}`}/>
+                <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={fmt$}/>
                 <Tooltip formatter={v=>[fmt$(v),L.combinedNetRevenue]} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Area type="monotone" dataKey="combinedRev" name={L.combinedNetRevenue} stroke="var(--success)" fill="url(#gRev)" strokeWidth={2} dot={false}/>
               </AreaChart>
@@ -83,7 +83,7 @@ export default function DailyTrendPage(){
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="date" tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={interval}/>
-                <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}k`:`$${v}`}/>
+                <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={fmt$}/>
                 <Tooltip formatter={v=>[fmt$(v)]} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Legend wrapperStyle={{fontSize:11}}/>
                 <Line type="monotone" dataKey="tagRev"    name="Tag net sales" stroke="var(--teal)" strokeWidth={2} dot={false}/>

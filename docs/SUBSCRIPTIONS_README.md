@@ -386,25 +386,11 @@ client/src/pages/NoblAirPerformancePage.js  NOBL Air dashboard
 
 ## Production Notes
 
-Production app:
+See [DEPLOY.md](../DEPLOY.md) for full production setup.
 
-```text
-marketingdashboard
-```
+PM2 process name: `nobl` (from `ecosystem.config.js`).
 
-Production path:
-
-```text
-/var/www/html/marketingdashboard
-```
-
-PM2 process:
-
-```text
-marketingdashboard
-```
-
-The production `.env` must contain both Appstle keys:
+Required Appstle keys in production `.env`:
 
 ```text
 APPSTLE_API_KEY

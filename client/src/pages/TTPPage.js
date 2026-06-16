@@ -59,7 +59,7 @@ export default function TTPPage(){
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="tier" tick={{fontSize:12,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
-                <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Bar dataKey="ttp" name={L.ttpRate} radius={[4,4,0,0]}>
                   {chartData.map((_,i)=><Cell key={i} fill={COLORS[i%COLORS.length]}/>)}
                 </Bar>

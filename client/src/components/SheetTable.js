@@ -13,41 +13,25 @@
  *  - Sticky header, row numbers, zebra rows, full date/number formatting
  */
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { fmt$, fmtCell } from '../utils/api';
+import { fmtCell } from '../utils/api';
 import { COLUMN_TIP } from '../copy/plainLanguage';
 import TableFilterBar from './TableFilterBar';
+import CommentAnchor from './CommentAnchor';
+import CommentHoverTooltip from './CommentHoverTooltip';
+import SheetSelectionBar from './SheetSelectionBar';
+import { useComments } from './CommentProvider';
 import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
 import { filterTableRows } from '../utils/tableFilterSort';
+import useSheetCellSelection, { sheetCellStyle } from '../hooks/useSheetCellSelection';
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 function fmtVal(v, header) {
   if (v == null || v === '') return '—';
-  if (typeof fmtCell === 'function') return fmtCell(v, header);
-  const raw = String(v).trim();
-  const n = typeof v === 'number' ? v : Number(raw);
-  const h = String(header).toLowerCase();
-  if (h === 'brand' || h === 'campaign' || h === 'ad set' || h === 'ad' || /(^|\s)id($|\s)/.test(h)) return String(v);
-  if ((typeof v === 'number' || raw !== '') && Number.isFinite(n)) {
-    if (h.includes('revenue') || h.includes('spend') || h.includes('rev') || h.includes('cac') || h.includes('sub'))
-      return '$' + n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-    if (h.includes('roas') || h.includes('mer')) return n.toFixed(2) + 'x';
-    if (h.includes('rate') || h.includes('pct') || h.includes('%')) return n.toFixed(1) + '%';
-    return n.toLocaleString(undefined, { maximumFractionDigits: 2 });
-  }
-  return String(v);
+  return fmtCell(v, header);
 }
 
 function isNumeric(v) {
   return v != null && v !== '' && !isNaN(parseFloat(v));
-}
-
-function cellKey(r, c) { return `${r}:${c}`; }
-
-function expandRect(a, b) {
-  return {
-    r0: Math.min(a.r, b.r), r1: Math.max(a.r, b.r),
-    c0: Math.min(a.c, b.c), c1: Math.max(a.c, b.c),
-  };
 }
 
 function defaultColWidth(header) {
@@ -79,6 +63,9 @@ export default function SheetTable({
   onRowClick = null,       // (row) => void — optional row click handler
   stickyFirstCol = false,  // freeze first column
   compact = false,
+  getCellCommentKey = null,   // (row, header, ri, ci) => string | null
+  getCellCommentLabel = null, // (row, header) => string
+  commentsEnabled = null,     // default: true when getCellCommentKey + CommentProvider
 }) {
   // ── search & sort
   const [search, setSearch] = useState('');
@@ -89,17 +76,13 @@ export default function SheetTable({
   const sortBy = sortControlled ? controlledSortBy : internalSortBy;
   const sortDir = sortControlled ? (controlledSortDir || 'desc') : internalSortDir;
 
-  // ── cell selection state
-  const [sel, setSel] = useState(new Set());        // Set of "r:c" keys
-  const [anchor, setAnchor] = useState(null);       // { r, c }
-  const [dragging, setDragging] = useState(false);
   const [colWidths, setColWidths] = useState({});
   const [hoverCell, setHoverCell] = useState(null);
-  const dragStart = useRef(null);
+  const [commentHover, setCommentHover] = useState(null);
   const resizeRef = useRef(null);
-
-  // ref to table div for copy-to-clipboard
   const tableRef = useRef(null);
+  const comments = useComments();
+  const commentsOn = commentsEnabled ?? (!!getCellCommentKey && !!comments);
 
   useEffect(() => {
     setColWidths(prev => {
@@ -154,85 +137,36 @@ export default function SheetTable({
     else { setInternalSortBy(h); setInternalSortDir('asc'); }
   }
 
-  // ── selection helpers
-  function rectCells(r0, r1, c0, c1) {
-    const keys = new Set();
-    for (let r = r0; r <= r1; r++)
-      for (let c = c0; c <= c1; c++)
-        keys.add(cellKey(r, c));
-    return keys;
-  }
+  const getCopyValue = useCallback((ri, ci) => {
+    const row = sorted[ri];
+    return row ? (row[headers[ci]] ?? '') : '';
+  }, [sorted, headers]);
 
-  function setCellSelection(ri, ci, e) {
-    const cell = { r: ri, c: ci };
+  const selection = useSheetCellSelection({
+    rowCount: sorted.length,
+    colCount: headers.length,
+    getCopyValue,
+  });
 
-    if (e.shiftKey && anchor) {
-      // extend range from anchor
-      const rect = expandRect(anchor, cell);
-      setSel(rectCells(rect.r0, rect.r1, rect.c0, rect.c1));
-    } else if (e.ctrlKey || e.metaKey) {
-      // toggle single cell
-      const key = cellKey(ri, ci);
-      setSel(prev => {
-        const next = new Set(prev);
-        next.has(key) ? next.delete(key) : next.add(key);
-        return next;
-      });
-      setAnchor(cell);
-    } else {
-      // single cell
-      setSel(new Set([cellKey(ri, ci)]));
-      setAnchor(cell);
+  const commentTargets = React.useMemo(() => {
+    if (!commentsOn) return [];
+    const targets = [];
+    for (const k of selection.sel) {
+      const [ri, ci] = k.split(':').map(Number);
+      const row = sorted[ri];
+      const header = headers[ci];
+      if (!row || !header) continue;
+      const key = getCellCommentKey?.(row, header, ri, ci);
+      if (!key) continue;
+      const label = getCellCommentLabel?.(row, header) || `${header} · ${row._date || row.Date || row.date || ri + 1}`;
+      targets.push({ key, label });
     }
-  }
-
-  function selectRow(ri, e) {
-    e.stopPropagation();
-    if (e.shiftKey && anchor) {
-      const r0 = Math.min(anchor.r, ri), r1 = Math.max(anchor.r, ri);
-      setSel(rectCells(r0, r1, 0, headers.length - 1));
-    } else if (e.ctrlKey || e.metaKey) {
-      const rowKeys = rectCells(ri, ri, 0, headers.length - 1);
-      setSel(prev => {
-        const next = new Set(prev);
-        rowKeys.forEach(k => next.add(k));
-        return next;
-      });
-      setAnchor({ r: ri, c: 0 });
-    } else {
-      setSel(rectCells(ri, ri, 0, headers.length - 1));
-      setAnchor({ r: ri, c: 0 });
-    }
-  }
+    return targets;
+  }, [selection.sel, sorted, headers, getCellCommentKey, getCellCommentLabel, commentsOn]);
 
   function selectCol(ci, e) {
-    e.stopPropagation();
-    handleSort(headers[ci]);
-    if (e.shiftKey && anchor) {
-      const c0 = Math.min(anchor.c, ci), c1 = Math.max(anchor.c, ci);
-      setSel(rectCells(0, sorted.length - 1, c0, c1));
-    } else {
-      setSel(rectCells(0, sorted.length - 1, ci, ci));
-      setAnchor({ r: 0, c: ci });
-    }
+    selection.selectCol(ci, e, () => handleSort(headers[ci]));
   }
-
-  // ── drag selection
-  function handleCellMouseDown(ri, ci, e) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    setDragging(true);
-    dragStart.current = { r: ri, c: ci };
-    setCellSelection(ri, ci, e);
-  }
-
-  function handleCellMouseEnter(ri, ci) {
-    if (!dragging || !dragStart.current) return;
-    const rect = expandRect(dragStart.current, { r: ri, c: ci });
-    setSel(rectCells(rect.r0, rect.r1, rect.c0, rect.c1));
-  }
-
-  function handleMouseUp() { setDragging(false); }
 
   function positionHover(e) {
     const maxWidth = 520;
@@ -242,7 +176,7 @@ export default function SheetTable({
   }
 
   function showCellHover(e, row, header, rowIndex) {
-    if (dragging || resizeRef.current) return;
+    if (selection.dragging || resizeRef.current) return;
     const raw = row?.[header];
     setHoverCell({
       ...positionHover(e),
@@ -254,11 +188,13 @@ export default function SheetTable({
   }
 
   function moveCellHover(e) {
-    if (!hoverCell || dragging || resizeRef.current) return;
+    if (!hoverCell || selection.dragging || resizeRef.current) return;
     setHoverCell(prev => prev ? { ...prev, ...positionHover(e) } : prev);
   }
 
   function hideCellHover() { setHoverCell(null); }
+
+  function hideCommentHover() { setCommentHover(null); }
 
   function startColumnResize(e, header) {
     e.preventDefault();
@@ -270,40 +206,6 @@ export default function SheetTable({
     };
   }
 
-  // ── Ctrl+C copy
-  useEffect(() => {
-    function onKeyDown(e) {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'c' && sel.size > 0) {
-        // build TSV from selected cells
-        const selRows = new Set([...sel].map(k => parseInt(k.split(':')[0])));
-        const selCols = new Set([...sel].map(k => parseInt(k.split(':')[1])));
-        const sortedR = [...selRows].sort((a,b) => a - b);
-        const sortedC = [...selCols].sort((a,b) => a - b);
-        const tsv = sortedR.map(ri =>
-          sortedC.map(ci => {
-            if (!sel.has(cellKey(ri, ci))) return '';
-            const row = sorted[ri];
-            return row ? (row[headers[ci]] ?? '') : '';
-          }).join('\t')
-        ).join('\n');
-        navigator.clipboard.writeText(tsv).catch(() => {});
-      }
-      if (e.key === 'Escape') setSel(new Set());
-    }
-    document.addEventListener('keydown', onKeyDown);
-    return () => document.removeEventListener('keydown', onKeyDown);
-  }, [sel, sorted, headers]);
-
-  // ── selection stats
-  const selNums = [...sel].map(k => {
-    const [ri, ci] = k.split(':').map(Number);
-    const row = sorted[ri];
-    return row ? parseFloat(row[headers[ci]]) : NaN;
-  }).filter(n => !isNaN(n));
-
-  const selSum  = selNums.length ? selNums.reduce((a,b)=>a+b,0) : null;
-  const selAvg  = selNums.length ? selSum / selNums.length : null;
-
   // ── detect numeric columns for alignment
   function isNumCol(h) {
     const sample = sorted.slice(0,8).map(r=>r[h]).filter(v=>v!=null&&v!=='');
@@ -314,8 +216,8 @@ export default function SheetTable({
 
   return (
       <div
-        onMouseUp={handleMouseUp}
-        onMouseLeave={() => { handleMouseUp(); hideCellHover(); }}
+        onMouseUp={selection.handleMouseUp}
+        onMouseLeave={() => { selection.handleMouseUp(); hideCellHover(); hideCommentHover(); }}
         style={{ userSelect: 'none', display: 'flex', flexDirection: 'column', gap: 6 }}
       >
       {/* ── toolbar ── */}
@@ -337,32 +239,22 @@ export default function SheetTable({
           </span>
         )}
 
-        {/* selection summary */}
-        {sel.size > 0 && (
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 10,
-            padding: '3px 10px', background: 'var(--accent-dim)',
-            border: '1px solid var(--accent)', borderRadius: 20,
-            fontSize: 11,
-          }}>
-            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{sel.size} cell{sel.size !== 1 ? 's' : ''}</span>
-            {selNums.length > 0 && <>
-              <span style={{ color: 'var(--text3)' }}>|</span>
-              <span style={{ color: 'var(--text2)' }}>
-                Sum: <strong>{selSum < 1000 ? selSum.toFixed(2) : selSum >= 1000000 ? '$' + (selSum/1000000).toFixed(2)+'M' : '$' + Math.round(selSum).toLocaleString()}</strong>
-              </span>
-              <span style={{ color: 'var(--text3)' }}>|</span>
-              <span style={{ color: 'var(--text2)' }}>
-                Avg: <strong>{selAvg < 1000 ? selAvg.toFixed(2) : '$' + Math.round(selAvg).toLocaleString()}</strong>
-              </span>
-            </>}
-            <button
-              onClick={() => setSel(new Set())}
-              style={{ background:'none', border:'none', color:'var(--accent)', cursor:'pointer', fontSize:14, lineHeight:1, padding:0 }}
-              title="Clear selection (Esc)"
-            >×</button>
-          </div>
-        )}
+        <SheetSelectionBar
+          selSize={selection.sel.size}
+          selNums={selection.selNums}
+          selSum={selection.selSum}
+          selAvg={selection.selAvg}
+          onClear={selection.clearSelection}
+          commentTargets={commentTargets}
+          commentLabel={`${selection.sel.size} cells`}
+          anchorRect={() => {
+            const rect = tableRef.current?.getBoundingClientRect();
+            return rect
+              ? { top: rect.top + 8, bottom: rect.top + 14, left: rect.left + 12, right: rect.left + 312 }
+              : { top: 80, bottom: 86, left: 20, right: 320 };
+          }}
+          inline
+        />
       </div>
 
       {/* ── table ── */}
@@ -397,8 +289,8 @@ export default function SheetTable({
               }}>#</th>
 
               {headers.map((h, ci) => {
-                const allColSel = sorted.length > 0 && sorted.every((_, ri) => sel.has(cellKey(ri, ci)));
-                const someColSel = !allColSel && sorted.some((_, ri) => sel.has(cellKey(ri, ci)));
+                const allColSel = sorted.length > 0 && sorted.every((_, ri) => selection.isSelected(ri, ci));
+                const someColSel = !allColSel && sorted.some((_, ri) => selection.isSelected(ri, ci));
                 const isSort = sortBy === h;
                 const num = isNumCol(h);
                 return (
@@ -455,8 +347,7 @@ export default function SheetTable({
               </tr>
             )}
             {sorted.map((row, ri) => {
-              const rowAllSel = headers.every((_, ci) => sel.has(cellKey(ri, ci)));
-              const rowAnySel = !rowAllSel && headers.some((_, ci) => sel.has(cellKey(ri, ci)));
+              const rowAllSel = headers.every((_, ci) => selection.isSelected(ri, ci));
               const evenBg = ri % 2 === 1 ? 'var(--bg3)' : 'var(--bg2)';
 
               return (
@@ -467,7 +358,7 @@ export default function SheetTable({
                 >
                   {/* row number */}
                   <td
-                    onMouseDown={e => selectRow(ri, e)}
+                    onMouseDown={e => selection.selectRow(ri, e)}
                     style={{
                       padding: compact ? '4px 0' : '5px 0',
                       textAlign: 'center',
@@ -487,19 +378,42 @@ export default function SheetTable({
 
                   {/* data cells */}
                   {headers.map((h, ci) => {
-                    const isSel = sel.has(cellKey(ri, ci));
+                    const isSel = selection.isSelected(ri, ci);
                     const val = row[h];
                     const num = typeof val === 'number' || (!isNaN(parseFloat(val)) && val != null && val !== '');
+                    const commentKey = commentsOn ? getCellCommentKey?.(row, h, ri, ci) : null;
+                    const commentLabel = commentKey
+                      ? (getCellCommentLabel?.(row, h) || `${h} · ${row._date || row.Date || row.date || ri + 1}`)
+                      : null;
+                    const cellComment = commentKey ? comments?.getForTarget('cell', commentKey) : null;
+                    const hasComment = !!cellComment;
+
+                    const cellInner = (
+                      <span style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>{fmtVal(val, h)}</span>
+                    );
 
                     return (
                       <td
                         key={h}
-                        onMouseDown={e => handleCellMouseDown(ri, ci, e)}
-                        onMouseEnter={e => { handleCellMouseEnter(ri, ci); showCellHover(e, row, h, ri); }}
-                        onMouseMove={moveCellHover}
-                        onMouseLeave={hideCellHover}
+                        onMouseDown={e => selection.handleCellMouseDown(ri, ci, e)}
+                        onMouseEnter={(e) => {
+                          selection.handleCellMouseEnter(ri, ci);
+                          if (cellComment) {
+                            hideCellHover();
+                            setCommentHover({ comment: cellComment, rect: e.currentTarget.getBoundingClientRect() });
+                          } else {
+                            hideCommentHover();
+                            showCellHover(e, row, h, ri);
+                          }
+                        }}
+                        onMouseMove={(e) => {
+                          if (commentHover) return;
+                          moveCellHover(e);
+                        }}
+                        onMouseLeave={() => { hideCellHover(); hideCommentHover(); }}
                         style={{
                           padding: cellPad,
+                          paddingRight: hasComment ? 18 : undefined,
                           borderBottom: '1px solid var(--row-sep)',
                           borderRight: ci < headers.length - 1 ? '1px solid var(--col-sep)' : 'none',
                           textAlign: num ? 'right' : 'left',
@@ -512,20 +426,23 @@ export default function SheetTable({
                           fontSize: compact ? 11 : 12,
                           cursor: 'cell',
                           position: 'relative',
-                          // selection style
-                          background: isSel
-                            ? 'rgba(59,130,246,0.18)'
-                            : rowAllSel
-                            ? 'rgba(59,130,246,0.07)'
-                            : evenBg,
                           color: isSel ? 'var(--text)' : num ? 'var(--text)' : 'var(--text2)',
-                          outline: isSel ? '1px solid rgba(59,130,246,0.5)' : 'none',
-                          outlineOffset: '-1px',
-                          // sticky first col
-                          ...(stickyFirstCol && ci === 0 ? { position: 'sticky', left: 36, zIndex: 1, background: isSel ? 'rgba(59,130,246,0.18)' : evenBg } : {}),
+                          ...sheetCellStyle(isSel, rowAllSel, evenBg),
+                          ...(stickyFirstCol && ci === 0 ? {
+                            position: 'sticky', left: 36, zIndex: 1,
+                            background: isSel ? 'rgba(59,130,246,0.18)' : evenBg,
+                          } : {}),
                         }}
                       >
-                        {fmtVal(val, h)}
+                        {commentKey ? (
+                          <CommentAnchor
+                            targetType="cell"
+                            targetKey={commentKey}
+                            targetLabel={commentLabel}
+                          >
+                            {cellInner}
+                          </CommentAnchor>
+                        ) : cellInner}
                       </td>
                     );
                   })}
@@ -535,6 +452,12 @@ export default function SheetTable({
           </tbody>
         </table>
       </div>
+
+      <CommentHoverTooltip
+        comment={commentHover?.comment}
+        anchorRect={commentHover?.rect}
+        visible={!!commentHover}
+      />
 
       {hoverCell && (
         <div
@@ -572,7 +495,7 @@ export default function SheetTable({
 
       {/* ── keyboard hint ── */}
       <div style={{ fontSize: 10, color: 'var(--text4)' }}>
-        Hover cell for full value · Click to select · Shift+click range · Ctrl+click multi · Drag column edge to resize · Ctrl+C copy
+        Hover cell for full value · Click to select · Shift+click range · Ctrl+click multi · Drag to paint · Ctrl+C copy · Right-click for comment
       </div>
     </div>
   );

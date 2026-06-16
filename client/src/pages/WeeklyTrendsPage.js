@@ -55,7 +55,7 @@ export default function WeeklyTrendsPage(){
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="week" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
-                <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Line type="monotone" dataKey="attach" name={L.attachRate} stroke="var(--teal)" strokeWidth={2} dot={false}/>
               </LineChart>
             </ResponsiveContainer>
@@ -82,7 +82,7 @@ export default function WeeklyTrendsPage(){
               <LineChart data={chartData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="week" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
-                <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}k`:`$${v}`}/>
+                <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={fmt$}/>
                 <Tooltip formatter={v=>fmt$(v)} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Line type="monotone" dataKey="revenue" name={L.sales} stroke="var(--warn)" strokeWidth={2} dot={false}/>
               </LineChart>

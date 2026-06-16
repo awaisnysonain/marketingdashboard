@@ -24,7 +24,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
 
 const { pgRun, pgQuery } = require('../db/postgres');
 const { twSqlSafe, chDateRange } = require('./twSqlApi');
-const { fetchDualRevenueMetrics, fetchBlendedShopifyRevenue } = require('./tripleWhaleSQL');
+const { fetchDualRevenueMetrics, fetchBlendedShopifyRevenue, fetchAmazonRevenue } = require('./tripleWhaleSQL');
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
@@ -904,8 +904,8 @@ async function syncTWBenchmarks(brand) {
 //    gross_minus_discounts = Gross Product Sales − Discounts (excludes shipping & taxes)
 //    spend                 = ads_table.spend (channel-reported platforms only)
 //
-//  shopify_revenue = blended_stats_tvf(include_amazon=FALSE).order_revenue
-//  amazon_revenue  = order_revenue − shopify
+//  shopify_revenue = order_revenue − amazon_revenue (orders_table amazon platform)
+//  amazon_revenue  = orders_table amazon platform order revenue (NOBL only)
 //  total_sales     = order_revenue − refund_amount  (net)
 //
 //  tw_refresh (tripleWhaleSQL) owns total_spend; this task updates revenue columns only.
@@ -928,6 +928,7 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
 
   let dualRevMap = {};
   let shopifyRevMap = {};
+  let amazonRevMap = {};
   let refundRows = [];
   try {
     [dualRevMap, shopifyRevMap, refundRows] = await Promise.all([
@@ -935,6 +936,9 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
       fetchBlendedShopifyRevenue(brand, startDate, endDate),
       twSqlSafe(brand, refundsSql),
     ]);
+    if (brand === 'NOBL') {
+      amazonRevMap = await fetchAmazonRevenue(brand, startDate, endDate);
+    }
   } catch (e) {
     const msg = `syncTWOrderRevenue fetch ${brand}: ${e.message}`;
     console.error('[twFullSync]', msg);
@@ -945,6 +949,7 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
   const allDates = new Set([
     ...Object.keys(dualRevMap),
     ...Object.keys(shopifyRevMap),
+    ...Object.keys(amazonRevMap),
   ]);
   if (!allDates.size) {
     console.log(`[twFullSync] syncTWOrderRevenue ${brand}: no rows for ${startDate}→${endDate}`);
@@ -964,10 +969,14 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
     const metrics      = dualRevMap[date] || { order_revenue: 0, gross_minus_discounts: 0 };
     const orderRevenue = parseFloat(metrics.order_revenue || 0);
     const gmd          = parseFloat(metrics.gross_minus_discounts || 0);
-    const shopifyRev   = shopifyRevMap[date] !== undefined
-      ? parseFloat(shopifyRevMap[date])
-      : orderRevenue;
-    const amazonRev    = Math.max(0, orderRevenue - shopifyRev);
+    const amazonRev    = brand === 'NOBL'
+      ? parseFloat(amazonRevMap[date] || 0)
+      : 0;
+    const shopifyRev   = brand === 'NOBL'
+      ? Math.max(0, orderRevenue - amazonRev)
+      : (shopifyRevMap[date] !== undefined
+        ? parseFloat(shopifyRevMap[date])
+        : orderRevenue);
     const refunds      = refundMap[date] || { count: 0, amount: 0 };
     const totalSales   = Math.max(0, orderRevenue - refunds.amount);
 

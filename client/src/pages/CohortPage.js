@@ -62,7 +62,7 @@ export default function CohortPage(){
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="cohort" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={Math.max(1,Math.floor(chartData.length/6))}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
-                <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Line type="monotone" dataKey="ttp" name={L.ttpRate} stroke={COLORS[1]} strokeWidth={2} dot={false}/>
               </LineChart>
             </ResponsiveContainer>

@@ -50,6 +50,18 @@ async function verifyMayFlo() {
   for (const row of r.rows) console.log(' ', row);
 }
 
+async function verifyAmazonChannel() {
+  const r = await pgQuery(`
+    SELECT COUNT(*)::int AS days,
+           ROUND(SUM(spend_1d)::numeric, 2) AS spend,
+           ROUND(SUM(revenue_1d)::numeric, 2) AS ads_rev
+    FROM tw_channel_daily
+    WHERE brand = 'NOBL' AND channel = 'AMAZON'
+      AND date >= (CURRENT_DATE - INTERVAL '30 days')
+  `);
+  console.log('\n[VERIFY] NOBL AMAZON channel (last 30d):', r.rows[0]);
+}
+
 (async () => {
   const start = process.argv[2] || DEFAULT_START;
   const end = process.argv[3] || DEFAULT_END;
@@ -60,28 +72,57 @@ async function verifyMayFlo() {
   console.log(`[backfillTwSql] ${chunks.length} chunks × 2 brands\n`);
 
   let ok = 0;
-  let fail = 0;
+  const failed = [];
+
+  async function runChunk(brand, cs, ce) {
+    const t1 = Date.now();
+    const r = await refreshBrand(brand, cs, ce);
+    console.log(`  ✓ ${brand} ${cs}..${ce}  summary=${r.rows} channels=${r.channelRows}  [${((Date.now() - t1) / 1000).toFixed(0)}s]`);
+    if (brand === 'FLO' && cs >= '2026-05-01' && ce <= '2026-05-31') await verifyMayFlo();
+    return r;
+  }
+
   for (const { start: cs, end: ce } of chunks) {
     for (const brand of ['FLO', 'NOBL']) {
-      const t1 = Date.now();
       try {
-        const r = await refreshBrand(brand, cs, ce);
-        console.log(`  ✓ ${brand} ${cs}..${ce}  summary=${r.rows} channels=${r.channelRows}  [${((Date.now() - t1) / 1000).toFixed(0)}s]`);
+        await runChunk(brand, cs, ce);
         ok++;
-        if (brand === 'FLO' && cs >= '2026-05-01' && ce <= '2026-05-31') await verifyMayFlo();
       } catch (e) {
         console.log(`  ✗ ${brand} ${cs}..${ce}  ${e.message}`);
-        fail++;
+        failed.push({ brand, cs, ce, err: e.message });
       }
     }
   }
 
+  if (failed.length) {
+    console.log(`\n[backfillTwSql] Retrying ${failed.length} failed chunk(s)…`);
+    const stillFailed = [];
+    for (const f of failed) {
+      try {
+        await new Promise(r => setTimeout(r, 5000));
+        await runChunk(f.brand, f.cs, f.ce);
+        ok++;
+      } catch (e) {
+        console.log(`  ✗ RETRY ${f.brand} ${f.cs}..${f.ce}  ${e.message}`);
+        stillFailed.push(f);
+      }
+    }
+    failed.length = 0;
+    failed.push(...stillFailed);
+  }
+
   await verifyMayFlo();
+  await verifyAmazonChannel();
   const v = await pgQuery(`
     SELECT brand, COUNT(*)::int n, MIN(date)::date first, MAX(date)::date last
-    FROM tw_product_daily GROUP BY brand
+    FROM tw_summary_daily GROUP BY brand ORDER BY brand
   `);
-  console.log('\n[backfillTwSql] tw_product_daily coverage:', v.rows);
-  console.log(`[backfillTwSql] DONE in ${((Date.now() - t0) / 60000).toFixed(1)} min (${ok} ok, ${fail} fail)`);
-  process.exit(fail > 0 ? 1 : 0);
+  console.log('\n[backfillTwSql] tw_summary_daily coverage:', v.rows);
+  const vc = await pgQuery(`
+    SELECT brand, channel, COUNT(*)::int n, MIN(date)::date first, MAX(date)::date last
+    FROM tw_channel_daily WHERE channel = 'AMAZON' GROUP BY brand, channel
+  `);
+  console.log('[backfillTwSql] AMAZON channel coverage:', vc.rows);
+  console.log(`[backfillTwSql] DONE in ${((Date.now() - t0) / 60000).toFixed(1)} min (${ok} ok, ${failed.length} fail)`);
+  process.exit(failed.length > 0 ? 1 : 0);
 })().catch(e => { console.error('[backfillTwSql] FATAL:', e); process.exit(1); });

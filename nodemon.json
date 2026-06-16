@@ -2,5 +2,6 @@
   "watch": ["server"],
   "ext": "js,json",
   "delay": 1000,
-  "signal": "SIGTERM"
+  "signal": "SIGTERM",
+  "ignore": ["data/*", "client/build/*", "client/node_modules/*"]
 }

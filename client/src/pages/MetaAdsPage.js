@@ -3,7 +3,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import DateRangePicker from '../components/DateRangePicker';
 import KpiCard from '../components/KpiCard';
 import ServerPaginatedSheetTable from '../components/ServerPaginatedSheetTable';
-import { getMetaAds, fmt$, fmtNum, fmtPct } from '../utils/api';
+import { getMetaAds, fmt$, fmtNum, fmtPct, fmtRatio } from '../utils/api';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
 import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
@@ -167,7 +167,7 @@ export default function MetaAdsPage() {
             <KpiCard label={L.spend} value={fmt$(t.spend || 0)} tooltip={TIP.spend} />
             <KpiCard label={L.revenue} value={fmt$(t.revenue || 0)} tooltip={TIP.revenue} />
             <KpiCard label={L.purchases} value={fmtNum(t.purchases || 0)} tooltip={TIP.purchases} />
-            <KpiCard label={L.roas} value={t.roas ? `${Number(t.roas).toFixed(2)}x` : '—'} tooltip={TIP.roas} />
+            <KpiCard label={L.roas} value={t.roas ? fmtRatio(t.roas) : '—'} tooltip={TIP.roas} />
             <KpiCard label={L.cac} value={t.cac ? fmt$(t.cac) : '—'} tooltip={TIP.cac} />
             <KpiCard label={L.ctr} value={t.ctr ? fmtPct(t.ctr) : '—'} tooltip={TIP.ctr} />
             <KpiCard label="Total rows" value={fmtNum(totalRows)} />
@@ -181,7 +181,7 @@ export default function MetaAdsPage() {
                 <XAxis dataKey="label" tick={{ fontSize:10 }} stroke="var(--border2)" angle={-30} textAnchor="end" interval={0} height={72} />
                 <YAxis yAxisId="spend" tickFormatter={fmt$} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
                 <YAxis yAxisId="roas" orientation="right" tick={{ fontSize:11 }} width={48} stroke="var(--border2)" />
-                <Tooltip formatter={(v, n) => n === 'ROAS' ? [`${Number(v || 0).toFixed(2)}x`, n] : [fmt$(v), n]} contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
+                <Tooltip formatter={(v, n) => n === 'ROAS' ? [fmtRatio(v || 0), n] : [fmt$(v), n]} contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
                 <Legend wrapperStyle={{ fontSize:12 }} />
                 <Bar yAxisId="spend" dataKey="spend" name={L.spend} fill="#1877f2" radius={[2,2,0,0]} />
                 <Line yAxisId="roas" dataKey="roas" name={L.roas} stroke="#22c55e" strokeWidth={2} dot={{ r:3 }} />

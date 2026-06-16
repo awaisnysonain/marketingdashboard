@@ -47,7 +47,7 @@ export default function DayOfWeekPage(){
             <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>Avg Orders</div>
             <div style={{...TH,fontSize:18,fontWeight:700,marginBottom:6}}>{fmtNum(d.orders)}</div>
             <div style={{fontSize:11,color:'var(--text3)',marginBottom:2}}>{L.attachRate}</div>
-            <div style={{fontSize:16,fontWeight:600,color:d.day===best.day?'var(--success)':d.day===worst.day?'var(--danger)':'var(--teal)'}}>{d.attach.toFixed(1)}%</div>
+            <div style={{fontSize:16,fontWeight:600,color:d.day===best.day?'var(--success)':d.day===worst.day?'var(--danger)':'var(--teal)'}}>{fmtPct(d.attach)}</div>
           </div>
         ))}
       </div>
@@ -77,7 +77,7 @@ export default function DayOfWeekPage(){
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="day" tick={{fontSize:12,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
-                <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Bar dataKey="attach" name={L.attachRate} radius={[4,4,0,0]}>
                   {chartData.map((d,i)=><Cell key={i} fill={d.day===best.day?'var(--success)':d.day===worst.day?'var(--danger)':COLORS[i%COLORS.length]}/>)}
                 </Bar>

@@ -19,6 +19,21 @@ const metaAirWarmInFlight = new Set();
  */
 // eslint-disable-next-line no-unused-vars
 const { NOBL_BRAND, FLO_US_BRAND, getBrand, calcMer } = require('../config/brandConfig');
+const {
+  enrichSummaryRows, enrichChannelRows, enrichGeoRows,
+} = require('../utils/twRowEnrich');
+
+const NOBL_SUBS_DAILY_SQL = `
+  SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
+         sub_gross AS shopify_sub_gross,
+         sub_discounts AS shopify_sub_disc,
+         sub_refunds AS shopify_sub_refunds,
+         rebill_revenue,
+         new_sub_revenue,
+         (sub_net_sales + rebill_revenue) AS sub_revenue_actual
+  FROM nobl_air_daily
+  WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+  ORDER BY date`;
 
 // Default date range: current month-to-date
 function getDefaultDates(req) {
@@ -1481,7 +1496,6 @@ router.get('/overview', async (req, res) => {
                 total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
-                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales,
                 COALESCE(refund_amount, 0) AS refund_amount
          FROM nobl_brand_tw_summary_daily
@@ -1494,7 +1508,6 @@ router.get('/overview', async (req, res) => {
                 total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
-                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales,
                 COALESCE(refund_amount, 0) AS refund_amount
          FROM flo_brand_tw_summary_daily
@@ -1502,14 +1515,7 @@ router.get('/overview', async (req, res) => {
          ORDER BY date`,
         [start, end]
       ),
-      pgQuery(
-        `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
-                sub_revenue_actual
-         FROM nobl_air_sub_revenue_daily
-         WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
-         ORDER BY date`,
-        [start, end]
-      ),
+      pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
     ]);
 
     // Build date-keyed maps
@@ -1539,7 +1545,6 @@ router.get('/overview', async (req, res) => {
         date: d,
         nobl_revenue:        nRev,
         nobl_order_revenue:  parseFloat(n.order_revenue  || 0),
-        nobl_gross_minus_discounts: parseFloat(n.gross_minus_discounts || 0),
         nobl_shopify_revenue:parseFloat(n.shopify_revenue || 0),
         nobl_amazon_revenue: parseFloat(n.amazon_revenue  || 0),
         nobl_total_sales:    parseFloat(n.total_sales     || 0),
@@ -1550,7 +1555,6 @@ router.get('/overview', async (req, res) => {
         nobl_nc_orders:      parseInt(n.new_customer_orders || 0),
         flo_revenue:         fRev,
         flo_order_revenue:   parseFloat(f.order_revenue   || 0),
-        flo_gross_minus_discounts: parseFloat(f.gross_minus_discounts || 0),
         flo_shopify_revenue: parseFloat(f.shopify_revenue || 0),
         flo_amazon_revenue:  parseFloat(f.amazon_revenue  || 0),
         flo_total_sales:     parseFloat(f.total_sales     || 0),
@@ -1570,7 +1574,6 @@ router.get('/overview', async (req, res) => {
       total_spend:          (acc.total_spend          || 0) + r.total_spend,
       nobl_revenue:         (acc.nobl_revenue         || 0) + r.nobl_revenue,
       nobl_order_revenue:   (acc.nobl_order_revenue   || 0) + r.nobl_order_revenue,
-      nobl_gross_minus_discounts: (acc.nobl_gross_minus_discounts || 0) + r.nobl_gross_minus_discounts,
       nobl_shopify_revenue: (acc.nobl_shopify_revenue || 0) + r.nobl_shopify_revenue,
       nobl_amazon_revenue:  (acc.nobl_amazon_revenue  || 0) + r.nobl_amazon_revenue,
       nobl_total_sales:     (acc.nobl_total_sales     || 0) + r.nobl_total_sales,
@@ -1579,7 +1582,6 @@ router.get('/overview', async (req, res) => {
       nobl_nc_orders:       (acc.nobl_nc_orders       || 0) + r.nobl_nc_orders,
       flo_revenue:          (acc.flo_revenue          || 0) + r.flo_revenue,
       flo_order_revenue:    (acc.flo_order_revenue    || 0) + r.flo_order_revenue,
-      flo_gross_minus_discounts: (acc.flo_gross_minus_discounts || 0) + r.flo_gross_minus_discounts,
       flo_shopify_revenue:  (acc.flo_shopify_revenue  || 0) + r.flo_shopify_revenue,
       flo_amazon_revenue:   (acc.flo_amazon_revenue   || 0) + r.flo_amazon_revenue,
       flo_total_sales:      (acc.flo_total_sales      || 0) + r.flo_total_sales,
@@ -1614,7 +1616,6 @@ router.get('/nobl/topline', async (req, res) => {
                 brand, total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
-                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
          FROM nobl_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
@@ -1635,19 +1636,12 @@ router.get('/nobl/topline', async (req, res) => {
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date, region`,
         [start, end]
       ),
-      pgQuery(
-        `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
-                shopify_sub_gross, shopify_sub_disc, shopify_sub_refunds,
-                rebill_revenue, new_sub_revenue, sub_revenue_actual
-         FROM nobl_air_sub_revenue_daily
-         WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
-        [start, end]
-      ),
+      pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
     ]);
     res.json({
-      summary: fmtRows(summaryRes.rows),
-      channels: fmtRows(channelsRes.rows),
-      geo: fmtRows(geoRes.rows),
+      summary: enrichSummaryRows(fmtRows(summaryRes.rows)),
+      channels: enrichChannelRows(fmtRows(channelsRes.rows)),
+      geo: enrichGeoRows(fmtRows(geoRes.rows)),
       subs: fmtRows(subsRes.rows),
       revenue_metrics: REVENUE_METRICS,
     });
@@ -1667,7 +1661,6 @@ router.get('/flo/topline', async (req, res) => {
                 brand, total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
-                COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                 shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
          FROM flo_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
@@ -1698,9 +1691,9 @@ router.get('/flo/topline', async (req, res) => {
       ),
     ]);
     res.json({
-      summary: fmtRows(summaryRes.rows),
-      channels: fmtRows(channelsRes.rows),
-      geo: fmtRows(geoRes.rows),
+      summary: enrichSummaryRows(fmtRows(summaryRes.rows)),
+      channels: enrichChannelRows(fmtRows(channelsRes.rows)),
+      geo: enrichGeoRows(fmtRows(geoRes.rows)),
       products: fmtRows(productsRes.rows),
       revenue_metrics: REVENUE_METRICS,
     });
@@ -1727,7 +1720,7 @@ router.get('/channels', async (req, res) => {
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date, channel`,
         [start, end]
       );
-      rows = fmtRows(r.rows);
+      rows = enrichChannelRows(fmtRows(r.rows));
     } else if (brand === 'FLO') {
       const r = await pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -1737,7 +1730,7 @@ router.get('/channels', async (req, res) => {
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date, channel`,
         [start, end]
       );
-      rows = fmtRows(r.rows);
+      rows = enrichChannelRows(fmtRows(r.rows));
     } else {
       const [noblRes, floRes] = await Promise.all([
         pgQuery(
@@ -1757,7 +1750,10 @@ router.get('/channels', async (req, res) => {
           [start, end]
         ),
       ]);
-      rows = [...fmtRows(noblRes.rows), ...fmtRows(floRes.rows)];
+      rows = [
+        ...enrichChannelRows(fmtRows(noblRes.rows)),
+        ...enrichChannelRows(fmtRows(floRes.rows)),
+      ];
       rows.sort((a, b) => String(a.date).localeCompare(String(b.date)));
     }
     // Optional server-side sort if requested

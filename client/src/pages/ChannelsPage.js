@@ -2,11 +2,14 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from 'recharts';
-import { getChannels, fmt$ } from '../utils/api';
+import { getChannels, fmt$, fmtRatio } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
+import { CommentProvider } from '../components/CommentProvider';
+import { commentTargetKey } from '../utils/commentKeys';
+import { entityDateCellKey, entityDateCellLabel } from '../utils/sheetComments';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 import { mtdRange } from '../utils/dateRange';
 function fmtDateLabel(s) {
@@ -83,9 +86,11 @@ export default function ChannelsPage({ showToast }) {
     'Ad spend (7 days)':   r.spend_7d,
     [L.newOrders]: r.new_cust_orders,
     [L.cac]:        r.cac,
+    _date: r.date,
   }));
 
   return (
+    <CommentProvider pageKey="channels">
     <div className="page-stack">
       <PageFilterBar start={range.start} end={range.end} onChange={setRange}>
         <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
@@ -114,15 +119,15 @@ export default function ChannelsPage({ showToast }) {
                 <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: CHANNEL_COLORS[ch.channel] || '#888', borderRadius: '2px 2px 0 0' }} />
                 <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.5px', marginBottom: 6 }}>{ch.channel}</div>
                 <div style={{ fontSize: 17, fontWeight: 700 }}>{fmt$(ch.total_spend)}</div>
-                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>Sales: {fmt$(ch.total_revenue)} &middot; Return: {ch.avg_roas.toFixed(2)}x per ad $</div>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>Sales: {fmt$(ch.total_revenue)} &middot; Return: {fmtRatio(ch.avg_roas)} per ad $</div>
               </div>
             ))}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
-            <KpiCard label="Total ad spend" value={fmt$(totSpend)} tooltip={TIP.spend} color="warn" />
-            <KpiCard label="Total sales" value={fmt$(totRev)} tooltip={TIP.revenue} color="blue" />
-            <KpiCard label={L.blendedMer} value={totSpend > 0 ? (totRev/totSpend).toFixed(2)+'x' : '—'} tooltip={TIP.mer} color="green" />
+            <KpiCard label="Total ad spend" value={fmt$(totSpend)} fullValue={fmt$(totSpend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
+            <KpiCard label="Total sales" value={fmt$(totRev)} fullValue={fmt$(totRev)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_revenue'), targetLabel: 'Total Sales' }} />
+            <KpiCard label={L.blendedMer} value={totSpend > 0 ? fmtRatio(totRev/totSpend) : '—'} copyValue={totSpend > 0 ? (totRev/totSpend).toFixed(4) : undefined} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('blended_mer'), targetLabel: L.blendedMer }} />
           </div>
 
           {/* Stacked spend chart */}
@@ -157,11 +162,14 @@ export default function ChannelsPage({ showToast }) {
               defaultSortField={L.date}
               defaultSortDir="desc"
               searchable={true}
+              getCellCommentKey={(row, h) => entityDateCellKey('channel', row, h, 'Channel', L.date)}
+              getCellCommentLabel={(row, h) => entityDateCellLabel('channel', h, row, 'Channel', L.date)}
             />
           </div>
         </>
       )}
     </div>
+    </CommentProvider>
   );
 }
 

@@ -75,7 +75,6 @@ export const L = {
 export const TIP = {
   spend: 'Money you paid to run ads in the selected dates.',
   revenue: 'Money from orders in the selected dates (after discounts where noted).',
-  grossMinusDiscounts: 'Product gross sales minus discounts only. Excludes shipping and taxes (Shopify-style subtotal).',
   orderRevenue: 'Gross Product Sales + Shipping + Taxes − Discounts. Triple Whale Order Revenue — used for MER.',
   mer: 'How much you earned in sales for each $1 spent on ads. Higher is better.',
   roas: 'Sales divided by ad spend for this ad or channel.',
@@ -110,6 +109,10 @@ export const TIP = {
   avgContract: 'Average monthly subscription price.',
   totalSubRevenue: 'All subscription money in the date range.',
   purchases: 'Number of purchase events attributed to ads.',
+  amazonToplineRevenue: 'Total Amazon marketplace order revenue (Seller Central OPS basis). Included in topline Sales / Order Revenue for NOBL.',
+  amazonAdsRevenue: 'Amazon Ads attributed sales when ads ran; otherwise marketplace order revenue (Seller Central). Purchases and new customers come from Amazon orders when ads conversions are unavailable.',
+  amazonChannelSpend: 'Amazon Ads spend when campaigns ran; otherwise marketplace COGS + handling fees from Seller Central orders (enables ROAS/CAC on organic days).',
+  shopifyRevenue: 'Shopify order revenue only (excludes Amazon marketplace).',
   impressions: 'How many times ads were shown.',
   nvp: 'Percent of orders from first-time customers.',
   ncOrders: 'Orders from someone buying for the first time.',
@@ -244,13 +247,8 @@ export function plainHeader(header) {
 
 /** Hover hint on table column headers (key = display label) */
 export const COLUMN_TIP = {
-  'Gross − Discounts': TIP.grossMinusDiscounts,
-  'Gross − Disc': TIP.grossMinusDiscounts,
   'Order Revenue': TIP.orderRevenue,
-  'NOBL Gross − Discounts': TIP.grossMinusDiscounts,
   'NOBL Order Revenue': TIP.orderRevenue,
-  'FLO Gross − Discounts': TIP.grossMinusDiscounts,
-  'Total Gross − Discounts': TIP.grossMinusDiscounts,
   'Total Order Revenue': TIP.orderRevenue,
   [L.spend]: TIP.spend,
   [L.revenue]: TIP.revenue,

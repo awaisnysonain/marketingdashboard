@@ -1,3 +1,21 @@
+import { fmt$, fmtRatio } from './api';
+
+export function fmtChartCurrency(v) {
+  return fmt$(v);
+}
+
+export function fmtChartRatio(v) {
+  return fmtRatio(v);
+}
+
+/** Recharts tooltip — currency unless series name is MER/ROAS. */
+export function fmtChartTooltip(value, name) {
+  if (name && /roas|mer|sales per ad/i.test(String(name))) {
+    return [fmtRatio(value), name];
+  }
+  return [fmt$(value), name];
+}
+
 export const NOBL_ACCENT = '#6366f1';
 export const FLO_ACCENT = '#14b8a6';
 export const NOBL_WARN = '#f59e0b';
@@ -16,6 +34,9 @@ export const CHANNEL_COL = {
 
 export const GEO_COL = ['#6366f1', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
 export const PROD_COL = { portable: '#14b8a6', wooden: '#f59e0b', metal: '#6366f1', mixed: '#94a3b8', unclassified: '#64748b' };
+
+export const Y_AXIS_WIDTH_CURRENCY = 92;
+export const Y_AXIS_WIDTH_RATIO = 48;
 
 export const TOOLTIP_STYLE = {
   background: 'var(--bg2)',

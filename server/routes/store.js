@@ -55,7 +55,6 @@ router.get('/nobl', async (req, res) => {
                total_revenue, total_spend, total_orders,
                new_customer_orders, returning_customer_orders,
                COALESCE(order_revenue, total_revenue) AS order_revenue,
-               COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                shopify_revenue, amazon_revenue, total_sales,
                COALESCE(refund_amount, 0) AS refund_amount, refund_count
         FROM   nobl_brand_tw_summary_daily
@@ -142,7 +141,6 @@ router.get('/nobl', async (req, res) => {
         amazon_revenue:    parseFloat(r.amazon_revenue  || 0),
         total_sales:       parseFloat(r.total_sales     || 0),
         refund_amount:     parseFloat(r.refund_amount   || 0),
-        gross_minus_discounts: parseFloat(r.gross_minus_discounts || 0),
         mer:     calcMer(rev, r.total_spend),
         aov:     r.total_orders > 0 ? parseFloat((rev / r.total_orders).toFixed(2)) : null,
         nvp_pct: r.total_orders > 0 ? parseFloat(((r.new_customer_orders / r.total_orders) * 100).toFixed(1)) : null,
@@ -230,7 +228,6 @@ router.get('/flo', async (req, res) => {
                total_revenue, total_spend, total_orders,
                new_customer_orders, returning_customer_orders,
                COALESCE(order_revenue, total_revenue) AS order_revenue,
-               COALESCE(gross_minus_discounts, 0) AS gross_minus_discounts,
                shopify_revenue, amazon_revenue, total_sales,
                COALESCE(refund_amount, 0) AS refund_amount, refund_count
         FROM   flo_brand_tw_summary_daily
@@ -327,7 +324,6 @@ router.get('/flo', async (req, res) => {
         amazon_revenue:  parseFloat(r.amazon_revenue  || 0),
         total_sales:     parseFloat(r.total_sales     || 0),
         refund_amount:   parseFloat(r.refund_amount   || 0),
-        gross_minus_discounts: parseFloat(r.gross_minus_discounts || 0),
         mer:     calcMer(rev, r.total_spend),
         aov:     r.total_orders > 0 ? parseFloat((rev / r.total_orders).toFixed(2)) : null,
         nvp_pct: r.total_orders > 0 ? parseFloat(((r.new_customer_orders / r.total_orders) * 100).toFixed(1)) : null,

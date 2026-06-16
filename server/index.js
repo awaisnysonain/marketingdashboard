@@ -31,6 +31,7 @@ const { ensureBrandTwViews } = require('./etl/ensureBrandTwViews');
 const { isAuthBypassEnabled, getDevBypassUser, isAdminSession, effectiveUserId } = require('./auth');
 const twRouter    = require('./routes/triplewhale');
 const storeRouter = require('./routes/store');
+const commentsRouter = require('./routes/comments');
 
 // ── OpenAI setup ────────────────────────────────────────────────
 const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
@@ -506,6 +507,22 @@ async function initPostgresTables() {
     `);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_app_ann_tab ON app_annotations(tab, row_key)`);
     await pgRun(`
+      CREATE TABLE IF NOT EXISTS dashboard_comments (
+        id            SERIAL PRIMARY KEY,
+        user_id       INTEGER NOT NULL,
+        page_key      TEXT NOT NULL,
+        target_type   TEXT NOT NULL,
+        target_key    TEXT NOT NULL,
+        comment_text  TEXT NOT NULL,
+        created_at    TIMESTAMPTZ DEFAULT NOW(),
+        updated_at    TIMESTAMPTZ DEFAULT NOW(),
+        UNIQUE (page_key, target_type, target_key)
+      )
+    `);
+    await pgRun(`CREATE INDEX IF NOT EXISTS idx_dashboard_comments_page ON dashboard_comments(page_key)`);
+    await pgRun(`ALTER TABLE dashboard_comments ADD COLUMN IF NOT EXISTS visibility TEXT NOT NULL DEFAULT 'team'`);
+    await pgRun(`ALTER TABLE dashboard_comments ADD COLUMN IF NOT EXISTS author_name TEXT`);
+    await pgRun(`
       CREATE TABLE IF NOT EXISTS app_highlights (
         id          SERIAL PRIMARY KEY,
         tab         TEXT NOT NULL,
@@ -786,6 +803,9 @@ app.use('/api/analytics', requireAppAuth, analyticsRouter);
 // ── AI Dashboard routes ─────────────────────────────────────────
 app.use('/api/dashboards', requireAppAuth, dashRouter);
 
+// ── Dashboard comments (KPI / cell notes) ─────────────────────────
+app.use('/api/comments', requireAppAuth, commentsRouter);
+
 // ── Annotations ─────────────────────────────────────────────────
 app.get('/api/annotations', async (req, res) => {
   const r = req.query.tab
@@ -850,17 +870,17 @@ PILATES FLO (pilatesflo.com): Pilates equipment — Portable Reformer, Home Refo
 ━━━ DATABASE TABLES ━━━
 tw_summary_daily(id, brand, date, total_revenue, total_spend, mer, total_orders, new_customer_orders, returning_customer_orders, order_revenue, gross_minus_discounts, shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count)
   → brand = 'NOBL' or 'FLO' | date is a DATE column (use date BETWEEN $1::date AND $2::date)
-  → order_revenue/total_revenue = Gross Product Sales + Shipping + Taxes − Discounts (use for MER)
-  → gross_minus_discounts = Gross Product Sales − Discounts (excludes shipping & taxes)
+  → order_revenue/total_revenue = Gross Product Sales + Shipping + Taxes − Discounts (canonical revenue metric for MER)
   → total_spend = SUM(ads_table.spend) via tw_refresh (tw_order_revenue does NOT overwrite spend)
   → Use COALESCE(order_revenue, total_revenue) only if you need compatibility with older rows
   → total_sales = order_revenue - refund_amount (net, after refunds)
-  → amazon_revenue ≈ $10-15k/day for NOBL; shopify_revenue = rest
+  → amazon_revenue = total Amazon marketplace order revenue (orders_table; Seller Central OPS basis)
   → Note: order_revenue populated by tw_order_revenue ETL task (NULL until backfill runs)
 
 tw_channel_daily(id, brand, date, channel, spend_1d, revenue_1d, purchases_1d, roas_1d, spend_7d, new_cust_orders, cac)
   → spend_1d = ads_table.spend by channel (facebook-ads→META, etc.; AMAZON included for NOBL)
   → revenue_1d / purchases_1d = pixel_joined_tvf Triple Attribution 1_day (NOT ads_table revenue)
+  → AMAZON exception: revenue_1d = ads_table.conversion_value (Amazon Ads platform-attributed OPS)
   → channel values: 'META','GOOGLE','APPLOVIN','TIKTOK','SNAPCHAT','BING','PINTEREST','X','AMAZON'
   → Use MAX(date) to determine latest available data; do not assume wall-clock today has synced.
 
@@ -947,10 +967,6 @@ order_revenue / total_revenue  (CANONICAL — USE for MER, AOV, all KPIs)
   = Triple Whale "Order Revenue" — after discounts, before refunds
   = Shopify + Amazon combined for NOBL. shopify_revenue and amazon_revenue show the split.
   ⚠️ FLO is FLO US only. Do not add FLO_EU unless the user explicitly asks for the separate EU store.
-
-gross_minus_discounts  (Shopify-style subtotal metric)
-  = Gross Product Sales − Discounts (excludes shipping & taxes)
-  = Show alongside order_revenue so users see both definitions
 
 total_sales
   = order_revenue - refund_amount (net revenue actually kept)

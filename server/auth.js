@@ -33,6 +33,12 @@ function effectiveUserId(req) {
   return null;
 }
 
+function effectiveUserName(req) {
+  if (isAuthBypassEnabled()) return DEV_BYPASS_USER.name;
+  if (req.session?.erp?.name) return req.session.erp.name;
+  return null;
+}
+
 function isAdminSession(req) {
   if (isAuthBypassEnabled()) return true;
   if (req.session?.erp?.role === 'admin') return true;
@@ -43,5 +49,6 @@ module.exports = {
   isAuthBypassEnabled,
   getDevBypassUser,
   effectiveUserId,
+  effectiveUserName,
   isAdminSession,
 };

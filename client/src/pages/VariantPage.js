@@ -59,9 +59,9 @@ export default function VariantPage(){
             <div style={{position:'absolute',top:0,left:0,right:0,height:3,background:d.color,borderRadius:'3px 3px 0 0'}}/>
             <div style={{fontSize:14,fontWeight:700,marginBottom:10,color:'var(--text)'}}>{d.tier}<span style={{fontSize:11,fontWeight:400,color:'var(--text3)',marginLeft:4}}>/ mo</span></div>
             <div style={{display:'flex',flexDirection:'column',gap:6}}>
-              <Stat label="Add-on" val={`${d.attach.toFixed(1)}%`} color="var(--accent)"/>
-              <Stat label="Trial→paid" val={`${d.ttp.toFixed(1)}%`}    color="var(--teal)"/>
-              <Stat label="Success" val={`${d.activation.toFixed(1)}%`} color="var(--warn)"/>
+              <Stat label="Add-on" val={fmtPct(d.attach)} color="var(--accent)"/>
+              <Stat label="Trial→paid" val={fmtPct(d.ttp)}    color="var(--teal)"/>
+              <Stat label="Success" val={fmtPct(d.activation)} color="var(--warn)"/>
             </div>
           </div>
         ))}
@@ -75,7 +75,7 @@ export default function VariantPage(){
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)"/>
                 <XAxis dataKey="tier" tick={{fontSize:12,fill:'var(--text3)'}} tickLine={false} axisLine={false}/>
                 <YAxis tick={{fontSize:11,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%"/>
-                <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Legend wrapperStyle={{fontSize:11}}/>
                 <Bar dataKey="attach"     name={L.attachRate}     fill="#4f8ef7" radius={[3,3,0,0]}/>
                 <Bar dataKey="ttp"        name={L.ttpRate}        fill="#2dd4bf" radius={[3,3,0,0]}/>

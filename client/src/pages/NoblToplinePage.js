@@ -7,12 +7,22 @@ import PageIntro from '../components/PageIntro';
 import PageFilterBar from '../components/PageFilterBar';
 import KpiCard from '../components/KpiCard';
 import ChartCard from '../components/ChartCard';
-import { getNoblTopline, fmt$, fmtFull$, fmtNum, fmtFullNum } from '../utils/api';
+import VerticalDataTable from '../components/VerticalDataTable';
+import { CommentProvider } from '../components/CommentProvider';
+import { commentTargetKey } from '../utils/commentKeys';
+import { getNoblTopline, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../utils/api';
 import { TIP } from '../copy/plainLanguage';
 import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
 import {
+  enrichSummaryRow, enrichChannelRow, enrichGeoRow, enrichSubsRow, mergeToplineDates,
+} from '../utils/toplineData';
+import {
   NOBL_ACCENT, NOBL_WARN, GEO_COL, TOOLTIP_STYLE, CHART_GRID, mer, chColor,
+  Y_AXIS_WIDTH_CURRENCY, Y_AXIS_WIDTH_RATIO, fmtChartTooltip,
 } from '../utils/chartHelpers';
+
+const PAGE_KEY = 'nobl-topline';
+
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -45,26 +55,15 @@ function PillTab({ label, active, onClick }) {
   );
 }
 
-function fmtVal(v, type) {
-  if (v == null || v === '') return '—';
-  const n = Number(v);
-  if (isNaN(n)) return String(v);
-  if (type === '$') return '$' + Math.round(n).toLocaleString('en-US');
-  if (type === '$2') return '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  if (type === 'x') return n.toFixed(2) + 'x';
-  return Math.round(n).toLocaleString('en-US');
-}
-
 const SUMMARY_METRICS = [
-  { key: 'gross_minus_discounts',     label: 'Gross − Disc',     type: '$', tip: TIP.grossMinusDiscounts },
   { key: 'order_revenue',             label: 'Order Revenue',    type: '$', tip: TIP.orderRevenue },
   { key: 'total_spend',               label: 'Spend',            type: '$' },
   { key: 'mer',                       label: 'MER',              type: 'x' },
   { key: 'total_orders',              label: 'Orders',           type: 'num' },
   { key: 'new_customer_orders',       label: 'New Cust',         type: 'num' },
   { key: 'returning_customer_orders', label: 'Returning',        type: 'num' },
-  { key: 'shopify_revenue',           label: 'Shopify Rev',      type: '$' },
-  { key: 'amazon_revenue',            label: 'Amazon Rev',       type: '$' },
+  { key: 'shopify_revenue',           label: 'Shopify Rev',      type: '$', tip: TIP.shopifyRevenue },
+  { key: 'amazon_revenue',            label: 'Amazon Rev',       type: '$', tip: TIP.amazonToplineRevenue },
   { key: 'refund_amount',             label: 'Refunds',          type: '$' },
 ];
 const CHANNEL_METRICS = [
@@ -73,7 +72,7 @@ const CHANNEL_METRICS = [
   { key: 'roas_1d',         label: 'ROAS',      type: 'x' },
   { key: 'purchases_1d',    label: 'Purchases', type: 'num' },
   { key: 'new_cust_orders', label: 'New Cust',  type: 'num' },
-  { key: 'cac',             label: 'CAC',       type: '$2' },
+  { key: 'cac',             label: 'CAC',       type: '$' },
 ];
 const GEO_METRICS = [
   { key: 'revenue_actual', label: 'Revenue', type: '$' },
@@ -87,57 +86,6 @@ const SUB_METRICS = [
   { key: 'shopify_sub_gross',   label: 'Sub Gross',    type: '$' },
   { key: 'shopify_sub_refunds', label: 'Sub Refunds',  type: '$' },
 ];
-
-function VerticalTable({ dates, getRow, metrics }) {
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-        <thead>
-          <tr style={{ background: 'var(--bg3)' }}>
-            <th style={{
-              padding: '9px 12px', textAlign: 'left', borderBottom: '2px solid var(--border)',
-              color: 'var(--text3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-              letterSpacing: '.05em', whiteSpace: 'nowrap', position: 'sticky', left: 0,
-              background: 'var(--bg3)', zIndex: 2, minWidth: 90,
-            }}>Date</th>
-            {metrics.map((m) => (
-              <th key={m.key} title={m.tip || undefined} style={{
-                padding: '9px 12px', textAlign: 'right', borderBottom: '2px solid var(--border)',
-                color: 'var(--text3)', fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-                letterSpacing: '.05em', whiteSpace: 'nowrap', cursor: m.tip ? 'help' : undefined,
-              }}>{m.label}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {[...dates].reverse().map((d, di) => {
-            const row = getRow(d);
-            return (
-              <tr key={d}
-                  style={{ background: di % 2 === 0 ? 'transparent' : 'var(--bg3)' }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'rgba(99,102,241,.06)'}
-                  onMouseLeave={e => e.currentTarget.style.background = di % 2 === 0 ? 'transparent' : 'var(--bg3)'}>
-                <td style={{
-                  padding: '8px 12px', fontWeight: 600, color: 'var(--text)',
-                  borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap',
-                  position: 'sticky', left: 0,
-                  background: di % 2 === 0 ? 'var(--bg2)' : 'var(--bg3)', zIndex: 1,
-                  fontSize: 11,
-                }}>{fmtDateLabel(d)}</td>
-                {metrics.map((m) => (
-                  <td key={m.key} style={{
-                    padding: '8px 12px', textAlign: 'right', borderBottom: '1px solid var(--border)',
-                    color: 'var(--text)', whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
-                  }}>{fmtVal(row?.[m.key], m.type)}</td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
 function Skeleton() {
   return (
@@ -177,11 +125,10 @@ export default function NoblToplinePage() {
   const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, subsByDate, kpi, chartData, chAgg, geoAgg, subChartData } = useMemo(() => {
     if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, subsByDate: {}, kpi: {}, chartData: [], chAgg: [], geoAgg: [], subChartData: [] };
     const summaryByDate = {};
-    let totalRev = 0, totalGmd = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
+    let totalRev = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
     for (const r of (data.summary || [])) {
       summaryByDate[r.date] = r;
       totalRev += Number(r.order_revenue || r.total_revenue) || 0;
-      totalGmd += Number(r.gross_minus_discounts) || 0;
       totalSpend += Number(r.total_spend) || 0;
       totalOrders += Number(r.total_orders) || 0;
       totalNew += Number(r.new_customer_orders) || 0;
@@ -201,7 +148,7 @@ export default function NoblToplinePage() {
     const subsByDate = {};
     let totalSubRev = 0;
     for (const r of (data.subs || [])) { subsByDate[r.date] = r; totalSubRev += Number(r.sub_revenue_actual) || 0; }
-    const allDates = [...new Set([...(data.summary || []).map(r => r.date), ...(data.channels || []).map(r => r.date)])].sort();
+    const allDates = mergeToplineDates(data.summary, data.channels, data.geo, data.subs);
     const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
 
     const chartData = allDates.map((d) => {
@@ -211,7 +158,6 @@ export default function NoblToplinePage() {
       return {
         date: d,
         order_revenue: rev,
-        gross_minus_discounts: Number(r.gross_minus_discounts) || 0,
         total_spend: spend,
         mer: Number(r.mer) || mer(rev, spend),
       };
@@ -257,7 +203,7 @@ export default function NoblToplinePage() {
       regionNames: sortByRevenueDesc(rgSet, regionRev),
       geoByDateRg,
       subsByDate,
-      kpi: { totalRev, totalGmd, totalSpend, mer: periodMer, totalOrders, totalNew, totalSubRev },
+      kpi: { totalRev, totalSpend, mer: periodMer, totalOrders, totalNew, totalSubRev },
       chartData,
       chAgg,
       geoAgg,
@@ -276,6 +222,7 @@ export default function NoblToplinePage() {
   ];
 
   return (
+    <CommentProvider pageKey={PAGE_KEY}>
     <div className="page-stack">
       <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
 
@@ -284,13 +231,12 @@ export default function NoblToplinePage() {
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
           <div className="page-kpi-grid">
-            <KpiCard label="Gross − Discounts" value={fmt$(kpi.totalGmd)} fullValue={fmtFull$(kpi.totalGmd)} tooltip={TIP.grossMinusDiscounts} />
-            <KpiCard label="Order Revenue" value={fmt$(kpi.totalRev)} fullValue={fmtFull$(kpi.totalRev)} tooltip={TIP.orderRevenue} />
-            <KpiCard label="Total Spend" value={fmt$(kpi.totalSpend)} fullValue={fmtFull$(kpi.totalSpend)} tooltip={TIP.spend} />
-            <KpiCard label="MER" value={kpi.mer.toFixed(2) + 'x'} tooltip={TIP.mer} />
-            <KpiCard label="Total Orders" value={fmtNum(kpi.totalOrders)} fullValue={fmtFullNum(kpi.totalOrders)} tooltip={TIP.orders} />
-            <KpiCard label="New Customers" value={fmtNum(kpi.totalNew)} fullValue={fmtFullNum(kpi.totalNew)} tooltip={TIP.ncOrders} />
-            <KpiCard label="Sub Revenue" value={fmt$(kpi.totalSubRev)} fullValue={fmtFull$(kpi.totalSubRev)} tooltip={TIP.subRevenue} />
+            <KpiCard label="Order Revenue" value={fmt$(kpi.totalRev)} fullValue={fmtFull$(kpi.totalRev)} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
+            <KpiCard label="Total Spend" value={fmt$(kpi.totalSpend)} fullValue={fmtFull$(kpi.totalSpend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Spend' }} />
+            <KpiCard label="MER" value={fmtRatio(kpi.mer)} copyValue={kpi.mer != null ? Number(kpi.mer).toFixed(4) : undefined} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: 'MER' }} />
+            <KpiCard label="Total Orders" value={fmtNum(kpi.totalOrders)} fullValue={fmtFullNum(kpi.totalOrders)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
+            <KpiCard label="New Customers" value={fmtNum(kpi.totalNew)} fullValue={fmtFullNum(kpi.totalNew)} tooltip={TIP.ncOrders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }} />
+            <KpiCard label="Sub Revenue" value={fmt$(kpi.totalSubRev)} fullValue={fmtFull$(kpi.totalSubRev)} tooltip={TIP.subRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('sub_revenue'), targetLabel: 'Sub Revenue' }} />
           </div>
 
           <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
@@ -300,7 +246,7 @@ export default function NoblToplinePage() {
           {activeView === 'summary' && (
             <>
               <div style={CHART_GRID}>
-                <ChartCard title="Revenue & Gross − Discounts" subtitle="Daily trend">
+                <ChartCard title="Order Revenue" subtitle="Daily trend">
                   <ResponsiveContainer width="100%" height={240}>
                     <AreaChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <defs>
@@ -311,11 +257,10 @@ export default function NoblToplinePage() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={NOBL_ACCENT} fill="url(#noblGradRev)" strokeWidth={2} dot={false} />
-                      <Line type="monotone" dataKey="gross_minus_discounts" name="Gross − Discounts" stroke="#8b5cf6" strokeWidth={2} dot={false} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </ChartCard>
@@ -324,7 +269,7 @@ export default function NoblToplinePage() {
                     <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={NOBL_ACCENT} fill="rgba(99,102,241,.12)" strokeWidth={2} dot={false} />
@@ -334,7 +279,7 @@ export default function NoblToplinePage() {
                 </ChartCard>
               </div>
               <Card title="Daily Summary" subtitle={`${dates.length} days`}>
-                <VerticalTable dates={dates} getRow={d => summaryByDate[d]} metrics={SUMMARY_METRICS} />
+                <VerticalDataTable dates={dates} getRow={d => enrichSummaryRow(summaryByDate[d])} metrics={SUMMARY_METRICS} tableScope="summary" />
               </Card>
             </>
           )}
@@ -360,9 +305,9 @@ export default function NoblToplinePage() {
                     <ComposedChart data={chAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis yAxisId="left" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} width={70} stroke="var(--border2)" />
-                      <YAxis yAxisId="right" orientation="right" tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 10 }} width={44} stroke="var(--border2)" />
-                      <Tooltip formatter={(v, n) => [n === 'ROAS' ? v.toFixed(2) + 'x' : fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
+                      <YAxis yAxisId="left" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
+                      <YAxis yAxisId="right" orientation="right" tickFormatter={fmtRatio} tick={{ fontSize: 10 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
+                      <Tooltip formatter={fmtChartTooltip} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar yAxisId="left" dataKey="spend" name="Spend" radius={[4, 4, 0, 0]}>
                         {chAgg.map((e, i) => <Cell key={i} fill={chColor(e.channel, NOBL_WARN)} />)}
@@ -376,7 +321,7 @@ export default function NoblToplinePage() {
                 {channelNames.map(ch => <PillTab key={ch} label={ch} active={activeChannel === ch} onClick={() => setActiveChannel(ch)} />)}
               </div>
               <Card title={activeChannel || 'Channel'} subtitle={`${dates.length} days`}>
-                <VerticalTable dates={dates} getRow={d => channelByDateCh[`${d}|${activeChannel}`]} metrics={CHANNEL_METRICS} />
+                <VerticalDataTable dates={dates} getRow={d => enrichChannelRow(channelByDateCh[`${d}|${activeChannel}`], activeChannel)} metrics={CHANNEL_METRICS} tableScope={commentTargetKey('channel', activeChannel)} />
               </Card>
             </>
           )}
@@ -389,7 +334,7 @@ export default function NoblToplinePage() {
                     <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="revenue" name="Revenue" radius={[4, 4, 0, 0]}>
@@ -404,8 +349,8 @@ export default function NoblToplinePage() {
                     <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 11 }} width={44} stroke="var(--border2)" />
-                      <Tooltip formatter={(v) => [v.toFixed(2) + 'x', 'MER']} contentStyle={TOOLTIP_STYLE} />
+                      <YAxis tickFormatter={fmtRatio} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
+                      <Tooltip formatter={(v) => fmtChartTooltip(v, 'MER')} contentStyle={TOOLTIP_STYLE} />
                       <Bar dataKey="mer" name="MER" radius={[4, 4, 0, 0]}>
                         {geoAgg.map((e, i) => <Cell key={i} fill={GEO_COL[i % GEO_COL.length]} />)}
                       </Bar>
@@ -417,7 +362,7 @@ export default function NoblToplinePage() {
                 {regionNames.map(r => <PillTab key={r} label={r} active={activeRegion === r} onClick={() => setActiveRegion(r)} />)}
               </div>
               <Card title={activeRegion || 'Region'} subtitle={`${dates.length} days`}>
-                <VerticalTable dates={dates} getRow={d => geoByDateRg[`${d}|${activeRegion}`]} metrics={GEO_METRICS} />
+                <VerticalDataTable dates={dates} getRow={d => enrichGeoRow(geoByDateRg[`${d}|${activeRegion}`])} metrics={GEO_METRICS} tableScope={commentTargetKey('geo', activeRegion)} />
               </Card>
             </>
           )}
@@ -430,7 +375,7 @@ export default function NoblToplinePage() {
                     <AreaChart data={subChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={72} stroke="var(--border2)" />
+                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="sub_revenue" name="Sub Revenue" stackId="sub" stroke={NOBL_ACCENT} fill="rgba(99,102,241,.35)" strokeWidth={1.5} />
@@ -441,12 +386,13 @@ export default function NoblToplinePage() {
                 </ChartCard>
               )}
               <Card title="NOBL Air Subscriptions" subtitle={`${dates.length} days`}>
-                <VerticalTable dates={dates} getRow={d => subsByDate[d]} metrics={SUB_METRICS} />
+                <VerticalDataTable dates={dates} getRow={d => enrichSubsRow(subsByDate[d])} metrics={SUB_METRICS} tableScope="subs" />
               </Card>
             </>
           )}
         </>
       )}
     </div>
+    </CommentProvider>
   );
 }

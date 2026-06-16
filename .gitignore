@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 client/node_modules/
+.opencode/node_modules/
 
 # Build outputs
 client/build/
@@ -38,10 +39,17 @@ pnpm-debug.log*
 .parcel-cache/
 .eslintcache
 .npm/
+client/node_modules/.cache/
 
 # Local tool state
 .claude/*.lock
 .claude/*.local.json
+
+# One-off scripts at repo root (should live in server/scripts/)
+tmp_*.js
+__*.js
+verify_*.js
+run_*.js
 
 # OS and editor files
 .DS_Store
@@ -51,6 +59,3 @@ Desktop.ini
 .idea/
 *.swp
 *.swo
-
-# Stray directory created by a malformed brace command
-/{server,client/

@@ -83,7 +83,7 @@ export default function ByProductPage(){
             <ResponsiveContainer width="100%" height={280}>
               <BarChart data={[...chartData].sort((a,b)=>b.rev-a.rev)} layout="vertical" barSize={16}>
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.06)" horizontal={false}/>
-                <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={v=>v>=1000?`$${(v/1000).toFixed(0)}k`:`$${v}`}/>
+                <XAxis type="number" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} tickFormatter={fmt$}/>
                 <YAxis dataKey="name" type="category" tick={{fontSize:10,fill:'var(--text2)'}} tickLine={false} axisLine={false} width={130}/>
                 <Tooltip formatter={v=>fmt$(v)} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Bar dataKey="rev" name={L.sales} radius={[0,4,4,0]}>

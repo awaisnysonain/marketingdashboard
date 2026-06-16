@@ -3,11 +3,14 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getFloTopline, fmt$ } from '../utils/api';
+import { getFloTopline, fmt$, fmtRatio } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
+import { CommentProvider } from '../components/CommentProvider';
+import { commentTargetKey } from '../utils/commentKeys';
+import { aggCellKey, dailyCellKey, dailyCellLabel } from '../utils/sheetComments';
 import { L, TIP } from '../copy/plainLanguage';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
@@ -93,6 +96,7 @@ export default function FloPage({ showToast }) {
     .sort((a,b) => b.revenue - a.revenue);
 
   return (
+    <CommentProvider pageKey="app-flo">
     <div>
       <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, flexWrap:'wrap', gap:12 }}>
         <PageIntro title="Pilates FLO" desc="Sales, ad spend, channels, regions, and products for Pilates FLO." accent="#14b8a6" />
@@ -102,12 +106,12 @@ export default function FloPage({ showToast }) {
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label={`Total ${L.sales}`}     value={fmt$(totals.revenue)} tooltip={TIP.revenue} color="flo"  />
-            <KpiCard label={`Total ${L.spend}`}       value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn" />
-            <KpiCard label={L.mer}               value={avgMer.toFixed(2) + 'x'} tooltip={TIP.mer} color="green"/>
-            <KpiCard label="Top channel"       value={topChannelByRev}               color="blue" />
-            <KpiCard label={`Best ${L.roas} channel`} value={bestROASChannel}               color="teal" />
-            <KpiCard label="Top Product"       value={productList[0]?.product_line || '—'} color="nobl" />
+            <KpiCard label={`Total ${L.sales}`} value={fmt$(totals.revenue)} fullValue={fmt$(totals.revenue)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_revenue'), targetLabel: `Total ${L.sales}` }} />
+            <KpiCard label={`Total ${L.spend}`} value={fmt$(totals.spend)} fullValue={fmt$(totals.spend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: `Total ${L.spend}` }} />
+            <KpiCard label={L.mer} value={fmtRatio(avgMer)} copyValue={avgMer.toFixed(4)} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: L.mer }} />
+            <KpiCard label="Top channel" value={topChannelByRev} copyValue={topChannelByRev} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('top_channel'), targetLabel: 'Top Channel' }} />
+            <KpiCard label={`Best ${L.roas} channel`} value={bestROASChannel} copyValue={bestROASChannel} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('best_roas_channel'), targetLabel: `Best ${L.roas} Channel` }} />
+            <KpiCard label="Top Product" value={productList[0]?.product_line || '—'} copyValue={productList[0]?.product_line || ''} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('top_product'), targetLabel: 'Top Product' }} />
           </div>
 
           <div style={{ display:'flex', gap:2, marginBottom:20, borderBottom:'1px solid var(--border)' }}>
@@ -129,6 +133,7 @@ export default function FloPage({ showToast }) {
         </>
       )}
     </div>
+    </CommentProvider>
   );
 }
 
@@ -143,6 +148,7 @@ function ToplineTab({ summary }) {
     [L.orders]:    r.total_orders,
     [L.ncOrders]: r.new_customer_orders,
     'Repeat customer orders': r.returning_customer_orders,
+    _date: r.date,
   }));
   return (
     <div>
@@ -172,7 +178,14 @@ function ToplineTab({ summary }) {
           Daily Summary
           <span style={{ fontSize:11, fontWeight:400, color:'var(--text3)', marginLeft:8 }}>— click cells · shift+click range · ctrl+C copy</span>
         </div>
-        <PaginatedSheetTable headers={FLO_TOPLINE_HEADERS} rows={sheetRows} defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable
+          headers={FLO_TOPLINE_HEADERS}
+          rows={sheetRows}
+          defaultSortField="Date"
+          defaultSortDir="desc"
+          getCellCommentKey={(row, h) => dailyCellKey('topline', row, h, 'Date')}
+          getCellCommentLabel={(row, h) => dailyCellLabel(h, row, 'Date')}
+        />
       </div>
     </div>
   );
@@ -207,7 +220,14 @@ function ChannelsTab({ channelList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Channel Performance</div>
-        <PaginatedSheetTable headers={FLO_CH_HEADERS} rows={chRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable
+          headers={FLO_CH_HEADERS}
+          rows={chRows}
+          defaultSortField={L.sales}
+          defaultSortDir="desc"
+          searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('channel', row, h, 'Channel')}
+        />
       </div>
     </div>
   );
@@ -256,7 +276,14 @@ function GeoTab({ geoList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Geographic Breakdown</div>
-        <PaginatedSheetTable headers={FLO_GEO_HEADERS} rows={geoSheetRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable
+          headers={FLO_GEO_HEADERS}
+          rows={geoSheetRows}
+          defaultSortField={L.sales}
+          defaultSortDir="desc"
+          searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('geo', row, h, 'Region')}
+        />
       </div>
     </div>
   );
@@ -295,7 +322,14 @@ function ProductsTab({ productList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Product Performance</div>
-        <PaginatedSheetTable headers={FLO_PROD_HEADERS} rows={prodRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable
+          headers={FLO_PROD_HEADERS}
+          rows={prodRows}
+          defaultSortField={L.sales}
+          defaultSortDir="desc"
+          searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('product', row, h, 'Product')}
+        />
       </div>
     </div>
   );

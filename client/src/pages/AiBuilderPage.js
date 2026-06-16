@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { generateDashboard, executeDashboard, saveDashboard, fmt$, aiChat } from '../utils/api';
+import { generateDashboard, executeDashboard, saveDashboard, fmt$, fmtNum, fmtPct, aiChat } from '../utils/api';
 import { Icons } from '../components/Icons';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 
@@ -31,10 +31,10 @@ function fmtDateLabel(s) {
 function formatCell(v, format) {
   if (v === null || v === undefined) return '—';
   if (format === 'currency') return fmt$(v);
-  if (format === 'percent') return `${(parseFloat(v)*100).toFixed(1)}%`;
-  if (format === 'number') return typeof v === 'number' ? v.toLocaleString(undefined,{maximumFractionDigits:2}) : v;
+  if (format === 'percent') return fmtPct(v);
+  if (format === 'number') return fmtNum(v);
   if (format === 'date') return fmtDateLabel(v);
-  return typeof v === 'number' ? v.toLocaleString(undefined,{maximumFractionDigits:2}) : String(v);
+  return typeof v === 'number' ? fmtNum(v) : String(v);
 }
 
 function KpiSection({ section, data }) {
@@ -75,11 +75,11 @@ function ChartSection({ section, data, type }) {
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
         <XAxis dataKey={xField} tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)"
           tickFormatter={v => /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? fmtDateLabel(v) : v}/>
-        <YAxis tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)" width={56}
-          tickFormatter={v => Math.abs(v)>=1e6 ? `$${(v/1e6).toFixed(1)}M` : Math.abs(v)>=1e3 ? `$${(v/1e3).toFixed(0)}K` : String(v)}/>
+        <YAxis tick={{fontSize:10,fill:'var(--text3)'}} stroke="var(--border2)" width={88}
+          tickFormatter={v => fmt$(v)}/>
         <Tooltip
           contentStyle={{background:'var(--bg2)',border:'1px solid var(--border)',borderRadius:8,fontSize:12}}
-          formatter={(v,n)=>[typeof v==='number'?v.toLocaleString(undefined,{maximumFractionDigits:2}):v,n]}
+          formatter={(v,n)=>[typeof v==='number'?fmtNum(v):v,n]}
           labelFormatter={l=>/^\d{4}-\d{2}-\d{2}/.test(String(l))?fmtDateLabel(l):l}/>
         <Legend wrapperStyle={{fontSize:11}}/>
         {series.map((s,i)=>{

@@ -9,10 +9,9 @@ const SCHEMA_CONTEXT = `
 AVAILABLE DATABASE TABLES (PostgreSQL — use the EXACT names below):
 
 1. tw_summary_daily — Daily totals per brand (brand-level rollup, both NOBL and FLO)
-   Columns: date, brand, order_revenue, gross_minus_discounts, total_revenue, total_spend, mer, total_orders,
+   Columns: date, brand, order_revenue, total_revenue, total_spend, mer, total_orders,
             new_customer_orders, returning_customer_orders, shopify_revenue, amazon_revenue, total_sales, refund_amount
    ▸ order_revenue = Gross Product Sales + Shipping + Taxes − Discounts (use for MER)
-   ▸ gross_minus_discounts = Gross Product Sales − Discounts (excludes shipping & taxes)
    ▸ ALWAYS filter by brand (use filters.brand: 'NOBL' or 'FLO').
    ▸ NOBL already includes EU customers (one Shopify store, all regions).
    ▸ FLO totals are FLO US only. FLO EU is a separate store and is excluded.
@@ -244,7 +243,7 @@ COMMON PATTERNS:
 // ── Allowed tables and their allowed columns ──────────────────────
 // Only real tables in PG. AI's selection is constrained to this map.
 const ALLOWED_TABLES = {
-  tw_summary_daily:        ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders','order_revenue','gross_minus_discounts','shopify_revenue','amazon_revenue','total_sales','refund_amount','refund_count'],
+  tw_summary_daily:        ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders','order_revenue','shopify_revenue','amazon_revenue','total_sales','refund_amount','refund_count'],
   tw_channel_daily:        ['date','brand','channel','spend_1d','revenue_1d','purchases_1d','roas_1d','spend_7d','new_cust_orders','cac','portable_cac','wooden_cac','metal_cac'],
   tw_store_summary_daily:  ['date','store_key','brand','total_revenue','total_spend','mer','total_orders'],
   tw_product_daily:        ['date','brand','product_line','spend','new_cust_orders','revenue','meta_spend','google_spend','tiktok_spend','snap_spend','pinterest_spend','bing_spend','applovin_spend'],

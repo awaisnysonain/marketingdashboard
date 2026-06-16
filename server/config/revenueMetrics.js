@@ -1,11 +1,10 @@
 /**
- * Dual revenue metrics — definitions and TW SQL expressions.
+ * Revenue metrics — definitions and TW SQL expressions.
  *
- * 1. gross_minus_discounts — Shopify-style product gross minus discounts
- *    (excludes shipping & taxes). Amazon rows use TW gross_sales markup adjustment.
+ * order_revenue — Gross Product Sales + Shipping + Taxes − Discounts
+ * (Triple Whale "Order Revenue"; before refunds). MER uses this metric.
  *
- * 2. order_revenue — Gross Product Sales + Shipping + Taxes − Discounts
- *    (Triple Whale "Order Revenue"; before refunds). MER uses this metric.
+ * gross_minus_discounts is still computed/stored by ETL but not exposed in the UI.
  */
 
 /** TW amazon fee rates applied to (gross_product_sales − gross_sales) markup. */
@@ -13,14 +12,6 @@ const AMAZON_GMD_FEE_RATE = 0.020488286;
 const AMAZON_ORD_FEE_RATE = 0.063436047;
 
 const METRICS = {
-  gross_minus_discounts: {
-    key: 'gross_minus_discounts',
-    label: 'Gross − Discounts',
-    shortLabel: 'Gross − Disc',
-    formula: 'Gross Product Sales − Discounts (product subtotal; excludes shipping & taxes)',
-    tooltip:
-      'Product gross sales minus discounts only. Shopify-style subtotal metric — does not include shipping or taxes.',
-  },
   order_revenue: {
     key: 'order_revenue',
     label: 'Order Revenue',

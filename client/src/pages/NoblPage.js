@@ -3,11 +3,14 @@ import {
   AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getNoblTopline, fmt$ } from '../utils/api';
+import { getNoblTopline, fmt$, fmtRatio } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import PageIntro from '../components/PageIntro';
+import { CommentProvider } from '../components/CommentProvider';
+import { commentTargetKey } from '../utils/commentKeys';
+import { aggCellKey, dailyCellKey, dailyCellLabel } from '../utils/sheetComments';
 import { L, TIP } from '../copy/plainLanguage';
 
 function toISO(d) { return d.toISOString().slice(0, 10); }
@@ -117,6 +120,7 @@ export default function NoblPage({ showToast }) {
   };
 
   return (
+    <CommentProvider pageKey="app-nobl">
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <PageIntro title="NOBL Air" desc="Sales, ad spend, channels, regions, and subscriptions for the NOBL Air brand." accent="#6366f1" />
@@ -127,12 +131,12 @@ export default function NoblPage({ showToast }) {
         <>
           {/* KPI Row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
-            <KpiCard label={`Total ${L.sales}`} value={fmt$(totals.revenue)} tooltip={TIP.revenue} color="nobl" />
-            <KpiCard label={`Total ${L.spend}`} value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn" />
-            <KpiCard label={L.mer} value={avgMer.toFixed(2) + 'x'} tooltip={TIP.mer} color="green" />
-            <KpiCard label={L.subRevenue} value={fmt$(totalSubRev)} color="purple" />
-            <KpiCard label="Top channel" value={topChannelByRev} color="blue" />
-            <KpiCard label={`Best ${L.roas} channel`} value={bestROASChannel} color="teal" />
+            <KpiCard label={`Total ${L.sales}`} value={fmt$(totals.revenue)} fullValue={fmt$(totals.revenue)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_revenue'), targetLabel: `Total ${L.sales}` }} />
+            <KpiCard label={`Total ${L.spend}`} value={fmt$(totals.spend)} fullValue={fmt$(totals.spend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: `Total ${L.spend}` }} />
+            <KpiCard label={L.mer} value={fmtRatio(avgMer)} copyValue={avgMer.toFixed(4)} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: L.mer }} />
+            <KpiCard label={L.subRevenue} value={fmt$(totalSubRev)} fullValue={fmt$(totalSubRev)} tooltip={TIP.subRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('sub_revenue'), targetLabel: L.subRevenue }} />
+            <KpiCard label="Top channel" value={topChannelByRev} copyValue={topChannelByRev} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('top_channel'), targetLabel: 'Top Channel' }} />
+            <KpiCard label={`Best ${L.roas} channel`} value={bestROASChannel} copyValue={bestROASChannel} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('best_roas_channel'), targetLabel: `Best ${L.roas} Channel` }} />
           </div>
 
           {/* Inner Tabs */}
@@ -155,6 +159,7 @@ export default function NoblPage({ showToast }) {
         </>
       )}
     </div>
+    </CommentProvider>
   );
 }
 
@@ -168,6 +173,7 @@ function ToplineTab({ summary }) {
     [L.orders]:    r.total_orders,
     [L.ncOrders]: r.new_customer_orders,
     'Repeat customer orders': r.returning_customer_orders,
+    _date: r.date,
   }));
   return (
     <div>
@@ -193,7 +199,14 @@ function ToplineTab({ summary }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Summary</div>
-        <PaginatedSheetTable headers={NOBL_TOPLINE_HEADERS} rows={sheetRows} defaultSortField={L.date} defaultSortDir="desc" />
+        <PaginatedSheetTable
+          headers={NOBL_TOPLINE_HEADERS}
+          rows={sheetRows}
+          defaultSortField={L.date}
+          defaultSortDir="desc"
+          getCellCommentKey={(row, h) => dailyCellKey('topline', row, h)}
+          getCellCommentLabel={(row, h) => dailyCellLabel(h, row)}
+        />
       </div>
     </div>
   );
@@ -226,7 +239,14 @@ function ChannelsTab({ channels, channelList }) {
       </div>
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Channel Performance</div>
-        <PaginatedSheetTable headers={NOBL_CH_HEADERS} rows={chRows} defaultSortField={L.sales} defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable
+          headers={NOBL_CH_HEADERS}
+          rows={chRows}
+          defaultSortField={L.sales}
+          defaultSortDir="desc"
+          searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('channel', row, h, 'Channel')}
+        />
       </div>
     </div>
   );
@@ -277,6 +297,7 @@ function GeoTab({ geoList, geo }) {
           defaultSortField={L.sales}
           defaultSortDir="desc"
           searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('geo', row, h, 'Region')}
         />
       </div>
     </div>
@@ -293,6 +314,7 @@ function SubsTab({ subs, subStats }) {
     'Gross':       r.shopify_sub_gross,
     'Discount':    r.shopify_sub_disc,
     'Refunds':     r.shopify_sub_refunds,
+    _date: r.date,
   }));
   return (
     <div>
@@ -330,6 +352,8 @@ function SubsTab({ subs, subStats }) {
             rows={subSheetRows}
             defaultSortField={L.date}
             defaultSortDir="desc"
+            getCellCommentKey={(row, h) => dailyCellKey('subs', row, h, L.date)}
+            getCellCommentLabel={(row, h) => dailyCellLabel(h, row, L.date)}
           />
         </div>
       </div>

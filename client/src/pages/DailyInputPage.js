@@ -169,7 +169,7 @@ export default function DailyInputPage(){
                 <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,.05)"/>
                 <XAxis dataKey="date" tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} interval={4}/>
                 <YAxis tick={{fontSize:10,fill:'var(--text3)'}} tickLine={false} axisLine={false} unit="%" tickFormatter={v=>v.toFixed(0)}/>
-                <Tooltip formatter={v=>`${v.toFixed(1)}%`} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
+                <Tooltip formatter={fmtPct} contentStyle={{background:'var(--bg3)',border:'1px solid var(--border2)',borderRadius:8,fontSize:12}}/>
                 <Line type="monotone" dataKey="attach" name={L.attachRate} stroke="var(--teal)" strokeWidth={2} dot={false}/>
               </LineChart>
             </ResponsiveContainer>

@@ -7,7 +7,9 @@
  *   tw_summary_daily     — order_revenue (Gross+Ship+Tax−Disc), gross_minus_discounts,
  *                          total_spend (= ads_table), order counts.
  *   tw_channel_daily     — spend from ads_table by channel; revenue/orders from
- *                          pixel_joined_tvf Triple Attribution + 1_day window.
+ *                          pixel_joined_tvf Triple Attribution + 1_day window,
+ *                          except AMAZON (NOBL) which uses ads_table conversion_value
+ *                          (Amazon Ads platform-attributed OPS).
  *   tw_geo_daily         — revenue from orders_table; spend from ads_table country
  *                          breakdown (US/CA/AUS/DUBAI/EU/OTHER/TOTAL).
  *   tw_product_daily     — FLO product-line breakdown (portable/wooden/metal).
@@ -77,6 +79,18 @@ function mapTwChannelToKey(twChannel, brand) {
   if (!key) return null;
   if (key === 'X' && !BRAND_CONFIG[brand]?.includeXChannel) return null;
   return key;
+}
+
+/** CAC denominator — Amazon Ads has no new-customer split; use conversions (purchases). */
+function channelCac(channel, spend, newCust, purchases) {
+  const sp = Number(spend || 0);
+  if (sp <= 0) return null;
+  if (channel === 'AMAZON') {
+    const denom = Number(purchases || 0) || Number(newCust || 0);
+    return denom > 0 ? sp / denom : null;
+  }
+  const nc = Number(newCust || 0);
+  return nc > 0 ? sp / nc : null;
 }
 
 function nextYmd(ymd) {
@@ -169,10 +183,12 @@ async function fetchBlendedShopifyRevenue(brand, startYmd, endYmd) {
   return indexByDate(rows, 'shopify_revenue');
 }
 
+/** Total Amazon marketplace order revenue (topline split; Seller Central OPS basis). */
 async function fetchAmazonRevenue(brand, startYmd, endYmd) {
+  const ordExpr = sqlOrderRevenue(true);
   const rows = await twSqlQuery(brand,
     `SELECT ot.event_date AS event_date,
-            COALESCE(SUM(ot.gross_product_sales), 0) AS amazon_revenue
+            COALESCE(SUM(${ordExpr}), 0) AS amazon_revenue
      FROM orders_table AS ot
      WHERE ot.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
        AND ot.platform = 'amazon'
@@ -180,6 +196,30 @@ async function fetchAmazonRevenue(brand, startYmd, endYmd) {
      GROUP BY ot.event_date ORDER BY ot.event_date`,
     { period: { startDate: startYmd, endDate: endYmd } });
   return indexByDate(rows, 'amazon_revenue');
+}
+
+/** Amazon marketplace order counts (orders_table) for channel daily fallback. */
+async function fetchAmazonOrderCounts(brand, startYmd, endYmd) {
+  const rows = await twSqlQuery(brand,
+    `SELECT ot.event_date AS event_date,
+            uniq(ot.order_id) AS total_orders,
+            uniqIf(ot.order_id, ot.is_new_customer = 1) AS new_customer_orders
+     FROM orders_table AS ot
+     WHERE ot.platform = 'amazon'
+       AND ot.amazon_fulfillment_status != 'Canceled'
+       AND ot.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
+     GROUP BY ot.event_date ORDER BY ot.event_date`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+  const out = {};
+  (rows || []).forEach((r) => {
+    const ymd = String(r?.event_date || '').slice(0, 10);
+    if (!ymd) return;
+    out[ymd] = {
+      total_orders: Number(r?.total_orders || 0),
+      new_customer_orders: Number(r?.new_customer_orders || 0),
+    };
+  });
+  return out;
 }
 
 async function fetchAdSpend(brand, startYmd, endYmd) {
@@ -305,6 +345,59 @@ async function fetchChannelAttribution(brand, startYmd, endYmd) {
      GROUP BY pjt.event_date, pjt.channel ORDER BY pjt.event_date`,
     { period: { startDate: startYmd, endDate: endYmd } });
   return rows || [];
+}
+
+/** Amazon Ads channel — pixel attribution is 0; use ads_table platform attribution. */
+async function fetchAmazonChannelMetrics(brand, startYmd, endYmd) {
+  const cfg = BRAND_CONFIG[brand];
+  if (!cfg?.includeAmazon) return {};
+
+  const rows = await twSqlQuery(brand,
+    `SELECT adt.event_date AS event_date,
+            COALESCE(SUM(adt.spend), 0) AS spend,
+            COALESCE(SUM(adt.conversion_value), 0) AS revenue,
+            COALESCE(SUM(adt.conversions), 0) AS purchases
+     FROM ads_table AS adt
+     WHERE adt.channel = 'amazon'
+       AND adt.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
+     GROUP BY adt.event_date ORDER BY adt.event_date`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+
+  const out = {};
+  (rows || []).forEach(r => {
+    const ymd = String(r?.event_date || '').slice(0, 10);
+    if (!ymd) return;
+    const purchases = Number(r.purchases || 0);
+    out[ymd] = {
+      spend: Number(r.spend || 0),
+      revenue: Number(r.revenue || 0),
+      purchases,
+      // TW ads_table has no new-customer split for Amazon — use conversions as proxy.
+      new_customer_orders: purchases,
+    };
+  });
+  return out;
+}
+
+/** Amazon marketplace fulfillment cost (COGS + handling) when ads spend is zero. */
+async function fetchAmazonMarketplaceCosts(brand, startYmd, endYmd) {
+  const rows = await twSqlQuery(brand,
+    `SELECT ot.event_date AS event_date,
+            COALESCE(SUM(ot.cost_of_goods), 0)
+              + COALESCE(SUM(ot.handling_fees), 0) AS marketplace_cost
+     FROM orders_table AS ot
+     WHERE ot.platform = 'amazon'
+       AND ot.amazon_fulfillment_status != 'Canceled'
+       AND ot.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
+     GROUP BY ot.event_date ORDER BY ot.event_date`,
+    { period: { startDate: startYmd, endDate: endYmd } });
+  const out = {};
+  (rows || []).forEach((r) => {
+    const ymd = String(r?.event_date || '').slice(0, 10);
+    if (!ymd) return;
+    out[ymd] = Number(r?.marketplace_cost || 0);
+  });
+  return out;
 }
 
 /** @deprecated use fetchChannelAttribution + fetchChannelSpend */
@@ -472,6 +565,15 @@ async function refreshBrand(brand, startYmd, endYmd) {
   const regionSp = await fetchRegionSpend(brand, startYmd, endYmd);
   const channelSpend = await fetchChannelSpend(brand, startYmd, endYmd);
   const channelAttr = await fetchChannelAttribution(brand, startYmd, endYmd);
+  const amazonChannel = cfg.includeAmazon
+    ? await fetchAmazonChannelMetrics(brand, startYmd, endYmd)
+    : {};
+  const amazonOrders = cfg.includeAmazon
+    ? await fetchAmazonOrderCounts(brand, startYmd, endYmd)
+    : {};
+  const amazonMarketplaceCosts = cfg.includeAmazon
+    ? await fetchAmazonMarketplaceCosts(brand, startYmd, endYmd)
+    : {};
 
   // Optional EU shop — revenue via euBrand, ad spend via euSpendBrand (NOBL only).
   let euRev = {};
@@ -509,9 +611,11 @@ async function refreshBrand(brand, startYmd, endYmd) {
     const metrics  = dualRev[date] || { gross_minus_discounts: 0, order_revenue: 0 };
     const orderRev = Number(metrics.order_revenue || 0);
     const gmd      = Number(metrics.gross_minus_discounts || 0);
-    const shopVal  = Number(shopRev[date] || orderRev);
+    const shopVal  = cfg.includeAmazon
+      ? Math.max(0, orderRev - Number(amzRev[date] || 0))
+      : Number(shopRev[date] || orderRev);
     const amzVal   = cfg.includeAmazon
-      ? Math.max(0, orderRev - shopVal)
+      ? Number(amzRev[date] || 0)
       : 0;
     const totalRev = orderRev;
     const totalSp  = Number(spend[date] || 0) + Number(euSpend[date] || 0);
@@ -632,6 +736,39 @@ async function refreshBrand(brand, startYmd, endYmd) {
     out.purchases = Number(row.purchases || 0);
     out.new_customer_orders = Number(row.new_customer_orders || 0);
   }
+  // Override AMAZON — pixel_joined has no Amazon attribution; use Amazon Ads platform data.
+  for (const [date, metrics] of Object.entries(amazonChannel)) {
+    const out = ensureCh(date, 'AMAZON');
+    if (Number(metrics.spend || 0) > 0) {
+      out.spend = Number(metrics.spend);
+    }
+    out.revenue = Number(metrics.revenue || 0);
+    out.purchases = Number(metrics.purchases || 0);
+    out.new_customer_orders = Number(metrics.new_customer_orders || 0);
+  }
+  // Daily AMAZON channel rows for every day with marketplace sales (orders_table OPS).
+  // When ads attribution is zero, use marketplace OPS + order counts + fulfillment cost.
+  if (cfg.includeAmazon) {
+    for (const [date, opsRaw] of Object.entries(amzRev)) {
+      const marketplaceOps = Number(opsRaw || 0);
+      const ord = amazonOrders[date] || {};
+      if (marketplaceOps <= 0 && !ord.total_orders) continue;
+      const out = ensureCh(date, 'AMAZON');
+      if (Number(out.revenue || 0) <= 0 && marketplaceOps > 0) {
+        out.revenue = marketplaceOps;
+      }
+      if (Number(out.purchases || 0) <= 0 && Number(ord.total_orders || 0) > 0) {
+        out.purchases = Number(ord.total_orders);
+      }
+      if (Number(out.new_customer_orders || 0) <= 0 && Number(ord.new_customer_orders || 0) > 0) {
+        out.new_customer_orders = Number(ord.new_customer_orders);
+      }
+      if (Number(out.spend || 0) <= 0) {
+        const cost = Number(amazonMarketplaceCosts[date] || 0);
+        if (cost > 0) out.spend = cost;
+      }
+    }
+  }
 
   let chWritten = 0;
   for (const row of channelMerged.values()) {
@@ -657,7 +794,7 @@ async function refreshBrand(brand, startYmd, endYmd) {
       sp, rv, purch,
       sp > 0 ? rv / sp : null,
       nc,
-      nc > 0 ? sp / nc : null,
+      channelCac(row.channel, sp, nc, purch),
     ]);
     chWritten++;
   }

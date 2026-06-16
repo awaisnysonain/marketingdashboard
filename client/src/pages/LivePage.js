@@ -3,23 +3,23 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine,
 } from 'recharts';
+import SharedKpiCard from '../components/KpiCard';
+import SheetTable from '../components/SheetTable';
+import { CommentProvider } from '../components/CommentProvider';
+import { commentTargetKey } from '../utils/commentKeys';
+import { TIP } from '../copy/plainLanguage';
 
-// ── Utils ─────────────────────────────────────────────────────────────────────
+import { fmt$, fmtNum, fmtRatio, fmtPct } from '../utils/api';
+
 const API = (path) => fetch(path, { credentials: 'include' }).then(r => r.json());
 
 const fmt = {
-  currency: (v) => {
-    if (v == null || isNaN(v)) return '—';
-    const n = Number(v);
-    if (n >= 1e6)  return `$${(n/1e6).toFixed(2)}M`;
-    if (n >= 1000) return `$${(n/1000).toFixed(1)}K`;
-    return `$${n.toFixed(0)}`;
-  },
-  num:   (v) => v == null ? '—' : Number(v).toLocaleString(),
-  ratio: (v) => v == null ? '—' : `${Number(v).toFixed(2)}x`,
-  pct:   (v) => v == null ? '—' : `${(Number(v)*100).toFixed(1)}%`,
+  currency: fmt$,
+  num: fmtNum,
+  ratio: fmtRatio,
+  pct: (v) => v == null ? '—' : fmtPct(v),
   date:  (v) => v ? String(v).slice(5) : '—',
-  full:  (v) => v ? String(v).slice(0,10) : '—',
+  full:  (v) => v ? String(v).slice(0, 10) : '—',
 };
 
 const STATUS = {
@@ -69,35 +69,6 @@ const ErrBox = ({ msg, onRetry }) => (
     {onRetry && <button onClick={onRetry} style={{ padding:'6px 14px', borderRadius:7, background:'var(--accent)', color:'#fff', border:'none', fontSize:12, fontWeight:600, cursor:'pointer' }}>Retry</button>}
   </div>
 );
-
-// ── KPI Card ──────────────────────────────────────────────────────────────────
-function KpiCard({ label, value, format='currency', status, sub, icon, delta }) {
-  const st = STATUS[status] || {};
-  return (
-    <div style={{
-      background: status ? st.bg : 'var(--bg2)',
-      border: `1px solid ${status ? st.border : 'var(--border2)'}`,
-      borderRadius:14, padding:'18px 20px',
-      display:'flex', flexDirection:'column', gap:6,
-      position:'relative', overflow:'hidden',
-    }}>
-      {status && <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background:st.color, borderRadius:'14px 14px 0 0' }}/>}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-        <div style={{ fontSize:11, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.06em' }}>{label}</div>
-        {icon && <span style={{ fontSize:16, opacity:.5 }}>{icon}</span>}
-      </div>
-      <div style={{ fontSize:28, fontWeight:900, color: status ? st.color : 'var(--text)', lineHeight:1, letterSpacing:'-.5px' }}>
-        {fmt[format]?.(value) ?? '—'}
-      </div>
-      {sub && <div style={{ fontSize:11, color:'var(--text3)', marginTop:1 }}>{sub}</div>}
-      {delta != null && (
-        <div style={{ fontSize:11, fontWeight:600, color: delta>=0 ? '#22c55e' : '#ef4444' }}>
-          {delta>=0 ? '▲' : '▼'} {Math.abs(delta).toFixed(1)}% vs prev period
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ── Section header ────────────────────────────────────────────────────────────
 const SH = ({ title, sub, right }) => (
@@ -151,7 +122,7 @@ function SpendBar({ channels }) {
     <ResponsiveContainer width="100%" height={Math.max(160, data.length*34)}>
       <BarChart data={data} layout="vertical" margin={{ top:4, right:12, left:58, bottom:4 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
-        <XAxis type="number" tick={{ fontSize:9, fill:'var(--text3)' }} tickFormatter={v=>`$${(v/1000).toFixed(0)}K`} axisLine={false} tickLine={false}/>
+        <XAxis type="number" tick={{ fontSize:9, fill:'var(--text3)' }} tickFormatter={fmt$} axisLine={false} tickLine={false}/>
         <YAxis dataKey="name" type="category" tick={{ fontSize:11, fill:'var(--text2)', fontWeight:600 }} width={56} axisLine={false} tickLine={false}/>
         <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:8, fontSize:12 }} formatter={v=>[fmt.currency(v),'Spend']}/>
         <Bar dataKey="spend" radius={[0,6,6,0]} maxBarSize={22}>
@@ -192,7 +163,7 @@ function GeoCards({ geo, loading, brand }) {
       {regions.map(g => {
         const isEU   = g.region === 'EU';
         const st     = STATUS[g.mer_status] || STATUS.gray;
-        const revPct = totalRev > 0 ? ((g.revenue / totalRev) * 100).toFixed(1) : '0.0';
+        const revPct = totalRev > 0 ? fmtPct((g.revenue / totalRev)) : '0%';
         return (
           <div key={g.region} style={{
             background: st.bg || 'var(--bg2)',
@@ -243,51 +214,43 @@ function GeoCards({ geo, loading, brand }) {
   );
 }
 
+const LIVE_CH_HEADERS = ['Channel', 'Spend', 'Revenue', 'ROAS', 'Orders', 'NC Orders', 'CAC', 'AOV'];
+const LIVE_CH_FIELD_KEYS = {
+  Channel: 'channel', Spend: 'spend', Revenue: 'revenue', ROAS: 'roas',
+  Orders: 'purchases', 'NC Orders': 'nc_orders', CAC: 'cac', AOV: 'aov',
+};
+
 // ── Channel table ─────────────────────────────────────────────────────────────
-function ChannelTable({ channels, loading }) {
+function ChannelTable({ channels, loading, asOfDate }) {
   if (loading) return <div style={{ padding:16 }}>{[...Array(4)].map((_,i)=><div key={i} style={{ marginBottom:8 }}><Skeleton h={36}/></div>)}</div>;
   if (!channels?.length) return <div style={{ padding:'20px 16px', color:'var(--text3)', fontSize:13 }}>No channel data for this date</div>;
 
-  const sortedChannels = [...channels].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
-
-  const cols = [
-    { h:'Channel',   render:(ch)=>(
-      <span style={{ display:'flex', alignItems:'center', gap:8 }}>
-        <span style={{ width:28, height:28, borderRadius:7, background:CHANNEL_META[ch.channel]?.color||'#888', display:'flex', alignItems:'center', justifyContent:'center', fontSize:10, fontWeight:800, color:'#fff', flexShrink:0 }}>{CHANNEL_META[ch.channel]?.short||ch.channel[0]}</span>
-        <span style={{ fontWeight:700, color:'var(--text)', fontSize:13 }}>{CHANNEL_META[ch.channel]?.label||ch.channel}</span>
-      </span>
-    )},
-    { h:'Spend',     render:(ch)=><span style={{ fontWeight:600, color:'var(--text2)' }}>{fmt.currency(ch.spend)}</span> },
-    { h:'Revenue',   render:(ch)=><span style={{ color:'var(--text2)' }}>{fmt.currency(ch.revenue)}</span> },
-    { h:'ROAS',      render:(ch)=><Pill s={ch.roas_status}>{fmt.ratio(ch.roas)}</Pill> },
-    { h:'Orders',    render:(ch)=><span style={{ color:'var(--text2)' }}>{fmt.num(ch.purchases)}</span> },
-    { h:'NC Orders', render:(ch)=><span style={{ color:'var(--text2)' }}>{fmt.num(ch.nc_orders)}</span> },
-    { h:'CAC',       render:(ch)=><span style={{ color:'var(--text2)' }}>{ch.cac>0?fmt.currency(ch.cac):'—'}</span> },
-    { h:'AOV',       render:(ch)=><span style={{ color:'var(--text2)' }}>{ch.purchases>0?fmt.currency(ch.revenue/ch.purchases):'—'}</span> },
-  ];
+  const rows = [...channels]
+    .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
+    .map((ch) => ({
+      Channel: CHANNEL_META[ch.channel]?.label || ch.channel,
+      Spend: ch.spend,
+      Revenue: ch.revenue,
+      ROAS: ch.roas,
+      Orders: ch.purchases,
+      'NC Orders': ch.nc_orders,
+      CAC: ch.cac > 0 ? ch.cac : null,
+      AOV: ch.purchases > 0 ? ch.revenue / ch.purchases : null,
+      _channel: ch.channel,
+    }));
 
   return (
-    <div style={{ overflowX:'auto' }}>
-      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-        <thead>
-          <tr>
-            {cols.map(c=>(
-              <th key={c.h} style={{ padding:'10px 14px', textAlign:'left', fontSize:10, fontWeight:700, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.05em', borderBottom:'2px solid var(--border)', whiteSpace:'nowrap', background:'var(--bg3)' }}>{c.h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {sortedChannels.map((ch,i)=>(
-            <tr key={ch.channel} style={{ background: i%2?'var(--bg3)':'transparent', transition:'background .15s' }}>
-              {cols.map(c=>(
-                <td key={c.h} style={{ padding:'12px 14px', borderBottom:'1px solid var(--border)', whiteSpace:'nowrap', verticalAlign:'middle' }}>
-                  {c.render(ch)}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div style={{ padding: 16 }}>
+      <SheetTable
+        headers={LIVE_CH_HEADERS}
+        rows={rows}
+        keyField="_channel"
+        scrollable={false}
+        searchable={false}
+        hideRowCount
+        getCellCommentKey={(row, h) => commentTargetKey('channel', row._channel, LIVE_CH_FIELD_KEYS[h] || h, asOfDate)}
+        getCellCommentLabel={(row, h) => `${row._channel} · ${h} · ${asOfDate || '—'}`}
+      />
     </div>
   );
 }
@@ -378,6 +341,7 @@ export default function LivePage() {
     : 0;
 
   return (
+    <CommentProvider pageKey="live">
     <div style={{ maxWidth:1380, margin:'0 auto' }}>
       <style>{`
         @keyframes sk { 0%,100%{opacity:1} 50%{opacity:.4} }
@@ -482,17 +446,13 @@ export default function LivePage() {
           </div>
         ) : sum ? (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12 }}>
-            <KpiCard label="Gross − Discounts" value={sum.gross_minus_discounts} format="currency" icon="📊" tooltip="Product gross minus discounts (excludes shipping & taxes)"/>
-            <KpiCard label="Order Revenue"   value={sum.order_revenue || sum.total_revenue} format="currency" icon="💰" tooltip="Gross + Shipping + Taxes − Discounts (MER basis)"/>
-            <KpiCard label="Total ad spend"     value={sum.total_spend}          format="currency" icon="📣"/>
-            <KpiCard label="Sales per ad $"             value={sum.mer}                  format="ratio"    icon="⚡" status={sum.mer_status}
-              sub={sum.mer_status==='green'?'✓ On target (≥2.0)':sum.mer_status==='yellow'?'Near target — needs ≥2.0':'⚠ Below target — needs ≥2.0'}/>
-            <KpiCard label="Total orders"    value={sum.total_orders}         format="num"      icon="🛒"/>
-            <KpiCard label="New customers"   value={sum.new_customer_orders}  format="num"      icon="✨"
-              sub={`${fmt.pct(sum.new_customer_rate)} of all orders`}/>
-            <KpiCard label="Repeat customers"       value={sum.returning_orders}     format="num"      icon="🔄"
-              sub={`${fmt.pct(1-sum.new_customer_rate)} of all orders`}/>
-            <KpiCard label="Avg order size"             value={sum.aov}                  format="currency" icon="🎯"/>
+            <SharedKpiCard label="Order Revenue" value={fmt.currency(sum.order_revenue || sum.total_revenue)} fullValue={String(sum.order_revenue || sum.total_revenue || '')} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
+            <SharedKpiCard label="Total ad spend" value={fmt.currency(sum.total_spend)} fullValue={String(sum.total_spend || '')} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
+            <SharedKpiCard label="Sales per ad $" value={fmt.ratio(sum.mer)} copyValue={sum.mer != null ? Number(sum.mer).toFixed(4) : undefined} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: 'Sales per ad $' }} />
+            <SharedKpiCard label="Total orders" value={fmt.num(sum.total_orders)} fullValue={String(sum.total_orders || '')} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
+            <SharedKpiCard label="New customers" value={fmt.num(sum.new_customer_orders)} fullValue={String(sum.new_customer_orders || '')} tooltip={TIP.ncOrders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }} />
+            <SharedKpiCard label="Repeat customers" value={fmt.num(sum.returning_orders)} fullValue={String(sum.returning_orders || '')} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('returning_orders'), targetLabel: 'Repeat Customers' }} />
+            <SharedKpiCard label="Avg order size" value={fmt.currency(sum.aov)} fullValue={String(sum.aov || '')} tooltip={TIP.aov} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('aov'), targetLabel: 'Avg Order Size' }} />
           </div>
         ) : !errL && resolvedDate ? (
           <div style={{ color:'var(--text3)', fontSize:13, padding:'16px 0' }}>No data for {resolvedDate}</div>
@@ -551,9 +511,9 @@ export default function LivePage() {
         {!errT && (
           <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14 }}>
             {[
-              { key:'mer',     label:'Sales per ad $',     color:'#6366f1', fmt:v=>`${Number(v).toFixed(2)}x`, ref:2.0  },
-              { key:'revenue', label:'Sales', color:'#22c55e', fmt:v=>`$${(v/1000).toFixed(0)}K`         },
-              { key:'spend',   label:'Ad spend',   color:'#f59e0b', fmt:v=>`$${(v/1000).toFixed(0)}K`         },
+              { key:'mer',     label:'Sales per ad $',     color:'#6366f1', fmt:fmt.ratio, ref:2.0  },
+              { key:'revenue', label:'Sales', color:'#22c55e', fmt:fmt.currency         },
+              { key:'spend',   label:'Ad spend',   color:'#f59e0b', fmt:fmt.currency         },
             ].map(c=>(
               <div key={c.key} style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 16px 12px', overflow:'hidden' }}>
                 <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
@@ -607,7 +567,7 @@ export default function LivePage() {
 
         {/* Full table */}
         <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, overflow:'hidden' }}>
-          <ChannelTable channels={channels} loading={loadL}/>
+          <ChannelTable channels={channels} loading={loadL} asOfDate={channelDate || resolvedDate}/>
         </div>
       </div>
 
@@ -631,5 +591,6 @@ export default function LivePage() {
         </div>
       </div>
     </div>
+    </CommentProvider>
   );
 }

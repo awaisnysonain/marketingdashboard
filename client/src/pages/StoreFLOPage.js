@@ -3,10 +3,14 @@ import {
   AreaChart, Area, BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getStoreFlo, fmt$, fmtNum, fmtPct } from '../utils/api';
+import { getStoreFlo, fmt$, fmtNum, fmtPct, fmtRatio } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
+import VerticalDataTable from '../components/VerticalDataTable';
+import { CommentProvider } from '../components/CommentProvider';
+import { commentTargetKey } from '../utils/commentKeys';
+import { aggCellKey, dailyCellKey, dailyCellLabel, entityDateCellKey, entityDateCellLabel } from '../utils/sheetComments';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 import { mtdRange } from '../utils/dateRange';
 function fmtLabel(s) {
@@ -16,6 +20,8 @@ function fmtLabel(s) {
   return `${M[parseInt(mo)-1]} ${parseInt(dy)}`;
 }
 function mer(rev, spend) { return spend > 0 ? (rev / spend) : 0; }
+
+const PAGE_KEY = 'store-flo';
 
 /* ── palettes ─────────────────────────────────────────────────────── */
 const CHANNEL_COL = {
@@ -81,12 +87,11 @@ export default function StoreFLOPage({ showToast }) {
 
   const totals = useMemo(() => summary.reduce((a, r) => ({
     revenue: a.revenue + (r.order_revenue || r.total_revenue || 0),
-    gmd:     a.gmd     + (r.gross_minus_discounts || 0),
     spend:   a.spend   + (r.total_spend   || 0),
     orders:  a.orders  + (r.total_orders  || 0),
     nc:      a.nc      + (r.new_customer_orders      || 0),
     rc:      a.rc      + (r.returning_customer_orders || 0),
-  }), { revenue:0, gmd:0, spend:0, orders:0, nc:0, rc:0 }), [summary]);
+  }), { revenue:0, spend:0, orders:0, nc:0, rc:0 }), [summary]);
 
   const totalMer = mer(totals.revenue, totals.spend);
   const totalAov = totals.orders > 0 ? totals.revenue / totals.orders : 0;
@@ -149,6 +154,7 @@ export default function StoreFLOPage({ showToast }) {
   }), { sent:0, opened:0, clicked:0, revenue:0 }), [email]);
 
   return (
+    <CommentProvider pageKey={PAGE_KEY}>
     <div className="page-stack">
       <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
 
@@ -172,15 +178,14 @@ export default function StoreFLOPage({ showToast }) {
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
           <div className="page-kpi-grid">
-            <KpiCard label="Gross − Discounts" value={fmt$(totals.gmd)} tooltip={TIP.grossMinusDiscounts} color="teal" />
-            <KpiCard label="Order Revenue" value={fmt$(totals.revenue)} tooltip={TIP.orderRevenue} color="teal" />
-            <KpiCard label="Total ad spend"   value={fmt$(totals.spend)} tooltip={TIP.spend} color="warn"   />
-            <KpiCard label={L.mer}           value={totalMer.toFixed(2)+'x'} tooltip={TIP.mer} color={totalMer>=2?'green':totalMer>=1.8?'warn':'red'} />
-            <KpiCard label="Total orders"  value={fmtNum(totals.orders)} tooltip={TIP.orders} color="blue"   />
-            <KpiCard label={L.ncOrders}     value={fmtNum(totals.nc)} tooltip={TIP.ncOrders} color="nobl"   />
-            <KpiCard label={L.aov}           value={fmt$(totalAov)} tooltip={TIP.aov} color="purple" />
-            <KpiCard label={L.nvp}         value={nvpPct.toFixed(1)+'%'} tooltip={TIP.nvp} color={nvpPct>=50?'green':nvpPct>=45?'warn':'red'} />
-            <KpiCard label="Product Lines" value={coreProdAgg.length + ' lines'} color="teal"  />
+            <KpiCard label="Order Revenue" value={fmt$(totals.revenue)} fullValue={fmt$(totals.revenue)} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
+            <KpiCard label="Total ad spend" value={fmt$(totals.spend)} fullValue={fmt$(totals.spend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
+            <KpiCard label={L.mer} value={fmtRatio(totalMer)} copyValue={totalMer.toFixed(4)} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: L.mer }} />
+            <KpiCard label="Total orders" value={fmtNum(totals.orders)} fullValue={String(totals.orders)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
+            <KpiCard label={L.ncOrders} value={fmtNum(totals.nc)} fullValue={String(totals.nc)} tooltip={TIP.ncOrders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nc_orders'), targetLabel: L.ncOrders }} />
+            <KpiCard label={L.aov} value={fmt$(totalAov)} fullValue={fmt$(totalAov)} tooltip={TIP.aov} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('aov'), targetLabel: L.aov }} />
+            <KpiCard label={L.nvp} value={fmtPct(nvpPct)} copyValue={nvpPct.toFixed(2)} tooltip={TIP.nvp} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nvp'), targetLabel: L.nvp }} />
+            <KpiCard label="Product Lines" value={coreProdAgg.length + ' lines'} copyValue={String(coreProdAgg.length)} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('product_lines'), targetLabel: 'Product Lines' }} />
           </div>
 
           <div className="page-tabs">
@@ -204,26 +209,35 @@ export default function StoreFLOPage({ showToast }) {
         </>
       )}
     </div>
+    </CommentProvider>
   );
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    OVERVIEW TAB
 ════════════════════════════════════════════════════════════════════ */
-const OV_HEADERS = ['Date','Gross − Discounts','Order Revenue','Spend','MER','Orders','NC Orders','RC Orders','NVP %','AOV'];
+const OV_METRICS = [
+  { key: 'order_revenue', label: 'Order Revenue', type: '$' },
+  { key: 'total_spend', label: 'Spend', type: '$' },
+  { key: 'mer', label: 'MER', type: 'x' },
+  { key: 'total_orders', label: 'Orders', type: 'num' },
+  { key: 'new_customer_orders', label: 'NC Orders', type: 'num' },
+  { key: 'returning_customer_orders', label: 'RC Orders', type: 'num' },
+  { key: 'nvp_pct', label: 'NVP %', type: 'num' },
+  { key: 'aov', label: 'AOV', type: '$' },
+];
+
 function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
-  const rows = summary.map(r => ({
-    Date:                r.date,
-    'Gross − Discounts': r.gross_minus_discounts,
-    'Order Revenue':     r.order_revenue || r.total_revenue,
-    Spend:               r.total_spend,
-    MER:                 r.mer,
-    Orders:              r.total_orders,
-    'NC Orders':         r.new_customer_orders,
-    'RC Orders':         r.returning_customer_orders,
-    'NVP %':             r.nvp_pct,
-    AOV:                 r.aov,
-  }));
+  const summaryByDate = {};
+  const dates = [];
+  for (const r of summary) {
+    summaryByDate[r.date] = {
+      ...r,
+      order_revenue: r.order_revenue || r.total_revenue,
+    };
+    dates.push(r.date);
+  }
+  dates.sort();
   const chartData = [...summary].reverse();
 
   return (
@@ -245,7 +259,6 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
               contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
             <Legend wrapperStyle={{ fontSize:12 }} />
             <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={FLO_ACCENT} fill="url(#fGradRev)" strokeWidth={2} dot={false} />
-            <Area type="monotone" dataKey="gross_minus_discounts" name="Gross − Discounts" stroke="#6366f1" fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
             <Area type="monotone" dataKey="total_spend"   name="Spend"   stroke={FLO_WARN}  fill="none" strokeWidth={2} strokeDasharray="4 2" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
@@ -259,7 +272,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="date" tickFormatter={fmtLabel} tick={{ fontSize:10 }} stroke="var(--border2)" />
               <YAxis domain={['auto','auto']} tickFormatter={v => v.toFixed(1)+'x'} tick={{ fontSize:10 }} width={42} stroke="var(--border2)" />
-              <Tooltip formatter={(v) => [v?.toFixed(2)+'x','MER']} labelFormatter={fmtLabel}
+              <Tooltip formatter={(v) => [fmtRatio(v), 'MER']} labelFormatter={fmtLabel}
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
               <Line type="monotone" dataKey="mer" name="MER" stroke={FLO_ACCENT} strokeWidth={2} dot={false} />
             </LineChart>
@@ -284,7 +297,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Summary — All Days</div>
-        <PaginatedSheetTable headers={OV_HEADERS} rows={rows} defaultSortField="Date" defaultSortDir="desc" />
+        <VerticalDataTable dates={dates} getRow={(d) => summaryByDate[d]} metrics={OV_METRICS} tableScope="overview" />
       </div>
     </div>
   );
@@ -330,7 +343,7 @@ function ChannelsTab({ channels, chAgg }) {
             <div style={{ fontSize:14, fontWeight:800, color:'var(--text)', marginBottom:2 }}>{fmt$(ch.revenue)}</div>
             <div style={{ fontSize:11, color:'var(--text3)' }}>Spend: {fmt$(ch.spend)}</div>
             <div style={{ fontSize:12, fontWeight:700, color: merColor(ch.roas), marginTop:4 }}>
-              {ch.roas.toFixed(2)}x ROAS
+              {fmtRatio(ch.roas)} ROAS
             </div>
           </div>
         ))}
@@ -359,7 +372,7 @@ function ChannelsTab({ channels, chAgg }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="channel" tick={{ fontSize:11 }} stroke="var(--border2)" />
               <YAxis domain={[0,'auto']} tickFormatter={v => v.toFixed(1)+'x'} tick={{ fontSize:11 }} width={50} stroke="var(--border2)" />
-              <Tooltip formatter={(v) => [v.toFixed(2)+'x','ROAS']}
+              <Tooltip formatter={(v) => [fmtRatio(v), 'ROAS']}
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
               <Bar dataKey="roas" radius={[4,4,0,0]}>
                 {chAgg.map((e,i) => <Cell key={i} fill={CHANNEL_COL[e.channel]||FLO_ACCENT} />)}
@@ -371,13 +384,27 @@ function ChannelsTab({ channels, chAgg }) {
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Period Totals by Channel</div>
-        <PaginatedSheetTable headers={CH_AGG_HEADERS} rows={aggRows} defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable
+          headers={CH_AGG_HEADERS}
+          rows={aggRows}
+          defaultSortField="Revenue"
+          defaultSortDir="desc"
+          searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('ch-agg', row, h, 'Channel')}
+        />
       </div>
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Daily Channel Data — Every Day</div>
         <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>Each row = one day × one channel</div>
-        <PaginatedSheetTable headers={CH_DAILY_HEADERS} rows={dailyRows} defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable
+          headers={CH_DAILY_HEADERS}
+          rows={dailyRows}
+          defaultSortField="Date"
+          defaultSortDir="desc"
+          getCellCommentKey={(row, h) => entityDateCellKey('ch-daily', row, h, 'Channel')}
+          getCellCommentLabel={(row, h) => entityDateCellLabel('channel', h, row, 'Channel')}
+        />
       </div>
     </div>
   );
@@ -396,7 +423,7 @@ function RegionsTab({ geo, geoAgg }) {
     Revenue:       r.revenue,
     Spend:         r.spend,
     MER:           r.mer,
-    'Rev Share %': totalRev > 0 ? parseFloat(((r.revenue/totalRev)*100).toFixed(1)) : 0,
+    'Rev Share %': totalRev > 0 ? Math.round((r.revenue / totalRev) * 100) : 0,
   }));
   const dailyRows = geo.map(r => ({
     Date:   r.date,
@@ -417,10 +444,10 @@ function RegionsTab({ geo, geoAgg }) {
             </div>
             <div style={{ fontSize:14, fontWeight:800, marginBottom:2 }}>{fmt$(r.revenue)}</div>
             <div style={{ fontSize:11, color:'var(--text3)', marginBottom:4 }}>Spend: {fmt$(r.spend)}</div>
-            <div style={{ fontSize:12, fontWeight:700, color: merColor(r.mer) }}>{r.mer.toFixed(2)}x MER</div>
+            <div style={{ fontSize:12, fontWeight:700, color: merColor(r.mer) }}>{fmtRatio(r.mer)} MER</div>
             {totalRev > 0 && (
               <div style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>
-                {((r.revenue/totalRev)*100).toFixed(1)}% of rev
+                {Math.round((r.revenue / totalRev) * 100)}% of rev
               </div>
             )}
           </div>
@@ -448,7 +475,7 @@ function RegionsTab({ geo, geoAgg }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis type="number" domain={[0,'auto']} tickFormatter={v => v.toFixed(1)+'x'} tick={{ fontSize:10 }} stroke="var(--border2)" />
               <YAxis type="category" dataKey="region" tick={{ fontSize:11 }} stroke="var(--border2)" />
-              <Tooltip formatter={(v) => [v.toFixed(2)+'x','MER']}
+              <Tooltip formatter={(v) => [fmtRatio(v), 'MER']}
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
               <Bar dataKey="mer" radius={[0,4,4,0]}>
                 {geoAgg.map((_,i) => <Cell key={i} fill={GEO_COL[i%GEO_COL.length]} />)}
@@ -460,13 +487,27 @@ function RegionsTab({ geo, geoAgg }) {
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Period Totals by Region</div>
-        <PaginatedSheetTable headers={GEO_AGG_HEADERS} rows={aggRows} defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable
+          headers={GEO_AGG_HEADERS}
+          rows={aggRows}
+          defaultSortField="Revenue"
+          defaultSortDir="desc"
+          searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('geo-agg', row, h, 'Region')}
+        />
       </div>
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Daily Regional Data</div>
         <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>Each row = one day × one region</div>
-        <PaginatedSheetTable headers={GEO_DAILY_HEADERS} rows={dailyRows} defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable
+          headers={GEO_DAILY_HEADERS}
+          rows={dailyRows}
+          defaultSortField="Date"
+          defaultSortDir="desc"
+          getCellCommentKey={(row, h) => entityDateCellKey('geo-daily', row, h, 'Region')}
+          getCellCommentLabel={(row, h) => entityDateCellLabel('region', h, row, 'Region')}
+        />
       </div>
     </div>
   );
@@ -543,7 +584,7 @@ function ProductsTab({ products, prodAgg }) {
               </div>
               <div>
                 <div style={{ fontSize:10, color:'var(--text3)', marginBottom:1 }}>MER</div>
-                <div style={{ fontSize:14, fontWeight:800, color: merColor(p.mer) }}>{p.mer.toFixed(2)}x</div>
+                <div style={{ fontSize:14, fontWeight:800, color: merColor(p.mer) }}>{fmtRatio(p.mer)}</div>
               </div>
               <div>
                 <div style={{ fontSize:10, color:'var(--text3)', marginBottom:1 }}>Units Sold</div>
@@ -552,7 +593,7 @@ function ProductsTab({ products, prodAgg }) {
             </div>
             {totalRev > 0 && (
               <div style={{ marginTop:8, fontSize:11, color:'var(--text3)' }}>
-                {((p.revenue/totalRev)*100).toFixed(1)}% of total rev
+                {Math.round((p.revenue / totalRev) * 100)}% of total rev
               </div>
             )}
           </div>
@@ -624,14 +665,28 @@ function ProductsTab({ products, prodAgg }) {
       {/* Aggregated product table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Period Totals by Product Line</div>
-        <PaginatedSheetTable headers={PROD_AGG_HEADERS} rows={aggRows} defaultSortField="Revenue" defaultSortDir="desc" searchable={false} />
+        <PaginatedSheetTable
+          headers={PROD_AGG_HEADERS}
+          rows={aggRows}
+          defaultSortField="Revenue"
+          defaultSortDir="desc"
+          searchable={false}
+          getCellCommentKey={(row, h) => aggCellKey('prod-agg', row, h, 'Product')}
+        />
       </div>
 
       {/* Daily product table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Daily Product Data — Every Day</div>
         <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>Each row = one day × one product line, with channel spend breakdown</div>
-        <PaginatedSheetTable headers={PROD_DAILY_HEADERS} rows={dailyRows} defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable
+          headers={PROD_DAILY_HEADERS}
+          rows={dailyRows}
+          defaultSortField="Date"
+          defaultSortDir="desc"
+          getCellCommentKey={(row, h) => entityDateCellKey('prod-daily', row, h, 'Product')}
+          getCellCommentLabel={(row, h) => entityDateCellLabel('product', h, row, 'Product')}
+        />
       </div>
     </div>
   );
@@ -723,7 +778,14 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
       {/* Daily table */}
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Subscription Detail</div>
-        <PaginatedSheetTable headers={SUB_HEADERS} rows={rows} defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable
+          headers={SUB_HEADERS}
+          rows={rows}
+          defaultSortField="Date"
+          defaultSortDir="desc"
+          getCellCommentKey={(row, h) => dailyCellKey('subs', row, h, 'Date')}
+          getCellCommentLabel={(row, h) => dailyCellLabel(h, row, 'Date')}
+        />
       </div>
     </div>
   );
@@ -790,7 +852,14 @@ function EmailTab({ email, emailTotals }) {
 
       <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
         <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Email Stats</div>
-        <PaginatedSheetTable headers={EMAIL_HEADERS} rows={rows} defaultSortField="Date" defaultSortDir="desc" />
+        <PaginatedSheetTable
+          headers={EMAIL_HEADERS}
+          rows={rows}
+          defaultSortField="Date"
+          defaultSortDir="desc"
+          getCellCommentKey={(row, h) => dailyCellKey('email', row, h, 'Date')}
+          getCellCommentLabel={(row, h) => dailyCellLabel(h, row, 'Date')}
+        />
       </div>
     </div>
   );

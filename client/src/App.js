@@ -7,6 +7,7 @@ import { appStatus, verifyErpToken, getSyncStatus } from './utils/api';
 import TopBar from './components/TopBar';
 import Sidebar from './components/Sidebar';
 import AiAssistant from './components/AiAssistant';
+import { ToastProvider, useToast } from './components/ToastProvider';
 import AccessDeniedPage from './pages/AccessDeniedPage';
 
 import OverviewPage      from './pages/OverviewPage';
@@ -195,6 +196,7 @@ function AppRoot() {
   }
 
   return (
+    <ToastProvider>
     <Routes>
       <Route element={<Layout appUser={appUser} />}>
         <Route path="/" element={<Navigate to="/overview" replace />} />
@@ -221,6 +223,7 @@ function AppRoot() {
         <Route path="*"                     element={<Navigate to="/overview" replace />} />
       </Route>
     </Routes>
+    </ToastProvider>
   );
 }
 
@@ -228,7 +231,7 @@ function AppRoot() {
 function Layout({ appUser }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const [toast, setToast]                 = useState(null);
+  const toastApi = useToast();
   const [refreshing, setRefreshing]       = useState(false);
   const [syncStatus, setSyncStatus]       = useState(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(getSidebarState);
@@ -250,9 +253,8 @@ function Layout({ appUser }) {
   }, [dynamicTabs]);
 
   const showToast = useCallback((msg, type = 'info') => {
-    setToast({ msg, type });
-    setTimeout(() => setToast(null), 4000);
-  }, []);
+    toastApi?.show(msg, type);
+  }, [toastApi]);
 
   useEffect(() => {
     function fetchSync() {
@@ -399,7 +401,6 @@ function Layout({ appUser }) {
         </main>
       </div>
 
-      {toast && <Toast {...toast} />}
       <AiAssistant activeTab={activeTab} />
     </div>
   );
@@ -483,22 +484,3 @@ function Spinner() {
   );
 }
 
-function Toast({ msg, type }) {
-  const colors = {
-    info:    { bg:'var(--accent-dim)', border:'var(--accent)',  text:'var(--accent)'  },
-    success: { bg:'var(--success-dim)',border:'var(--success)', text:'var(--success)' },
-    error:   { bg:'var(--danger-dim)', border:'var(--danger)',  text:'var(--danger)'  },
-    warn:    { bg:'var(--warn-dim)',   border:'var(--warn)',    text:'var(--warn)'    },
-  }[type] || { bg:'var(--bg3)', border:'var(--border2)', text:'var(--text)' };
-  return (
-    <div style={{
-      position:'fixed', bottom:24, right:24, zIndex:2000,
-      background:colors.bg, border:`1px solid ${colors.border}`,
-      color:colors.text, padding:'10px 14px', borderRadius:8,
-      fontSize:12, fontWeight:500, maxWidth:360,
-      boxShadow:'var(--shadow)', animation:'fadein .2s ease',
-    }}>
-      {msg}
-    </div>
-  );
-}
