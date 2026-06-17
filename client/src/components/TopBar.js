@@ -15,8 +15,8 @@ const PAGE_INFO = {
   'Forecast Engine':          'Plan vs actual and full-year sales projection',
   'Store:NOBL':               'Full store view — channels, products, subs, email',
   'Store:FLO':                'Full store view — channels, products, subs, email',
-  'App:NOBL':                 'NOBL mobile app — revenue and subscriptions',
-  'App:FLO':                  'Pilates FLO app — revenue and product performance',
+  'App:NOBL':                 'NOBL Travel app — in-app purchases and subscriptions',
+  'App:FLO':                  'Pilates FLO app — in-app purchases and subscriptions',
 };
 
 function HeaderBtn({ icon: Ic, label, onClick, danger, title: ttl, disabled, active, small }) {

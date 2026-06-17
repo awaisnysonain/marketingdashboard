@@ -19,8 +19,7 @@ import GenericDashPage   from './pages/GenericDashPage';
 import LivePage          from './pages/LivePage';
 import StoreNoblPage     from './pages/StoreNoblPage';
 import StoreFLOPage      from './pages/StoreFLOPage';
-import NoblPage          from './pages/NoblPage';
-import FloPage           from './pages/FloPage';
+import AppComingSoonPage from './pages/AppComingSoonPage';
 import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
 import MetaAdsPage       from './pages/MetaAdsPage';
 import ForecastEnginePage from './pages/ForecastEnginePage';
@@ -80,8 +79,8 @@ const TAB_DISPLAY_NAMES = {
   'FLO Channel Level Daily':  'FLO Channel Daily',
   'Store:NOBL':               'NOBL Travel',
   'Store:FLO':                'Pilates FLO',
-  'App:NOBL':                 'Nobl app',
-  'App:FLO':                  'Flo app',
+  'App:NOBL':                 'NOBL Travel app',
+  'App:FLO':                  'Pilates FLO app',
 };
 
 function pathToActiveTab(pathname, dynamicTabs) {
@@ -214,8 +213,8 @@ function AppRoot() {
         <Route path="/nobl-air-performance" element={<PageHost Comp={NoblAirPerformancePage} />} />
         <Route path="/store/nobl"           element={<PageHost Comp={StoreNoblPage} />} />
         <Route path="/store/flo"            element={<PageHost Comp={StoreFLOPage} />} />
-        <Route path="/app/nobl"             element={<PageHost Comp={NoblPage} />} />
-        <Route path="/app/flo"              element={<PageHost Comp={FloPage} />} />
+        <Route path="/app/nobl"             element={<PageHost Comp={NoblAppPage} />} />
+        <Route path="/app/flo"              element={<PageHost Comp={FloAppPage} />} />
         <Route path="/aibuilder"            element={<AiBuilderRoute />} />
         <Route path="/sync"                 element={<PageHost Comp={SyncPage} />} />
         <Route path="/dashboard/:id"        element={<DynamicDashRoute kind="dashboard" />} />
@@ -410,6 +409,14 @@ function Layout({ appUser }) {
 function PageHost({ Comp }) {
   const { showToast } = useOutletContext();
   return <Comp showToast={showToast} />;
+}
+
+function NoblAppPage() {
+  return <AppComingSoonPage brand="nobl" />;
+}
+
+function FloAppPage() {
+  return <AppComingSoonPage brand="flo" />;
 }
 
 function AiBuilderRoute() {

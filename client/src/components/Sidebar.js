@@ -32,8 +32,8 @@ const NOBL_AIR_TABS = [
 ];
 
 const APPLICATION_TABS = [
-  { id: 'App:NOBL', icon: Icons.Smartphone, label: 'Nobl app', title: 'NOBL mobile app — revenue and subscriptions' },
-  { id: 'App:FLO',  icon: Icons.Smartphone, label: 'Flo app',  title: 'Pilates FLO app — revenue and product performance' },
+  { id: 'App:NOBL', icon: Icons.Smartphone, label: 'NOBL Travel app', title: 'NOBL Travel app — in-app purchases and subscriptions' },
+  { id: 'App:FLO',  icon: Icons.Smartphone, label: 'Pilates FLO app', title: 'Pilates FLO app — in-app purchases and subscriptions' },
 ];
 
 /* ── Confirm delete dialog ─────────────────────────────────────────── */
@@ -378,7 +378,7 @@ export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard,
         <NavSection label="Pilates FLO" tabs={PILATES_FLO_TABS} collapsed={collapsed} active={active} onChange={onChange} />
         <NavSection label="Marketing" tabs={MARKETING_TABS} collapsed={collapsed} active={active} onChange={onChange} />
         <NavSection label="NOBL Air" tabs={NOBL_AIR_TABS} collapsed={collapsed} active={active} onChange={onChange} />
-        <NavSection label="Mobile apps" tabs={APPLICATION_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="In-app purchases" tabs={APPLICATION_TABS} collapsed={collapsed} active={active} onChange={onChange} />
 
         {/* Custom dashboards & sheets */}
         <SectionLabel
