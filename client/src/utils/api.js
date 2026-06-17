@@ -142,9 +142,14 @@ export function isCurrency(header){
     h.includes('ltv')||h.includes('budget')||h.includes('profit')||h.includes('margin')||
     h.includes('refund')||h.includes('discount');
 }
-export function isRatio(header){
-  const h=String(header).toLowerCase();
-  return h.includes('roas')||h.includes('mer')||h.includes('sales per ad');
+/** True when a column/series label is MER or ROAS — not substrings like "customer". */
+export function isMerRoasLabel(text) {
+  const h = String(text).toLowerCase();
+  return h.includes('roas') || /\bmer\b/.test(h) || h.includes('sales per ad');
+}
+
+export function isRatio(header) {
+  return isMerRoasLabel(header);
 }
 export function isDateField(header){
   const h=String(header).toLowerCase();

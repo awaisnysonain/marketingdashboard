@@ -8,7 +8,7 @@
  * | ratio    | 2.38x          | MER, ROAS                         |
  * | percent  | 33%            | attach rate, NVP, TTP             |
  */
-import { fmt$, fmtNum, fmtPct, fmtRatio } from './api';
+import { fmt$, fmtNum, fmtPct, fmtRatio, isMerRoasLabel } from './api';
 
 export const METRIC_KIND = {
   CURRENCY: '$',
@@ -88,7 +88,7 @@ export function aggShowsSum(kind) {
 export function inferMetricKind(metricKey, label) {
   if (metricKey && KEY_KIND[metricKey]) return KEY_KIND[metricKey];
   const h = String(label || metricKey || '').toLowerCase();
-  if (/roas|mer|sales per ad/.test(h)) return 'x';
+  if (isMerRoasLabel(h)) return 'x';
   if (/rate|attach|ttp|nvp|activation|percent|pct|%/.test(h) && !/operating/.test(h)) return 'pct';
   if (/revenue|spend|sales|cac|aov|ltv|refund|gross|amount|budget|cost|rev\b|price/.test(h)) return '$';
   if (/orders|purchases|cust|customers|units|count|impressions|clicks/.test(h)) return 'num';

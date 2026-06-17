@@ -1,4 +1,4 @@
-import { fmt$, fmtRatio } from './api';
+import { fmt$, fmtRatio, isMerRoasLabel } from './api';
 
 export function fmtChartCurrency(v) {
   return fmt$(v);
@@ -20,7 +20,7 @@ export function fmtAxisRatio(v) {
 
 /** Recharts tooltip — currency unless series name is MER/ROAS. */
 export function fmtChartTooltip(value, name) {
-  if (name && /roas|mer|sales per ad/i.test(String(name))) {
+  if (name && isMerRoasLabel(name)) {
     return [fmtRatio(value), name];
   }
   return [fmt$(value), name];

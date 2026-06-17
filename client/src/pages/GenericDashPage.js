@@ -107,7 +107,7 @@ function autoDetectColumns(headers, rows) {
         hl.includes('cac') || hl.includes('cost') || hl.includes('variance') ||
         hl.includes('budget') || hl.includes('aov') || hl.includes('ltv') ||
         hl.includes('gross') || hl.includes('profit')) return 'currency';
-    if (hl.includes('mer') || hl.includes('roas') || hl.includes('cvr') ||
+    if (/\bmer\b/.test(hl) || hl.includes('roas') || hl.includes('cvr') ||
         hl.includes('rate') || hl.includes('pacing') || hl.includes('%') ||
         hl.includes('margin') || hl.includes('conv') || hl.includes('yoy')) return 'percent';
     if (hl.includes('date') || hl.includes('week') || hl.includes('month') || hl.includes('day')) return 'date';
