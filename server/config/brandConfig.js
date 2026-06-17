@@ -53,6 +53,10 @@ const NOBL_BRAND = {
 
   // EU region identifier in geo table
   euRegion: 'EU',
+
+  // Separate TW workspace for EU ad spend only (NOBL_EU_TW_* env vars).
+  // Same Shopify domain as FLO EU is possible; different API key / workspace.
+  euTwSpendBrand: 'NOBL_EU',
 };
 
 const FLO_US_BRAND = {

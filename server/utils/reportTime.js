@@ -16,4 +16,23 @@ function reportYesterdayStr() {
   return addDaysStr(reportTodayStr(), -1);
 }
 
-module.exports = { REPORT_TZ, reportTodayStr, reportYesterdayStr, addDaysStr };
+/** Later of two YYYY-MM-DD strings. */
+function maxDateStr(a, b) {
+  if (!a) return b || '';
+  if (!b) return a || '';
+  return a > b ? a : b;
+}
+
+/** SQL fragment: row has meaningful TW metrics (not an empty placeholder). */
+const SUMMARY_HAS_DATA_SQL = `(COALESCE(total_spend, 0) > 0
+              OR COALESCE(order_revenue, total_revenue, 0) > 0
+              OR COALESCE(total_orders, 0) > 0)`;
+
+module.exports = {
+  REPORT_TZ,
+  reportTodayStr,
+  reportYesterdayStr,
+  addDaysStr,
+  maxDateStr,
+  SUMMARY_HAS_DATA_SQL,
+};

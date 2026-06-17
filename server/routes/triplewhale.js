@@ -15,7 +15,7 @@ const express  = require('express');
 const router   = express.Router();
 const { pgQuery } = require('../db/postgres');
 const { getBrand, THRESHOLDS, classify, calcMer } = require('../config/brandConfig');
-const { reportYesterdayStr } = require('../utils/reportTime');
+const { reportTodayStr, reportYesterdayStr, SUMMARY_HAS_DATA_SQL } = require('../utils/reportTime');
 
 /*
  * ══════════════════════════════════════════════════════════════
@@ -30,14 +30,21 @@ const { reportYesterdayStr } = require('../utils/reportTime');
  * Falls back to yesterday if empty.
  */
 async function latestSummaryDate(dbBrand) {
+  const today = reportTodayStr();
   try {
+    // Prefer today when hourly Live snapshot has landed partial ET data.
+    const todayR = await pgQuery(
+      `SELECT date::text AS d FROM tw_summary_daily
+       WHERE brand = $1 AND date = $2::date AND ${SUMMARY_HAS_DATA_SQL}
+       LIMIT 1`,
+      [dbBrand, today]
+    );
+    if (todayR.rows[0]?.d) return todayR.rows[0].d;
+
     const r = await pgQuery(
       `SELECT MAX(date)::text AS mx
        FROM tw_summary_daily
-       WHERE brand = $1
-         AND (COALESCE(total_spend, 0) > 0
-              OR COALESCE(order_revenue, total_revenue, 0) > 0
-              OR COALESCE(total_orders, 0) > 0)`,
+       WHERE brand = $1 AND ${SUMMARY_HAS_DATA_SQL}`,
       [dbBrand]
     );
     return r.rows[0]?.mx || reportYesterdayStr();
@@ -415,25 +422,25 @@ router.get('/available-dates', async (req, res) => {
            MAX(date)::text AS latest_summary,
            MIN(date)::text AS oldest_summary
          FROM tw_summary_daily
-         WHERE brand = $1
-           AND (COALESCE(total_spend, 0) > 0
-                OR COALESCE(order_revenue, total_revenue, 0) > 0
-                OR COALESCE(total_orders, 0) > 0)`,
+         WHERE brand = $1 AND ${SUMMARY_HAS_DATA_SQL}`,
         [dbBrand]
       ),
       latestValidChannelDate(dbBrand),
       latestValidGeoDate(brandParam),
     ]);
 
+    const latestSummary = await latestSummaryDate(dbBrand);
+
     res.json({
       ok: true,
-      latest_summary: sumRes.rows[0]?.latest_summary || '',
+      latest_summary: latestSummary || sumRes.rows[0]?.latest_summary || '',
       oldest_summary: sumRes.rows[0]?.oldest_summary || '',
+      report_today:   reportTodayStr(),
       latest_channel: chLatest,
       latest_geo:     geoLatest,
       // Expose lag so UI can show a warning
-      channel_lag: chLatest < (sumRes.rows[0]?.latest_summary || ''),
-      geo_lag:     geoLatest < (sumRes.rows[0]?.latest_summary || ''),
+      channel_lag: chLatest < latestSummary,
+      geo_lag:     geoLatest < latestSummary,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });

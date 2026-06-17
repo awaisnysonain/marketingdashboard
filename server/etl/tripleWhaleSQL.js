@@ -555,7 +555,15 @@ async function refreshBrand(brand, startYmd, endYmd) {
 
   console.log(`[TW SQL] ${brand} ${startYmd} → ${endYmd}`);
 
-  // Sequential TW fetches — parallel calls were triggering TW 429/500 during cron.
+  if (cfg.euSpendBrand) {
+    const { shopId, apiKey } = brandCreds(cfg.euSpendBrand);
+    const mainId = brandCreds(brand).shopId;
+    if (apiKey && shopId && shopId !== mainId) {
+      console.log(`[TW SQL] ${brand} EU spend via ${cfg.euSpendBrand} (${shopId})`);
+    } else if (!apiKey) {
+      console.warn(`[TW SQL] ${brand} ${cfg.euSpendBrand} skipped — set NOBL_EU_TW_API_KEY for EU ad spend`);
+    }
+  }
   const dualRev = await fetchDualRevenueMetrics(brand, startYmd, endYmd);
   const shopRev = await fetchBlendedShopifyRevenue(brand, startYmd, endYmd);
   const amzRev = cfg.includeAmazon ? await fetchAmazonRevenue(brand, startYmd, endYmd) : {};

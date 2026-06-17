@@ -1402,7 +1402,7 @@ try {
   const { pgQuery, pgRun } = require('./db/postgres');
   const { sendAlert, ensureSchema: ensureAlertsSchema } = require('./etl/alerts');
   const { CRON_TZ, pakistanTodayStr, pakistanYesterdayStr, addDaysStr } = require('./utils/pakistanTime');
-  const { reportTodayStr, reportYesterdayStr } = require('./utils/reportTime');
+  const { reportTodayStr, reportYesterdayStr, maxDateStr } = require('./utils/reportTime');
 
   // Initialize alerts table on boot
   ensureAlertsSchema().catch(e => console.warn('[Alerts] schema init failed:', e.message));
@@ -1461,7 +1461,7 @@ try {
       // Step 0: clean up any stuck runs first
       await cleanupStuckRuns();
 
-      const yStr = pakistanYesterdayStr();
+      const yStr = maxDateStr(pakistanYesterdayStr(), reportYesterdayStr());
 
       // Step 1: find missing days in the last 7 (we'll catch holes)
       let missing = [];
@@ -1508,8 +1508,8 @@ try {
         });
       }
 
-      // Step 3: validate completeness
-      const issues = await validateRunCompleteness(yStr);
+      // Step 3: validate completeness (TW dates are ET)
+      const issues = await validateRunCompleteness(reportYesterdayStr());
       if (issues.length) {
         await sendAlert({
           severity: 'error',
@@ -1558,7 +1558,7 @@ try {
   console.log(`[Cron] Scheduled: 11:00 AM ${CRON_TZ} (PKT, UTC+5) daily — syncs yesterday, 10 tasks, 7-day backfill`);
 
   async function runLiveSnapshotSync(opts = {}) {
-    if (cronRunning || syncEngine.isSyncRunning()) {
+    if (syncEngine.isSyncRunning()) {
       console.log('[LiveSnapshot] Skip — another sync is running');
       return { skipped: true };
     }
@@ -1582,7 +1582,8 @@ try {
       lastLiveSnapshotAt = new Date().toISOString();
       lastLiveSnapshotStatus = {
         runId,
-        ok: !result.errors?.length,
+        ok: !result.skipped && !result.errors?.length,
+        skipped: !!result.skipped,
         errors: result.errors?.length || 0,
         elapsed_min: elapsed,
         ts: lastLiveSnapshotAt,
@@ -1597,12 +1598,18 @@ try {
     }
   }
 
-  // Hourly: refresh Live/Snapshot page data (today + yesterday, PKT). Skip 11:00 — daily cron hour.
+  // Hourly: refresh Live/Snapshot page data (ET yesterday→today). Skip 11:00 — daily cron hour.
   cron.schedule('0 0-10,12-23 * * *', () => {
     runLiveSnapshotSync().catch(e => console.error('[LiveSnapshot unhandled]', e));
   }, { timezone: CRON_TZ });
 
   console.log(`[Cron] Scheduled: hourly ${CRON_TZ} (skip 11:00) — Live snapshot tw_refresh + tw_order_revenue (ET yesterday→today)`);
+
+  // Run once after deploy so Live page is not stale until the next :00 tick.
+  setTimeout(() => {
+    runLiveSnapshotSync({ runId: `boot_live_snapshot_${reportTodayStr()}` })
+      .catch(e => console.error('[LiveSnapshot boot]', e));
+  }, 20_000);
 
   // ── Manual sync trigger — admin only, single-flight, rate-limited ────────
   // Tracks per-user manual triggers in this Map; purges every hour

@@ -115,7 +115,38 @@ The app schedules sync internally via `node-cron` — no system crontab needed.
 | `nobl_air_aggregate` | Recompute `nobl_air_daily` |
 | `product_daily` | Recompute `shopify_product_daily` |
 
-Post-run validation checks `tw_summary_daily`, `shopify_orders_raw`, and `nobl_air_daily` for yesterday.
+Post-run validation checks `tw_summary_daily`, `shopify_orders_raw`, and `nobl_air_daily` for yesterday (America/New_York reporting date).
+
+## Live / Snapshot hourly refresh
+
+The Live page reads `tw_summary_daily` (ET date keys). A lightweight cron keeps it current:
+
+- **When:** every hour at :00 Asia/Karachi, **except** 11:00 (daily cron hour)
+- **Window:** ET yesterday → ET today (`tw_refresh` + `tw_order_revenue`)
+- **On deploy:** runs once ~20s after PM2 start so the page is not stale until the next hour
+
+Check status: `GET /api/sync/last-cron` → `live_snapshot.last_run_at`.
+
+If the Live page still shows an old date, verify `NOBL_TW_API_KEY` / `FLO_TW_API_KEY` in `.env` and look for `[LiveSnapshot]` lines in `pm2 logs nobl`.
+
+## NOBL EU Triple Whale (ad spend)
+
+NOBL Travel revenue comes from the main NOBL TW shop. EU **ad spend** is merged from a separate TW workspace:
+
+| Env var | Purpose |
+|---------|---------|
+| `NOBL_EU_TW_SHOP_ID` | EU TW shop id (e.g. `afmjag-r2.myshopify.com`) |
+| `NOBL_EU_TW_API_KEY` | API key for that workspace |
+
+This is **not** FLO EU (`FLO_EU_TW_*`) — same Shopify domain can appear in both, but keys and dashboards differ. EU spend rolls into `brand='NOBL'` totals and the EU row in `tw_geo_daily`.
+
+**Historical backfill** after setting keys:
+
+```bash
+node server/scripts/backfillTwSql.js 2024-01-01 $(node -e "console.log(new Date().toISOString().slice(0,10))")
+```
+
+Or a shorter window: `node server/scripts/backfillTwSql.js 2026-01-01 2026-06-17`
 
 ## Email alerts
 

@@ -51,7 +51,8 @@ function brandCreds(brand) {
         apiKey: process.env.FLO_TW_API_KEY,
       };
     case 'NOBL_EU':
-      // Separate TW workspace pointed at the same nobltravel.myshopify.com shop.
+      // Separate TW workspace for NOBL EU ad spend (shop may differ from main NOBL store).
+      // Often afmjag-r2.myshopify.com — NOT the same as FLO_EU_TW_* (different API key/workspace).
       return {
         shopId: process.env.NOBL_EU_TW_SHOP_ID || process.env.NOBL_TW_SHOP_ID,
         apiKey: process.env.NOBL_EU_TW_API_KEY,
