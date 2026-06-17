@@ -1,10 +1,38 @@
-import React from 'react';
-import { mtdRange, ytdRange, yesterdayRange } from '../utils/dateRange';
+import React, { useEffect, useState } from 'react';
+import {
+  isMtdRange,
+  mtdEndISO,
+  mtdRange,
+  todayISO,
+  ytdRange,
+  yesterdayRange,
+} from '../utils/dateRange';
 
 /**
  * DateRangePicker — quick presets + custom date inputs.
- * MTD/YTD always reset to the current calendar month/year through today.
+ * MTD defaults through yesterday (toggleable); YTD through today.
  */
+
+const MTD_THROUGH_YESTERDAY_KEY = 'nobl:mtdThroughYesterday';
+
+function readMtdThroughYesterdayPref() {
+  try {
+    const raw = sessionStorage.getItem(MTD_THROUGH_YESTERDAY_KEY);
+    if (raw === '0' || raw === 'false') return false;
+    if (raw === '1' || raw === 'true') return true;
+  } catch {
+    /* ignore */
+  }
+  return true;
+}
+
+function writeMtdThroughYesterdayPref(value) {
+  try {
+    sessionStorage.setItem(MTD_THROUGH_YESTERDAY_KEY, value ? '1' : '0');
+  } catch {
+    /* ignore */
+  }
+}
 
 const QUICK_BTNS = [
   {
@@ -17,11 +45,7 @@ const QUICK_BTNS = [
   },
   {
     label: 'MTD',
-    getRange: () => mtdRange(),
-    match: (start, end) => {
-      const m = mtdRange();
-      return start === m.start && end === m.end;
-    },
+    match: (start, end) => isMtdRange(start, end),
   },
   {
     label: 'YTD',
@@ -42,11 +66,34 @@ function detectActivePreset(start, end) {
 }
 
 export default function DateRangePicker({ start, end, onChange }) {
+  const [mtdThroughYesterday, setMtdThroughYesterday] = useState(readMtdThroughYesterdayPref);
   const activeLabel = detectActivePreset(start, end);
   const isSingleDay = start === end && start.length === 10;
+  const isMtdActive = activeLabel === 'MTD';
+
+  useEffect(() => {
+    if (!isMtdActive) return;
+    const todayEnd = todayISO();
+    const yesterdayEnd = mtdEndISO(true);
+    if (end === todayEnd && end !== yesterdayEnd) setMtdThroughYesterday(false);
+    else if (end === yesterdayEnd && end !== todayEnd) setMtdThroughYesterday(true);
+  }, [isMtdActive, end]);
 
   function handleQuick(btn) {
+    if (btn.label === 'MTD') {
+      onChange(mtdRange({ throughYesterday: mtdThroughYesterday }));
+      return;
+    }
     onChange(btn.getRange());
+  }
+
+  function handleMtdThroughYesterdayChange(e) {
+    const next = e.target.checked;
+    setMtdThroughYesterday(next);
+    writeMtdThroughYesterdayPref(next);
+    if (isMtdActive) {
+      onChange({ start, end: mtdEndISO(next) });
+    }
   }
 
   function handleStartChange(e) {
@@ -76,6 +123,16 @@ export default function DateRangePicker({ start, end, onChange }) {
         })}
         {isSingleDay && !QUICK_BTNS.some(b => b.label === activeLabel) && (
           <span className="date-range-picker__hint">Single day</span>
+        )}
+        {isMtdActive && (
+          <label className="date-range-picker__mtd-opt">
+            <input
+              type="checkbox"
+              checked={mtdThroughYesterday}
+              onChange={handleMtdThroughYesterdayChange}
+            />
+            Through yesterday
+          </label>
         )}
       </div>
 

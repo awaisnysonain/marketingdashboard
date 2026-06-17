@@ -61,9 +61,25 @@ export function ytdStartFor(endISO) {
   return `${endISO.slice(0, 4)}-01-01`;
 }
 
-/** Month-to-date: first day of the **current** month through today. */
-export function mtdRange() {
-  return { start: currentMonthStartISO(), end: todayISO() };
+/** MTD end date for the given mode (clamped to month start on the 1st). */
+export function mtdEndISO(throughYesterday = true) {
+  const start = currentMonthStartISO();
+  if (!throughYesterday) return todayISO();
+  const y = yesterdayISO();
+  return y < start ? start : y;
+}
+
+/** True when range is month-start through today or yesterday (MTD preset shapes). */
+export function isMtdRange(start, end) {
+  const monthStart = currentMonthStartISO();
+  if (start !== monthStart) return false;
+  return end === todayISO() || end === mtdEndISO(true);
+}
+
+/** Month-to-date: first day of the **current** month through today or yesterday. */
+export function mtdRange({ throughYesterday = true } = {}) {
+  const start = currentMonthStartISO();
+  return { start, end: mtdEndISO(throughYesterday) };
 }
 
 /** Year-to-date: Jan 1 of the **current** year through today. */

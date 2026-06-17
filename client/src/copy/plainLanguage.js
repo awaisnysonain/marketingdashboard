@@ -141,8 +141,8 @@ export const PAGE = {
     desc: 'Subscription signups and revenue for NOBL Air and/or Pilates FLO in your selected dates.',
   },
   live: {
-    title: 'Live data',
-    desc: 'Latest daily snapshot: sales, ad spend, orders, and how each ad channel is performing.',
+    title: "Today's snapshot",
+    desc: 'The most recent daily numbers for your selected store — sales, ad spend, orders, regional breakdown, and channel performance at a glance.',
   },
   forecastEngine: {
     title: 'Forecast',

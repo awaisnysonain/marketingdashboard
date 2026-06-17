@@ -15,6 +15,7 @@ const express  = require('express');
 const router   = express.Router();
 const { pgQuery } = require('../db/postgres');
 const { getBrand, THRESHOLDS, classify, calcMer } = require('../config/brandConfig');
+const { reportYesterdayStr } = require('../utils/reportTime');
 
 /*
  * ══════════════════════════════════════════════════════════════
@@ -31,12 +32,17 @@ const { getBrand, THRESHOLDS, classify, calcMer } = require('../config/brandConf
 async function latestSummaryDate(dbBrand) {
   try {
     const r = await pgQuery(
-      `SELECT MAX(date)::text AS mx FROM tw_summary_daily WHERE brand = $1`,
+      `SELECT MAX(date)::text AS mx
+       FROM tw_summary_daily
+       WHERE brand = $1
+         AND (COALESCE(total_spend, 0) > 0
+              OR COALESCE(order_revenue, total_revenue, 0) > 0
+              OR COALESCE(total_orders, 0) > 0)`,
       [dbBrand]
     );
-    return r.rows[0]?.mx || yesterdayStr();
+    return r.rows[0]?.mx || reportYesterdayStr();
   } catch {
-    return yesterdayStr();
+    return reportYesterdayStr();
   }
 }
 
@@ -58,9 +64,9 @@ async function latestValidChannelDate(dbBrand) {
        ) sub`,
       [dbBrand]
     );
-    return r.rows[0]?.mx || yesterdayStr();
+    return r.rows[0]?.mx || reportYesterdayStr();
   } catch {
-    return yesterdayStr();
+    return reportYesterdayStr();
   }
 }
 
@@ -81,16 +87,10 @@ async function latestValidGeoDate(brandParam) {
          HAVING SUM(spend_actual) > 50
        ) sub`
     );
-    return r.rows[0]?.mx || yesterdayStr();
+    return r.rows[0]?.mx || reportYesterdayStr();
   } catch {
-    return yesterdayStr();
+    return reportYesterdayStr();
   }
-}
-
-function yesterdayStr() {
-  const d = new Date();
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().slice(0, 10);
 }
 
 // ── GET /api/tw/live ─────────────────────────────────────────────────────────
@@ -414,7 +414,11 @@ router.get('/available-dates', async (req, res) => {
         `SELECT
            MAX(date)::text AS latest_summary,
            MIN(date)::text AS oldest_summary
-         FROM tw_summary_daily WHERE brand = $1`,
+         FROM tw_summary_daily
+         WHERE brand = $1
+           AND (COALESCE(total_spend, 0) > 0
+                OR COALESCE(order_revenue, total_revenue, 0) > 0
+                OR COALESCE(total_orders, 0) > 0)`,
         [dbBrand]
       ),
       latestValidChannelDate(dbBrand),

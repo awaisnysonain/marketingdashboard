@@ -1,132 +1,242 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis,
   CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine,
 } from 'recharts';
-import SharedKpiCard from '../components/KpiCard';
+import KpiCard from '../components/KpiCard';
 import SheetTable from '../components/SheetTable';
+import PageIntro from '../components/PageIntro';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
-import { TIP } from '../copy/plainLanguage';
-
+import { L, TIP, PAGE } from '../copy/plainLanguage';
 import { fmt$, fmtNum, fmtRatio, fmtPct } from '../utils/api';
+import {
+  fmtAxisCurrency, fmtAxisRatio, fmtChartCurrency, fmtChartRatio,
+  CHANNEL_COL, TOOLTIP_STYLE,
+} from '../utils/chartHelpers';
 
 const API = (path) => fetch(path, { credentials: 'include' }).then(r => r.json());
 
-const fmt = {
-  currency: fmt$,
-  num: fmtNum,
-  ratio: fmtRatio,
-  pct: (v) => v == null ? '—' : fmtPct(v),
-  date:  (v) => v ? String(v).slice(5) : '—',
-  full:  (v) => v ? String(v).slice(0, 10) : '—',
-};
-
 const STATUS = {
-  green:  { color: '#22c55e', bg: 'rgba(34,197,94,.1)',  border: 'rgba(34,197,94,.25)'  },
-  yellow: { color: '#f59e0b', bg: 'rgba(245,158,11,.1)', border: 'rgba(245,158,11,.25)' },
-  red:    { color: '#ef4444', bg: 'rgba(239,68,68,.1)',  border: 'rgba(239,68,68,.25)'  },
-  gray:   { color: '#6b7280', bg: 'rgba(107,114,128,.08)', border: 'rgba(107,114,128,.2)' },
+  green:  { cls: 'live-status--green', color: 'var(--success)' },
+  yellow: { cls: 'live-status--yellow', color: 'var(--warn)' },
+  red:    { cls: 'live-status--red', color: 'var(--danger)' },
+  gray:   { cls: 'live-status--gray', color: 'var(--text3)' },
 };
 
 const CHANNEL_META = {
-  META:     { label:'Meta',      color:'#1877f2', short:'FB' },
-  GOOGLE:   { label:'Google',    color:'#ea4335', short:'GG' },
-  APPLOVIN: { label:'AppLovin',  color:'#ff6b35', short:'AL' },
-  TIKTOK:   { label:'TikTok',    color:'#69c9d0', short:'TT' },
-  SNAPCHAT: { label:'Snapchat',  color:'#FFFC00', short:'SC' },
-  BING:     { label:'Bing',      color:'#00809d', short:'BG' },
-  PINTEREST:{ label:'Pinterest', color:'#e60023', short:'PT' },
-  X:        { label:'X',         color:'#000',    short:'X'  },
+  META:      { label: 'Meta',      color: CHANNEL_COL.META,      short: 'FB' },
+  GOOGLE:    { label: 'Google',    color: CHANNEL_COL.GOOGLE,    short: 'GG' },
+  APPLOVIN:  { label: 'AppLovin',  color: CHANNEL_COL.APPLOVIN,  short: 'AL' },
+  TIKTOK:    { label: 'TikTok',    color: CHANNEL_COL.TIKTOK,    short: 'TT' },
+  SNAPCHAT:  { label: 'Snapchat',  color: CHANNEL_COL.SNAPCHAT,  short: 'SC' },
+  BING:      { label: 'Bing',      color: CHANNEL_COL.BING,      short: 'BG' },
+  PINTEREST: { label: 'Pinterest', color: CHANNEL_COL.PINTEREST, short: 'PT' },
+  X:         { label: 'X',         color: CHANNEL_COL.X,         short: 'X'  },
 };
 
-const GEO_FLAG   = { US:'🇺🇸', CA:'🇨🇦', AUS:'🇦🇺', DUBAI:'🇦🇪', EU:'🇪🇺' };
-const GEO_LABEL  = { US:'United States', CA:'Canada', AUS:'Australia', DUBAI:'Dubai / UAE', EU:'Europe (EU)' };
-// For NOBL Travel, EU is the SAME store — always pinned and included in all totals
-const NOBL_REGIONS_ORDER = ['US','EU','CA','AUS','DUBAI'];
+const GEO_FLAG  = { US: '🇺🇸', CA: '🇨🇦', AUS: '🇦🇺', DUBAI: '🇦🇪', EU: '🇪🇺' };
+const GEO_LABEL = { US: 'United States', CA: 'Canada', AUS: 'Australia', DUBAI: 'Dubai / UAE', EU: 'Europe (EU)' };
+const NOBL_REGIONS_ORDER = ['US', 'EU', 'CA', 'AUS', 'DUBAI'];
 
-// ── Tiny components ───────────────────────────────────────────────────────────
-const Dot = ({ s, size=8 }) => (
-  <span style={{ display:'inline-block', width:size, height:size, borderRadius:'50%', background:STATUS[s]?.color||'#888', flexShrink:0 }}/>
-);
+const BRANDS = [
+  { k: 'nobl',   l: 'NOBL Travel', sub: 'US + EU + all regions' },
+  { k: 'flo',    l: 'FLO US',      sub: 'Pilates FLO United States' },
+  { k: 'flo_eu', l: 'FLO EU',      sub: 'Pilates FLO Europe' },
+];
 
-const Pill = ({ s, children }) => (
-  <span style={{ display:'inline-flex', alignItems:'center', gap:5, padding:'3px 9px', borderRadius:20, fontSize:12, fontWeight:700, background:STATUS[s]?.bg, border:`1px solid ${STATUS[s]?.border}`, color:STATUS[s]?.color }}>
-    <Dot s={s} size={6}/>{children}
-  </span>
-);
+const HOURLY_REFRESH_MS = 60 * 60 * 1000;
 
-const Skeleton = ({ h=72 }) => (
-  <div style={{ height:h, borderRadius:10, background:'var(--bg3)', animation:'sk 1.4s ease-in-out infinite' }}/>
-);
+const LIVE_CH_HEADERS = [
+  'Channel', L.spend, L.revenue, L.roas, L.orders, L.ncOrders, L.cac, L.aov,
+];
+const LIVE_CH_FIELD_KEYS = {
+  Channel: 'channel',
+  [L.spend]: 'spend',
+  [L.revenue]: 'revenue',
+  [L.roas]: 'roas',
+  [L.orders]: 'purchases',
+  [L.ncOrders]: 'nc_orders',
+  [L.cac]: 'cac',
+  [L.aov]: 'aov',
+};
 
-const ErrBox = ({ msg, onRetry }) => (
-  <div style={{ background:'rgba(239,68,68,.07)', border:'1px solid rgba(239,68,68,.2)', borderRadius:10, padding:'14px 18px', display:'flex', alignItems:'center', gap:14 }}>
-    <div style={{ flex:1 }}>
-      <div style={{ fontWeight:700, color:'#ef4444', fontSize:13, marginBottom:3 }}>Failed to load</div>
-      <code style={{ fontSize:11, color:'var(--text3)' }}>{msg}</code>
-    </div>
-    {onRetry && <button onClick={onRetry} style={{ padding:'6px 14px', borderRadius:7, background:'var(--accent)', color:'#fff', border:'none', fontSize:12, fontWeight:600, cursor:'pointer' }}>Retry</button>}
-  </div>
-);
+function fmtDateShort(s) {
+  if (!s) return '—';
+  const [, mo, dy] = String(s).slice(0, 10).split('-');
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[parseInt(mo, 10) - 1]} ${parseInt(dy, 10)}`;
+}
 
-// ── Section header ────────────────────────────────────────────────────────────
-const SH = ({ title, sub, right }) => (
-  <div style={{ display:'flex', alignItems:'flex-end', justifyContent:'space-between', marginBottom:14 }}>
-    <div>
-      <div style={{ fontSize:16, fontWeight:800, color:'var(--text)', letterSpacing:'-.2px' }}>{title}</div>
-      {sub && <div style={{ fontSize:12, color:'var(--text3)', marginTop:2 }}>{sub}</div>}
-    </div>
-    {right}
-  </div>
-);
+function fmtDateLong(s) {
+  if (!s) return '—';
+  const [yr, mo, dy] = String(s).slice(0, 10).split('-');
+  const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  return `${months[parseInt(mo, 10) - 1]} ${parseInt(dy, 10)}, ${yr}`;
+}
 
-// ── Trend chart ───────────────────────────────────────────────────────────────
-function TrendChart({ data, metric, color, formatY, refVal }) {
-  if (!data?.length) return <div style={{ height:140, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', fontSize:12 }}>No data</div>;
+function fmtTime(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return null;
+  }
+}
+
+function statusClass(s) {
+  return STATUS[s]?.cls || STATUS.gray.cls;
+}
+
+function statusColor(s) {
+  return STATUS[s]?.color || STATUS.gray.color;
+}
+
+// ── Small UI pieces ───────────────────────────────────────────────────────────
+function StatusPill({ status, children }) {
   return (
-    <ResponsiveContainer width="100%" height={140}>
-      <AreaChart data={data} margin={{ top:8, right:4, left:0, bottom:0 }}>
+    <span className={`live-status ${statusClass(status)}`}>
+      <span className="live-status__dot" style={{ background: statusColor(status) }} />
+      {children}
+    </span>
+  );
+}
+
+function SegBtn({ active, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`live-seg-btn${active ? ' live-seg-btn--active' : ''}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function Skeleton({ h = 72 }) {
+  return <div className="shimmer" style={{ height: h, borderRadius: 8 }} />;
+}
+
+function ErrBox({ msg, onRetry }) {
+  return (
+    <div className="live-error">
+      <div style={{ flex: 1 }}>
+        <div className="live-error__title">Failed to load</div>
+        <code className="live-error__msg">{msg}</code>
+      </div>
+      {onRetry && (
+        <button type="button" className="live-error__retry" onClick={onRetry}>Retry</button>
+      )}
+    </div>
+  );
+}
+
+function SectionHead({ title, sub, right }) {
+  return (
+    <div className="live-section__head">
+      <div>
+        <div className="live-section__title">{title}</div>
+        {sub && <div className="live-section__sub">{sub}</div>}
+      </div>
+      {right}
+    </div>
+  );
+}
+
+// ── Charts ────────────────────────────────────────────────────────────────────
+function TrendChart({ data, metric, label, color, formatY, refVal }) {
+  if (!data?.length) {
+    return <div className="live-empty" style={{ height: 150 }}>No trend data for this period</div>;
+  }
+  return (
+    <ResponsiveContainer width="100%" height={150}>
+      <AreaChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
         <defs>
-          <linearGradient id={`g${metric}`} x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%"  stopColor={color} stopOpacity={.35}/>
-            <stop offset="95%" stopColor={color} stopOpacity={0}/>
+          <linearGradient id={`live-${metric}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="5%" stopColor={color} stopOpacity={0.3} />
+            <stop offset="95%" stopColor={color} stopOpacity={0} />
           </linearGradient>
         </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false}/>
-        <XAxis dataKey="date" tickFormatter={fmt.date} tick={{ fontSize:9, fill:'var(--text3)' }} interval="preserveStartEnd" axisLine={false} tickLine={false}/>
-        <YAxis tick={{ fontSize:9, fill:'var(--text3)' }} tickFormatter={formatY} width={46} axisLine={false} tickLine={false}/>
-        <Tooltip
-          contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:8, fontSize:12, boxShadow:'0 4px 20px rgba(0,0,0,.2)' }}
-          labelStyle={{ color:'var(--text2)', fontWeight:600, marginBottom:4 }}
-          formatter={(v)=>[formatY(v)]}
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" vertical={false} />
+        <XAxis
+          dataKey="date"
+          tickFormatter={fmtDateShort}
+          tick={{ fontSize: 10, fill: 'var(--text3)' }}
+          interval="preserveStartEnd"
+          axisLine={false}
+          tickLine={false}
         />
-        {refVal && <ReferenceLine y={refVal} stroke={color} strokeDasharray="4 4" strokeOpacity={.5}/>}
-        <Area type="monotone" dataKey={metric} stroke={color} strokeWidth={2.5} fill={`url(#g${metric})`} dot={false} activeDot={{ r:4, stroke:color, strokeWidth:2, fill:'var(--bg2)' }}/>
+        <YAxis
+          tick={{ fontSize: 10, fill: 'var(--text3)' }}
+          tickFormatter={metric === 'mer' ? fmtAxisRatio : fmtAxisCurrency}
+          width={metric === 'mer' ? 48 : 72}
+          axisLine={false}
+          tickLine={false}
+        />
+        <Tooltip
+          contentStyle={TOOLTIP_STYLE}
+          labelFormatter={fmtDateLong}
+          formatter={(v) => [formatY(v), label]}
+        />
+        {refVal != null && (
+          <ReferenceLine y={refVal} stroke={color} strokeDasharray="4 4" strokeOpacity={0.45} />
+        )}
+        <Area
+          type="monotone"
+          dataKey={metric}
+          stroke={color}
+          strokeWidth={2}
+          fill={`url(#live-${metric})`}
+          dot={false}
+          activeDot={{ r: 4, stroke: color, strokeWidth: 2, fill: 'var(--bg2)' }}
+        />
       </AreaChart>
     </ResponsiveContainer>
   );
 }
 
-// ── Channel spend bar ─────────────────────────────────────────────────────────
 function SpendBar({ channels }) {
-  if (!channels?.length) return <div style={{ height:160, display:'flex', alignItems:'center', justifyContent:'center', color:'var(--text3)', fontSize:12 }}>No data</div>;
-  const sorted = [...channels].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  if (!channels?.length) {
+    return <div className="live-empty" style={{ height: 160 }}>No channel spend data</div>;
+  }
+  const sorted = [...channels].sort((a, b) => (b.spend || 0) - (a.spend || 0));
+  const totalSpend = sorted.reduce((s, c) => s + (c.spend || 0), 0);
   const data = sorted.map(c => ({
     name: CHANNEL_META[c.channel]?.label || c.channel,
-    spend: Math.round(c.spend||0),
-    roas: parseFloat((c.roas||0).toFixed(2)),
+    spend: Math.round(c.spend || 0),
+    pct: totalSpend > 0 ? ((c.spend || 0) / totalSpend) * 100 : 0,
     color: CHANNEL_META[c.channel]?.color || '#6b7280',
   }));
+
   return (
-    <ResponsiveContainer width="100%" height={Math.max(160, data.length*34)}>
-      <BarChart data={data} layout="vertical" margin={{ top:4, right:12, left:58, bottom:4 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false}/>
-        <XAxis type="number" tick={{ fontSize:9, fill:'var(--text3)' }} tickFormatter={fmt$} axisLine={false} tickLine={false}/>
-        <YAxis dataKey="name" type="category" tick={{ fontSize:11, fill:'var(--text2)', fontWeight:600 }} width={56} axisLine={false} tickLine={false}/>
-        <Tooltip contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:8, fontSize:12 }} formatter={v=>[fmt.currency(v),'Spend']}/>
-        <Bar dataKey="spend" radius={[0,6,6,0]} maxBarSize={22}>
-          {data.map(d=><Cell key={d.name} fill={d.color}/>)}
+    <ResponsiveContainer width="100%" height={Math.max(160, data.length * 36)}>
+      <BarChart data={data} layout="vertical" margin={{ top: 4, right: 12, left: 64, bottom: 4 }}>
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid)" horizontal={false} />
+        <XAxis
+          type="number"
+          tick={{ fontSize: 10, fill: 'var(--text3)' }}
+          tickFormatter={fmtAxisCurrency}
+          axisLine={false}
+          tickLine={false}
+        />
+        <YAxis
+          dataKey="name"
+          type="category"
+          tick={{ fontSize: 11, fill: 'var(--text2)', fontWeight: 600 }}
+          width={60}
+          axisLine={false}
+          tickLine={false}
+        />
+        <Tooltip
+          contentStyle={TOOLTIP_STYLE}
+          formatter={(v, _n, entry) => [
+            `${fmtChartCurrency(v)} (${entry.payload.pct.toFixed(1)}% of total)`,
+            L.spend,
+          ]}
+        />
+        <Bar dataKey="spend" radius={[0, 6, 6, 0]} maxBarSize={22}>
+          {data.map(d => <Cell key={d.name} fill={d.color} />)}
         </Bar>
       </BarChart>
     </ResponsiveContainer>
@@ -135,76 +245,64 @@ function SpendBar({ channels }) {
 
 // ── Geo cards ─────────────────────────────────────────────────────────────────
 function GeoCards({ geo, loading, brand }) {
-  if (loading) return (
-    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))', gap:10 }}>
-      {[...Array(5)].map((_,i)=><Skeleton key={i} h={110}/>)}
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="live-geo-grid">
+        {[...Array(5)].map((_, i) => <Skeleton key={i} h={130} />)}
+      </div>
+    );
+  }
 
   const isNobl = brand === 'nobl';
-  let regions = (geo||[]).filter(g => g.region !== 'TOTAL');
+  let regions = (geo || []).filter(g => g.region !== 'TOTAL');
 
-  // For NOBL: ensure all key regions appear, then sort by revenue descending
   if (isNobl) {
     const regionMap = Object.fromEntries(regions.map(r => [r.region, r]));
-    regions = NOBL_REGIONS_ORDER.map(k => regionMap[k] || { region:k, revenue:0, spend:0, mer:0, mer_status:'gray' });
+    regions = NOBL_REGIONS_ORDER.map(k => regionMap[k] || {
+      region: k, revenue: 0, spend: 0, mer: 0, mer_status: 'gray',
+    });
   }
 
   regions = [...regions].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
+  if (!regions.length) return <div className="live-empty">No regional data for this date</div>;
 
-  if (!regions.length) return <div style={{ color:'var(--text3)', fontSize:13, padding:'12px 0' }}>No regional data</div>;
-
-  // Compute total for share calculations
-  const totalRev   = regions.reduce((s,g) => s + (g.revenue||0), 0);
-  const totalSpend = regions.reduce((s,g) => s + (g.spend||0), 0);
+  const totalRev = regions.reduce((s, g) => s + (g.revenue || 0), 0);
 
   return (
-    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))', gap:10 }}>
+    <div className="live-geo-grid">
       {regions.map(g => {
-        const isEU   = g.region === 'EU';
-        const st     = STATUS[g.mer_status] || STATUS.gray;
-        const revPct = totalRev > 0 ? fmtPct((g.revenue / totalRev)) : '0%';
+        const isEU = g.region === 'EU';
+        const revShare = totalRev > 0 ? ((g.revenue / totalRev) * 100).toFixed(1) : '0.0';
         return (
-          <div key={g.region} style={{
-            background: st.bg || 'var(--bg2)',
-            border: `1px solid ${isEU && isNobl ? 'rgba(99,102,241,.4)' : (st.border || 'var(--border2)')}`,
-            borderRadius: 12, padding: '14px 16px',
-            position: 'relative', overflow: 'hidden',
-          }}>
-            {/* Top accent bar */}
-            <div style={{ position:'absolute', top:0, left:0, right:0, height:3, background: st.color || 'var(--border2)', borderRadius:'12px 12px 0 0' }}/>
+          <div
+            key={g.region}
+            className="live-geo-card"
+            style={isEU && isNobl ? { borderColor: 'rgba(47, 78, 181, .28)' } : undefined}
+          >
+            <div className="live-geo-card__accent" style={{ background: statusColor(g.mer_status) }} />
+            {isEU && isNobl && <div className="live-geo-card__badge">IN TOTALS</div>}
 
-            {/* EU "included in totals" badge for NOBL */}
-            {isEU && isNobl && (
-              <div style={{
-                position:'absolute', top:8, right:8,
-                fontSize:9, fontWeight:700, padding:'2px 6px',
-                background:'rgba(99,102,241,.15)', border:'1px solid rgba(99,102,241,.3)',
-                borderRadius:6, color:'#818cf8', letterSpacing:'.03em',
-              }}>✓ IN TOTALS</div>
-            )}
-
-            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:4, marginTop:2 }}>
-              <span style={{ fontSize:18 }}>{GEO_FLAG[g.region]||'🌐'}</span>
-            </div>
-            <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:6, lineHeight:1.2 }}>
-              {GEO_LABEL[g.region] || g.region}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+              <span style={{ fontSize: 16, lineHeight: 1 }}>{GEO_FLAG[g.region] || '🌐'}</span>
+              <span className="live-geo-card__region">{GEO_LABEL[g.region] || g.region}</span>
             </div>
 
-            <Pill s={g.mer_status}>MER {fmt.ratio(g.mer)}</Pill>
+            <div className="live-geo-card__revenue">{fmt$(g.revenue)}</div>
 
-            <div style={{ fontSize:11, color:'var(--text3)', marginTop:8, display:'flex', flexDirection:'column', gap:3 }}>
-              <div style={{ display:'flex', justifyContent:'space-between' }}>
-                <span>Revenue</span>
-                <span style={{ fontWeight:600, color:'var(--text2)' }}>{fmt.currency(g.revenue)}</span>
+            <div style={{ marginBottom: 10 }}>
+              <StatusPill status={g.mer_status}>{L.mer} {fmtRatio(g.mer)}</StatusPill>
+            </div>
+
+            <div className="live-geo-card__rows">
+              <div className="live-geo-card__row">
+                <span>{L.spend}</span>
+                <span className="live-geo-card__row-val">{fmt$(g.spend)}</span>
               </div>
-              <div style={{ display:'flex', justifyContent:'space-between' }}>
-                <span>Spend</span>
-                <span style={{ fontWeight:600, color:'var(--text2)' }}>{fmt.currency(g.spend)}</span>
-              </div>
-              <div style={{ display:'flex', justifyContent:'space-between', marginTop:2, paddingTop:4, borderTop:'1px solid var(--border)' }}>
-                <span>Rev share</span>
-                <span style={{ fontWeight:700, color: isEU && isNobl ? '#818cf8' : 'var(--text2)' }}>{revPct}%</span>
+              <div className="live-geo-card__row" style={{ paddingTop: 4, borderTop: '1px solid var(--border)' }}>
+                <span>Sales share</span>
+                <span className="live-geo-card__row-val" style={isEU && isNobl ? { color: 'var(--accent)' } : undefined}>
+                  {revShare}%
+                </span>
               </div>
             </div>
           </div>
@@ -214,33 +312,35 @@ function GeoCards({ geo, loading, brand }) {
   );
 }
 
-const LIVE_CH_HEADERS = ['Channel', 'Spend', 'Revenue', 'ROAS', 'Orders', 'NC Orders', 'CAC', 'AOV'];
-const LIVE_CH_FIELD_KEYS = {
-  Channel: 'channel', Spend: 'spend', Revenue: 'revenue', ROAS: 'roas',
-  Orders: 'purchases', 'NC Orders': 'nc_orders', CAC: 'cac', AOV: 'aov',
-};
-
-// ── Channel table ─────────────────────────────────────────────────────────────
 function ChannelTable({ channels, loading, asOfDate }) {
-  if (loading) return <div style={{ padding:16 }}>{[...Array(4)].map((_,i)=><div key={i} style={{ marginBottom:8 }}><Skeleton h={36}/></div>)}</div>;
-  if (!channels?.length) return <div style={{ padding:'20px 16px', color:'var(--text3)', fontSize:13 }}>No channel data for this date</div>;
+  if (loading) {
+    return (
+      <div style={{ padding: 16 }}>
+        {[...Array(4)].map((_, i) => <div key={i} style={{ marginBottom: 8 }}><Skeleton h={36} /></div>)}
+      </div>
+    );
+  }
+  if (!channels?.length) {
+    return <div className="live-empty" style={{ padding: '24px 16px' }}>No channel data for this date</div>;
+  }
 
   const rows = [...channels]
     .sort((a, b) => (b.revenue || 0) - (a.revenue || 0))
-    .map((ch) => ({
+    .map(ch => ({
       Channel: CHANNEL_META[ch.channel]?.label || ch.channel,
-      Spend: ch.spend,
-      Revenue: ch.revenue,
-      ROAS: ch.roas,
-      Orders: ch.purchases,
-      'NC Orders': ch.nc_orders,
-      CAC: ch.cac > 0 ? ch.cac : null,
-      AOV: ch.purchases > 0 ? ch.revenue / ch.purchases : null,
+      [L.spend]: ch.spend,
+      [L.revenue]: ch.revenue,
+      [L.roas]: ch.roas,
+      [L.orders]: ch.purchases,
+      [L.ncOrders]: ch.nc_orders,
+      [L.cac]: ch.cac > 0 ? ch.cac : null,
+      [L.aov]: ch.purchases > 0 ? ch.revenue / ch.purchases : null,
       _channel: ch.channel,
+      _roas_status: ch.roas_status,
     }));
 
   return (
-    <div style={{ padding: 16 }}>
+    <div style={{ padding: '0 4px 4px' }}>
       <SheetTable
         headers={LIVE_CH_HEADERS}
         rows={rows}
@@ -248,6 +348,7 @@ function ChannelTable({ channels, loading, asOfDate }) {
         scrollable={false}
         searchable={false}
         hideRowCount
+        compact
         getCellCommentKey={(row, h) => commentTargetKey('channel', row._channel, LIVE_CH_FIELD_KEYS[h] || h, asOfDate)}
         getCellCommentLabel={(row, h) => `${row._channel} · ${h} · ${asOfDate || '—'}`}
       />
@@ -255,342 +356,495 @@ function ChannelTable({ channels, loading, asOfDate }) {
   );
 }
 
-// ── Brand / date controls ─────────────────────────────────────────────────────
-function SegBtn({ active, onClick, children }) {
+function ChannelRoasCards({ channels, loading }) {
+  if (loading) return <Skeleton h={120} />;
+  if (!channels?.length) return <div className="live-empty">No channel data</div>;
+
+  const sorted = [...channels].sort((a, b) => (b.spend || 0) - (a.spend || 0));
+
   return (
-    <button onClick={onClick} style={{
-      padding:'6px 14px', borderRadius:8, fontSize:12, fontWeight:600, cursor:'pointer', border:'none',
-      background: active ? 'var(--accent)' : 'transparent',
-      color: active ? '#fff' : 'var(--text3)',
-      transition:'all .15s',
-    }}>{children}</button>
+    <div className="live-channel-cards">
+      {sorted.map(ch => {
+        const meta = CHANNEL_META[ch.channel] || {};
+        return (
+          <div
+            key={ch.channel}
+            className="live-channel-card"
+            style={{
+              background: ch.roas_status === 'gray' ? 'var(--bg2)' : undefined,
+              borderColor: 'var(--border)',
+            }}
+          >
+            <div className="live-channel-card__name">
+              <span className="live-channel-card__swatch" style={{ background: meta.color || '#888' }} />
+              {meta.label || ch.channel}
+            </div>
+            <div className="live-channel-card__value" style={{ color: statusColor(ch.roas_status) }}>
+              {fmtRatio(ch.roas)}
+            </div>
+            <div className="live-channel-card__sub">{fmt$(ch.spend)} {L.spend.toLowerCase()}</div>
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
+const THRESHOLDS = [
+  { label: 'MER — Global / US / CA / AU / EU', rules: ['< 1.8', '1.8 – 2.0', '≥ 2.0'], statuses: ['red', 'yellow', 'green'] },
+  { label: 'MER — Dubai / UAE', rules: ['< 1.6', '1.6 – 1.8', '≥ 1.8'], statuses: ['red', 'yellow', 'green'] },
+  { label: 'Meta', rules: ['< 1.6', '1.6 – 1.8', '≥ 1.8'], statuses: ['red', 'yellow', 'green'] },
+  { label: 'Google', rules: ['< 2.0', '2.0 – 3.0', '≥ 3.0'], statuses: ['red', 'yellow', 'green'] },
+  { label: 'AppLovin', rules: ['< 2.0', '2.0 – 2.2', '≥ 2.2'], statuses: ['red', 'yellow', 'green'] },
+  { label: 'NVP%', rules: ['< 45%', '45 – 50%', '≥ 50%'], statuses: ['red', 'yellow', 'green'] },
+];
+
+// ── Main page ─────────────────────────────────────────────────────────────────
 export default function LivePage() {
-  const [brand, setBrand]           = useState('nobl');
-  const [dateMode, setDateMode]     = useState('latest');
+  const [brand, setBrand] = useState('nobl');
+  const [dateMode, setDateMode] = useState('latest');
   const [customDate, setCustomDate] = useState('');
-  const [trendDays, setTrendDays]   = useState(30);
+  const [trendDays, setTrendDays] = useState(30);
   const [availDates, setAvailDates] = useState(null);
 
-  const [live,     setLive]         = useState(null);
-  const [trend,    setTrend]        = useState(null);
-  const [loadL,    setLoadL]        = useState(false);
-  const [loadT,    setLoadT]        = useState(false);
-  const [errL,     setErrL]         = useState(null);
-  const [errT,     setErrT]         = useState(null);
+  const [live, setLive] = useState(null);
+  const [trend, setTrend] = useState(null);
+  const [loadL, setLoadL] = useState(false);
+  const [loadT, setLoadT] = useState(false);
+  const [errL, setErrL] = useState(null);
+  const [errT, setErrT] = useState(null);
+  const liveFetchSeqRef = useRef(0);
+  const trendFetchSeqRef = useRef(0);
 
-  // Fetch available dates on brand change
   useEffect(() => {
-    setLive(null); setTrend(null); setErrL(null); setErrT(null);
+    setLive(null);
+    setTrend(null);
+    setErrL(null);
+    setErrT(null);
+    setDateMode('latest');
     API(`/api/tw/available-dates?brand=${brand}`).then(d => {
-      if (d.ok) { setAvailDates(d); if (!customDate) setCustomDate(d.latest_summary||''); }
-    }).catch(()=>{});
+      if (d.ok) {
+        setAvailDates(d);
+        setCustomDate(d.latest_summary || '');
+      }
+    }).catch(() => {});
   }, [brand]);
 
-  const resolvedDate = dateMode==='latest' ? (availDates?.latest_summary||'') : customDate;
+  const resolvedDate = dateMode === 'latest' ? (availDates?.latest_summary || '') : customDate;
+  const brandMeta = BRANDS.find(b => b.k === brand) || BRANDS[0];
 
-  const loadLive = useCallback(async () => {
-    if (!resolvedDate) return;
-    setLoadL(true); setErrL(null);
+  const loadLive = useCallback(async (opts = {}) => {
+    let date = resolvedDate;
+    if (opts.silent && dateMode === 'latest') {
+      try {
+        const avail = await API(`/api/tw/available-dates?brand=${brand}`);
+        if (avail.ok) {
+          setAvailDates(avail);
+          date = avail.latest_summary || date;
+        }
+      } catch { /* keep resolvedDate */ }
+    }
+    if (!date) return;
+    const seq = ++liveFetchSeqRef.current;
+    if (!opts.silent) setLoadL(true);
+    if (!opts.silent) setErrL(null);
     try {
-      const d = await API(`/api/tw/live?brand=${brand}&date=${resolvedDate}`);
-      if (!d.ok) throw new Error(d.error||'API error');
+      const d = await API(`/api/tw/live?brand=${brand}&date=${date}`);
+      if (seq !== liveFetchSeqRef.current) return;
+      if (!d.ok) throw new Error(d.error || 'API error');
       setLive(d);
-    } catch(e) { setErrL(e.message); }
-    finally    { setLoadL(false); }
-  }, [brand, resolvedDate]);
+    } catch (e) {
+      if (seq !== liveFetchSeqRef.current) return;
+      if (!opts.silent) setErrL(e.message);
+    } finally {
+      if (!opts.silent && seq === liveFetchSeqRef.current) setLoadL(false);
+    }
+  }, [brand, resolvedDate, dateMode]);
 
-  const loadTrend = useCallback(async () => {
-    if (!resolvedDate) return;
-    setLoadT(true); setErrT(null);
+  const loadTrend = useCallback(async (opts = {}) => {
+    let date = resolvedDate;
+    if (opts.silent && dateMode === 'latest') {
+      try {
+        const avail = await API(`/api/tw/available-dates?brand=${brand}`);
+        if (avail.ok) {
+          setAvailDates(avail);
+          date = avail.latest_summary || date;
+        }
+      } catch { /* keep resolvedDate */ }
+    }
+    if (!date) return;
+    const seq = ++trendFetchSeqRef.current;
+    if (!opts.silent) setLoadT(true);
+    if (!opts.silent) setErrT(null);
     try {
-      const d = await API(`/api/tw/trend?brand=${brand}&days=${trendDays}&endDate=${resolvedDate}`);
-      if (!d.ok) throw new Error(d.error||'API error');
+      const d = await API(`/api/tw/trend?brand=${brand}&days=${trendDays}&endDate=${date}`);
+      if (seq !== trendFetchSeqRef.current) return;
+      if (!d.ok) throw new Error(d.error || 'API error');
       setTrend(d);
-    } catch(e) { setErrT(e.message); }
-    finally    { setLoadT(false); }
-  }, [brand, trendDays, resolvedDate]);
+    } catch (e) {
+      if (seq !== trendFetchSeqRef.current) return;
+      if (!opts.silent) setErrT(e.message);
+    } finally {
+      if (!opts.silent && seq === trendFetchSeqRef.current) setLoadT(false);
+    }
+  }, [brand, trendDays, resolvedDate, dateMode]);
 
-  useEffect(() => { loadLive();  }, [loadLive]);
+  useEffect(() => { loadLive(); }, [loadLive]);
   useEffect(() => { loadTrend(); }, [loadTrend]);
 
-  const sum       = live?.summary;
-  const channels  = [...(live?.channels || [])].sort((a, b) => (b.revenue || 0) - (a.revenue || 0));
-  const geo       = live?.geo      || [];
-  const trendArr  = trend?.trend   || [];
+  const hourlyRef = useRef(null);
+  useEffect(() => {
+    hourlyRef.current = setInterval(() => {
+      loadLive({ silent: true });
+      loadTrend({ silent: true });
+    }, HOURLY_REFRESH_MS);
+    return () => clearInterval(hourlyRef.current);
+  }, [loadLive, loadTrend]);
+
+  const sum = live?.summary;
+  const channels = useMemo(
+    () => [...(live?.channels || [])].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)),
+    [live?.channels],
+  );
+  const geo = live?.geo || [];
+  const trendArr = trend?.trend || [];
   const euContrib = live?.eu_contribution || null;
 
-  const BRANDS = [
-    { k:'nobl',   l:'NOBL Travel', badge:'🇺🇸🇪🇺' },
-    { k:'flo',    l:'FLO US',      badge:null       },
-    { k:'flo_eu', l:'FLO EU',      badge:null       },
-  ];
-
-  // Dates each section is actually showing (may differ due to ETL lag)
-  const summaryDate    = live?.summary_date;
-  const channelDate    = live?.channel_date;
-  const geoDateUsed    = live?.geo_date;
-  const channelLag     = live?.channel_lag;
-  const geoLag         = live?.geo_lag;
-  // How many days behind is channel/geo?
-  const channelDaysLag = channelDate && summaryDate
+  const summaryDate = live?.summary_date;
+  const channelDate = live?.channel_date;
+  const geoDateUsed = live?.geo_date;
+  const channelLag = live?.channel_lag;
+  const geoLag = live?.geo_lag;
+  const channelDaysLag = summaryDate && channelDate
     ? Math.round((new Date(summaryDate) - new Date(channelDate)) / 86400000)
     : 0;
+  const hasDataLag = channelLag || geoLag;
+  const refreshedAt = fmtTime(live?.generated_at);
 
   return (
     <CommentProvider pageKey="live">
-    <div style={{ maxWidth:1380, margin:'0 auto' }}>
-      <style>{`
-        @keyframes sk { 0%,100%{opacity:1} 50%{opacity:.4} }
-      `}</style>
-
-      {/* ── Header bar ── */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:24, flexWrap:'wrap', gap:12 }}>
-        <div>
-          <h1 style={{ fontSize:24, fontWeight:900, color:'var(--text)', margin:0, letterSpacing:'-.5px' }}>
-            Today&apos;s snapshot
-            {brand === 'nobl' && (
-              <span style={{ marginLeft:10, fontSize:13, fontWeight:600, color:'#818cf8', verticalAlign:'middle',
-                background:'rgba(99,102,241,.12)', border:'1px solid rgba(99,102,241,.25)',
-                borderRadius:8, padding:'3px 9px' }}>
-                🇺🇸 US + 🇪🇺 EU
-              </span>
-            )}
-          </h1>
-          <div style={{ fontSize:12, color:'var(--text3)', marginTop:4 }}>
-            {brand === 'nobl' ? 'Latest daily numbers for NOBL Travel (all regions)' : brand === 'flo' ? 'Latest daily numbers for Pilates FLO US' : 'Latest daily numbers for Pilates FLO EU'}
-            {availDates?.latest_summary && (
-              <span> · Latest: <strong style={{ color:'var(--text2)' }}>{availDates.latest_summary}</strong></span>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display:'flex', alignItems:'center', gap:10, flexWrap:'wrap' }}>
-          {/* Brand selector */}
-          <div style={{ display:'flex', background:'var(--bg3)', borderRadius:10, padding:3, border:'1px solid var(--border2)' }}>
-            {BRANDS.map(b=>(
-              <SegBtn key={b.k} active={brand===b.k} onClick={()=>setBrand(b.k)}>
-                {b.l}{b.badge && <span style={{ marginLeft:4, fontSize:11, opacity:.8 }}>{b.badge}</span>}
-              </SegBtn>
-            ))}
-          </div>
-
-          {/* Date selector */}
-          <div style={{ display:'flex', background:'var(--bg3)', borderRadius:10, padding:3, border:'1px solid var(--border2)' }}>
-            <SegBtn active={dateMode==='latest'} onClick={()=>setDateMode('latest')}>Latest</SegBtn>
-            <SegBtn active={dateMode==='custom'} onClick={()=>setDateMode('custom')}>Custom</SegBtn>
-          </div>
-          {dateMode==='custom' && (
-            <input type="date" value={customDate} onChange={e=>setCustomDate(e.target.value)}
-              min={availDates?.oldest_summary} max={availDates?.latest_summary}
-              style={{ padding:'6px 10px', borderRadius:8, border:'1px solid var(--border2)', background:'var(--bg3)', color:'var(--text)', fontSize:12 }}/>
-          )}
-
-          {/* Refresh */}
-          <button onClick={()=>{loadLive();loadTrend();}} disabled={loadL}
-            style={{ padding:'7px 16px', borderRadius:9, border:'1px solid var(--border2)', background:'var(--bg3)', color:'var(--text2)', fontSize:12, fontWeight:600, cursor:'pointer', opacity:loadL?.5:1, display:'flex', alignItems:'center', gap:6 }}>
-            <span style={{ display:'inline-block', animation:loadL?'spin .8s linear infinite':'none', fontSize:14 }}>↻</span> Refresh
-          </button>
-        </div>
-      </div>
-
-      {errL && <div style={{ marginBottom:18 }}><ErrBox msg={errL} onRetry={loadLive}/></div>}
-
-      {/* ── Date banner ── */}
-      {resolvedDate && (
-        <div style={{ marginBottom:20 }}>
-          <div style={{ padding:'10px 16px', background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:10, display:'flex', alignItems:'center', gap:10, fontSize:13, flexWrap:'wrap' }}>
-            <span style={{ fontSize:16 }}>📅</span>
-            <span style={{ color:'var(--text2)' }}>Summary: <strong style={{ color:'var(--text)' }}>{summaryDate || resolvedDate}</strong></span>
-            {channelDate && channelDate !== (summaryDate || resolvedDate) && (
-              <span style={{ color:'var(--text3)', fontSize:12 }}>
-                · Channels/Geo: <strong style={{ color:'var(--warn, #f59e0b)' }}>{channelDate}</strong>
-                {channelDaysLag > 0 && <span style={{ color:'var(--text3)' }}> ({channelDaysLag}d behind — ETL sync pending)</span>}
-              </span>
-            )}
-          </div>
-          {(channelLag || geoLag) && (
-            <div style={{ marginTop:6, padding:'8px 14px', background:'rgba(245,158,11,.07)', border:'1px solid rgba(245,158,11,.25)', borderRadius:8, fontSize:12, color:'#f59e0b', display:'flex', alignItems:'center', gap:8 }}>
-              <span>⚠</span>
-              <span>Channel &amp; regional data is {channelDaysLag} day{channelDaysLag!==1?'s':''} behind summary. The ETL sync for channel/geo tables last ran on <strong>{channelDate}</strong>. Summary KPIs and trends use up-to-date data.</span>
+      <div className="page-stack">
+        {/* Controls */}
+        <div className="page-filter-bar">
+          <div className="page-filter-bar__inner">
+            <span className="page-filter-bar__label">Store</span>
+            <div className="live-seg-group">
+              {BRANDS.map(b => (
+                <SegBtn key={b.k} active={brand === b.k} onClick={() => setBrand(b.k)}>
+                  {b.l}
+                </SegBtn>
+              ))}
             </div>
-          )}
-        </div>
-      )}
 
-      {/* ── NOBL EU included notice ── */}
-      {brand === 'nobl' && (
-        <div style={{ marginBottom:18, padding:'10px 16px', background:'rgba(99,102,241,.07)', border:'1px solid rgba(99,102,241,.2)', borderRadius:10, display:'flex', alignItems:'center', gap:10, fontSize:12 }}>
-          <span style={{ fontSize:16 }}>🇪🇺</span>
-          <div>
-            <span style={{ fontWeight:700, color:'#818cf8' }}>EU operations are included in all NOBL Travel metrics.</span>
-            <span style={{ color:'var(--text3)', marginLeft:6 }}>NOBL processes EU orders through the same store — revenue, spend, MER and orders always reflect US + EU + CA + AUS + Dubai combined.</span>
+            <span className="page-filter-bar__label" style={{ marginLeft: 8 }}>Date</span>
+            <div className="live-seg-group">
+              <SegBtn active={dateMode === 'latest'} onClick={() => setDateMode('latest')}>Latest</SegBtn>
+              <SegBtn active={dateMode === 'custom'} onClick={() => setDateMode('custom')}>Pick date</SegBtn>
+            </div>
+            {dateMode === 'custom' && (
+              <input
+                type="date"
+                className="live-date-input"
+                value={customDate}
+                onChange={e => setCustomDate(e.target.value)}
+                min={availDates?.oldest_summary}
+                max={availDates?.latest_summary}
+              />
+            )}
+
+            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+              {refreshedAt && !loadL && (
+                <span style={{ fontSize: 11, color: 'var(--text3)' }} title="Auto-refreshes every hour">
+                  Updated {refreshedAt} · hourly
+                </span>
+              )}
+              <button
+                type="button"
+                className="live-refresh-btn"
+                onClick={() => { loadLive(); loadTrend(); }}
+                disabled={loadL}
+              >
+                <span className={`live-refresh-btn__icon${loadL ? ' live-refresh-btn__icon--spin' : ''}`}>↻</span>
+                Refresh
+              </button>
+            </div>
           </div>
         </div>
-      )}
 
-      {/* ── Summary KPIs ── */}
-      <div style={{ marginBottom:28 }}>
-        <SH
-          title="Summary"
-          sub={brand==='nobl'
-            ? 'All channels blended · US + 🇪🇺 EU + CA + AUS + Dubai'
-            : 'All channels blended'}
-        />
-        {loadL ? (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12 }}>
-            {[...Array(7)].map((_,i)=><Skeleton key={i}/>)}
-          </div>
-        ) : sum ? (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(175px,1fr))', gap:12 }}>
-            <SharedKpiCard label="Order Revenue" value={fmt.currency(sum.order_revenue || sum.total_revenue)} fullValue={String(sum.order_revenue || sum.total_revenue || '')} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
-            <SharedKpiCard label="Total ad spend" value={fmt.currency(sum.total_spend)} fullValue={String(sum.total_spend || '')} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
-            <SharedKpiCard label="Sales per ad $" value={fmt.ratio(sum.mer)} copyValue={sum.mer != null ? Number(sum.mer).toFixed(4) : undefined} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: 'Sales per ad $' }} />
-            <SharedKpiCard label="Total orders" value={fmt.num(sum.total_orders)} fullValue={String(sum.total_orders || '')} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
-            <SharedKpiCard label="New customers" value={fmt.num(sum.new_customer_orders)} fullValue={String(sum.new_customer_orders || '')} tooltip={TIP.ncOrders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }} />
-            <SharedKpiCard label="Repeat customers" value={fmt.num(sum.returning_orders)} fullValue={String(sum.returning_orders || '')} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('returning_orders'), targetLabel: 'Repeat Customers' }} />
-            <SharedKpiCard label="Avg order size" value={fmt.currency(sum.aov)} fullValue={String(sum.aov || '')} tooltip={TIP.aov} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('aov'), targetLabel: 'Avg Order Size' }} />
-          </div>
-        ) : !errL && resolvedDate ? (
-          <div style={{ color:'var(--text3)', fontSize:13, padding:'16px 0' }}>No data for {resolvedDate}</div>
-        ) : null}
+        <PageIntro title={PAGE.live.title} desc={PAGE.live.desc}>
+          <p style={{ fontSize: 12, color: 'var(--text3)', margin: '6px 0 0', lineHeight: 1.45 }}>
+            Viewing <strong style={{ color: 'var(--text2)' }}>{brandMeta.l}</strong>
+            {brandMeta.sub && <> — {brandMeta.sub}</>}
+            {availDates?.latest_summary && (
+              <> · Latest available: <strong style={{ color: 'var(--text2)' }}>{fmtDateLong(availDates.latest_summary)}</strong></>
+            )}
+          </p>
+        </PageIntro>
 
-        {/* EU contribution strip — NOBL only */}
-        {brand === 'nobl' && !loadL && euContrib && (
-          <div style={{ marginTop:14, padding:'12px 16px', background:'rgba(99,102,241,.06)', border:'1px solid rgba(99,102,241,.2)', borderRadius:10, display:'flex', alignItems:'center', gap:20, flexWrap:'wrap' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:7, flexShrink:0 }}>
-              <span style={{ fontSize:18 }}>🇪🇺</span>
-              <div>
-                <div style={{ fontSize:11, fontWeight:700, color:'#818cf8', textTransform:'uppercase', letterSpacing:'.05em' }}>EU Contribution</div>
-                <div style={{ fontSize:10, color:'var(--text3)' }}>included in all totals above · as of {geoDateUsed}</div>
+        {errL && <ErrBox msg={errL} onRetry={loadLive} />}
+
+        {/* Data freshness */}
+        {resolvedDate && !errL && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="live-banner live-banner--date">
+              <span style={{ fontSize: 14, lineHeight: 1 }}>📅</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text2)' }}>
+                  Summary KPIs: <strong style={{ color: 'var(--text)' }}>{fmtDateLong(summaryDate || resolvedDate)}</strong>
+                </span>
+                {channelDate && channelDate !== (summaryDate || resolvedDate) && (
+                  <span style={{ color: 'var(--text3)', fontSize: 12 }}>
+                    Channels &amp; regions: <strong style={{ color: 'var(--warn)' }}>{fmtDateLong(channelDate)}</strong>
+                    {channelDaysLag > 0 && <> ({channelDaysLag} day{channelDaysLag !== 1 ? 's' : ''} behind)</>}
+                  </span>
+                )}
               </div>
             </div>
-            <div style={{ display:'flex', gap:24, flexWrap:'wrap', flex:1 }}>
+            {hasDataLag && channelDaysLag > 0 && (
+              <div className="live-banner live-banner--warn">
+                <span style={{ flexShrink: 0 }}>⚠</span>
+                <span>
+                  Channel and regional data is {channelDaysLag} day{channelDaysLag !== 1 ? 's' : ''} behind summary.
+                  Summary KPIs and trend charts use the latest data; channel/geo sections reflect the most recent synced date.
+                </span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {brand === 'nobl' && (
+          <div className="live-banner live-banner--info">
+            <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0 }}>🇪🇺</span>
+            <span style={{ color: 'var(--text2)', lineHeight: 1.5 }}>
+              <strong style={{ color: 'var(--accent)' }}>EU is included in all NOBL Travel totals.</strong>
+              {' '}Revenue, ad spend, MER, and orders always reflect US + EU + CA + AUS + Dubai combined.
+            </span>
+          </div>
+        )}
+
+        {/* Summary KPIs */}
+        <section className="live-section">
+          <SectionHead
+            title="Daily summary"
+            sub={brand === 'nobl'
+              ? 'All channels blended · every NOBL region included'
+              : 'All channels blended for the selected store'}
+          />
+          {loadL ? (
+            <div className="page-kpi-grid">
+              {[...Array(8)].map((_, i) => <Skeleton key={i} />)}
+            </div>
+          ) : sum ? (
+            <>
+              <div className="page-kpi-grid">
+                <KpiCard
+                  label="Order revenue"
+                  value={fmt$(sum.order_revenue || sum.total_revenue)}
+                  fullValue={String(sum.order_revenue || sum.total_revenue || '')}
+                  tooltip={TIP.orderRevenue}
+                  commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }}
+                />
+                <KpiCard
+                  label={L.spend}
+                  value={fmt$(sum.total_spend)}
+                  fullValue={String(sum.total_spend || '')}
+                  tooltip={TIP.spend}
+                  commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }}
+                />
+                <div
+                  className="live-kpi-hero"
+                  style={{ '--live-kpi-accent': statusColor(sum.mer_status) }}
+                >
+                  <KpiCard
+                    label={L.mer}
+                    value={fmtRatio(sum.mer)}
+                    copyValue={sum.mer != null ? Number(sum.mer).toFixed(4) : undefined}
+                    tooltip={TIP.mer}
+                    commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: L.mer }}
+                  />
+                  {sum.mer_status && (
+                    <div style={{ position: 'absolute', bottom: 14, right: 14 }}>
+                      <StatusPill status={sum.mer_status}>vs target</StatusPill>
+                    </div>
+                  )}
+                </div>
+                <KpiCard
+                  label={L.orders}
+                  value={fmtNum(sum.total_orders)}
+                  fullValue={String(sum.total_orders || '')}
+                  tooltip={TIP.orders}
+                  commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }}
+                />
+                <KpiCard
+                  label="New customers"
+                  value={fmtNum(sum.new_customer_orders)}
+                  fullValue={String(sum.new_customer_orders || '')}
+                  tooltip={TIP.ncOrders}
+                  commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }}
+                />
+                <KpiCard
+                  label="Repeat customers"
+                  value={fmtNum(sum.returning_orders)}
+                  fullValue={String(sum.returning_orders || '')}
+                  tooltip={TIP.orders}
+                  commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('returning_orders'), targetLabel: 'Repeat Customers' }}
+                />
+                <KpiCard
+                  label="New customer %"
+                  value={fmtPct(sum.new_customer_rate)}
+                  copyValue={sum.new_customer_rate != null ? String(sum.new_customer_rate) : undefined}
+                  tooltip={TIP.nvp}
+                  commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customer_rate'), targetLabel: 'New Customer %' }}
+                />
+                <KpiCard
+                  label={L.aov}
+                  value={fmt$(sum.aov)}
+                  fullValue={String(sum.aov || '')}
+                  tooltip={TIP.aov}
+                  commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('aov'), targetLabel: L.aov }}
+                />
+              </div>
+
+              {brand === 'nobl' && euContrib && (
+                <div className="live-eu-strip">
+                  <div style={{ flexShrink: 0 }}>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '.05em' }}>
+                      🇪🇺 EU contribution
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2 }}>
+                      Included in totals above · as of {fmtDateShort(geoDateUsed)}
+                    </div>
+                  </div>
+                  {[
+                    { label: 'Sales', value: fmt$(euContrib.revenue) },
+                    { label: L.spend, value: fmt$(euContrib.spend) },
+                    { label: L.mer, value: fmtRatio(euContrib.mer) },
+                    { label: 'Share of sales', value: `${euContrib.rev_pct}%` },
+                  ].map(item => (
+                    <div key={item.label} className="live-eu-strip__metric">
+                      <div className="live-eu-strip__metric-label">{item.label}</div>
+                      <div className="live-eu-strip__metric-value">{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : !errL && resolvedDate ? (
+            <div className="live-empty">No summary data for {fmtDateLong(resolvedDate)}</div>
+          ) : null}
+        </section>
+
+        {/* Regional */}
+        <section className="live-section">
+          <SectionHead
+            title={brand === 'nobl' ? 'Sales by region' : 'Sales by region'}
+            sub={geoDateUsed
+              ? `Regional MER and sales · ${fmtDateLong(geoDateUsed)}`
+              : 'Sales, ad spend, and return per ad dollar by region'}
+          />
+          <GeoCards geo={geo} loading={loadL} brand={brand} />
+        </section>
+
+        {/* Trends */}
+        <section className="live-section">
+          <SectionHead
+            title={`${trendDays}-day trend`}
+            sub={brand === 'nobl'
+              ? 'Daily sales per ad $, sales, and ad spend · all regions'
+              : 'Daily sales per ad $, sales, and ad spend'}
+            right={(
+              <div className="live-seg-group">
+                {[7, 14, 30, 60].map(d => (
+                  <SegBtn key={d} active={trendDays === d} onClick={() => setTrendDays(d)}>{d}d</SegBtn>
+                ))}
+              </div>
+            )}
+          />
+          {errT && <ErrBox msg={errT} onRetry={loadTrend} />}
+          {!errT && (
+            <div className="live-trend-grid">
               {[
-                { label:'Sales',  value: fmt.currency(euContrib.revenue) },
-                { label:'Ad spend',    value: fmt.currency(euContrib.spend)   },
-                { label:'Sales per ad $',      value: fmt.ratio(euContrib.mer)        },
-                { label:'Share of total sales',value: `${euContrib.rev_pct}%`         },
-              ].map(item => (
-                <div key={item.label} style={{ display:'flex', flexDirection:'column', gap:2 }}>
-                  <div style={{ fontSize:10, fontWeight:600, color:'var(--text3)', textTransform:'uppercase', letterSpacing:'.04em' }}>{item.label}</div>
-                  <div style={{ fontSize:15, fontWeight:800, color:'#818cf8' }}>{item.value}</div>
+                { key: 'mer', label: L.mer, color: 'var(--accent)', fmt: fmtChartRatio, ref: 2.0 },
+                { key: 'revenue', label: L.revenue, color: 'var(--success)', fmt: fmtChartCurrency },
+                { key: 'spend', label: L.spend, color: 'var(--warn)', fmt: fmtChartCurrency },
+              ].map(c => (
+                <div key={c.key} className="live-panel live-panel--pad">
+                  <div className="live-panel__label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: c.color, display: 'inline-block' }} />
+                    {c.label}
+                    {c.ref != null && (
+                      <span style={{ fontSize: 10, fontWeight: 500, color: 'var(--text3)', marginLeft: 4 }}>
+                        (target ≥ {fmtRatio(c.ref)})
+                      </span>
+                    )}
+                  </div>
+                  {loadT ? <Skeleton h={150} /> : (
+                    <TrendChart
+                      data={trendArr}
+                      metric={c.key}
+                      label={c.label}
+                      color={c.color}
+                      formatY={c.fmt}
+                      refVal={c.ref}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Channels */}
+        <section className="live-section">
+          <SectionHead
+            title="Ad channels"
+            sub={channelDate
+              ? `Spend, sales, and efficiency by platform · ${fmtDateLong(channelDate)}`
+              : 'Where ad spend went and what it returned'}
+          />
+          <div className="live-channel-grid">
+            <div className="live-panel live-panel--pad">
+              <div className="live-panel__label">{L.spend} by channel</div>
+              {loadL ? <Skeleton h={160} /> : <SpendBar channels={channels} />}
+            </div>
+            <div className="live-panel live-panel--pad">
+              <div className="live-panel__label">{L.roas} vs targets</div>
+              <ChannelRoasCards channels={channels} loading={loadL} />
+            </div>
+          </div>
+          <div className="live-panel" style={{ overflow: 'hidden' }}>
+            <div style={{ padding: '14px 18px 0' }}>
+              <div className="live-panel__label" style={{ marginBottom: 0 }}>Channel detail</div>
+            </div>
+            <ChannelTable channels={channels} loading={loadL} asOfDate={channelDate || resolvedDate} />
+          </div>
+        </section>
+
+        {/* Thresholds legend */}
+        <section className="live-section">
+          <SectionHead
+            title="Performance thresholds"
+            sub="Color indicators on MER and channel cards follow these targets"
+          />
+          <div className="live-panel live-panel--pad">
+            <div className="live-threshold-grid">
+              {THRESHOLDS.map(t => (
+                <div key={t.label} className="live-threshold-item">
+                  <div className="live-threshold-item__label">{t.label}</div>
+                  <div className="live-threshold-item__rules">
+                    {t.rules.map((rule, i) => (
+                      <span key={rule} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                        <span className="live-status__dot" style={{ background: statusColor(t.statuses[i]) }} />
+                        {rule}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               ))}
             </div>
           </div>
-        )}
+        </section>
       </div>
-
-      {/* ── Regional MER ── */}
-      <div style={{ marginBottom:28 }}>
-        <SH
-          title={brand==='nobl' ? 'Sales by region — NOBL Travel' : 'Sales by region'}
-          sub={brand==='nobl'
-            ? `All regions incl. EU · Data as of ${geoDateUsed || '—'}`
-            : (geoDateUsed ? `Data as of ${geoDateUsed}` : 'Sales, ad spend, and return per ad $ by region')}
-        />
-        <GeoCards geo={geo} loading={loadL} brand={brand}/>
-      </div>
-
-      {/* ── Trend charts ── */}
-      <div style={{ marginBottom:28 }}>
-        <SH
-          title={`${trendDays}-Day Trend`}
-          sub={brand==='nobl' ? 'Daily sales per ad $, sales, and ad spend · All regions incl. EU' : 'Daily sales per ad $, sales, and ad spend'}
-          right={
-            <div style={{ display:'flex', background:'var(--bg3)', borderRadius:8, padding:2, border:'1px solid var(--border2)' }}>
-              {[7,14,30,60].map(d=><SegBtn key={d} active={trendDays===d} onClick={()=>setTrendDays(d)}>{d}d</SegBtn>)}
-            </div>
-          }
-        />
-        {errT && <ErrBox msg={errT} onRetry={loadTrend}/>}
-        {!errT && (
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:14 }}>
-            {[
-              { key:'mer',     label:'Sales per ad $',     color:'#6366f1', fmt:fmt.ratio, ref:2.0  },
-              { key:'revenue', label:'Sales', color:'#22c55e', fmt:fmt.currency         },
-              { key:'spend',   label:'Ad spend',   color:'#f59e0b', fmt:fmt.currency         },
-            ].map(c=>(
-              <div key={c.key} style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 16px 12px', overflow:'hidden' }}>
-                <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}>
-                  <span style={{ width:8, height:8, borderRadius:'50%', background:c.color, display:'inline-block' }}/>
-                  {c.label}
-                </div>
-                {loadT ? <Skeleton h={140}/> : <TrendChart data={trendArr} metric={c.key} color={c.color} formatY={c.fmt} refVal={c.ref}/>}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ── Channels ── */}
-      <div style={{ marginBottom:28 }}>
-        <SH title="Ad channels" sub={channelDate ? `Data as of ${channelDate}` : 'Where your ad spend went and what it returned'}/>
-        <div style={{ display:'grid', gridTemplateColumns:'300px 1fr', gap:14, marginBottom:14 }}>
-          {/* Spend bar */}
-          <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 12px 12px' }}>
-            <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:10, paddingLeft:4 }}>Ad spend by channel</div>
-            {loadL ? <Skeleton h={160}/> : <SpendBar channels={channels}/>}
-          </div>
-
-          {/* ROAS cards */}
-          <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px' }}>
-            <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:12 }}>Sales per ad $ vs targets</div>
-            {loadL ? <Skeleton h={100}/> : (
-              <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-                {channels.map(ch=>{
-                  const m = CHANNEL_META[ch.channel]||{};
-                  const st = STATUS[ch.roas_status]||STATUS.gray;
-                  return (
-                    <div key={ch.channel} style={{
-                      background: st.bg, border:`1px solid ${st.border}`,
-                      borderRadius:10, padding:'10px 14px', minWidth:130,
-                      display:'flex', flexDirection:'column', gap:4,
-                    }}>
-                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                        <span style={{ width:10, height:10, borderRadius:3, background:m.color||'#888', flexShrink:0 }}/>
-                        <span style={{ fontSize:12, fontWeight:700, color:'var(--text2)' }}>{m.label||ch.channel}</span>
-                      </div>
-                      <div style={{ fontSize:20, fontWeight:900, color:st.color }}>{fmt.ratio(ch.roas)}</div>
-                      <div style={{ fontSize:11, color:'var(--text3)' }}>{fmt.currency(ch.spend)} ad spend</div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Full table */}
-        <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, overflow:'hidden' }}>
-          <ChannelTable channels={channels} loading={loadL} asOfDate={channelDate || resolvedDate}/>
-        </div>
-      </div>
-
-      {/* ── Threshold guide ── */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border2)', borderRadius:14, padding:'16px 20px' }}>
-        <div style={{ fontSize:12, fontWeight:700, color:'var(--text2)', marginBottom:12 }}>Performance Thresholds</div>
-        <div style={{ display:'flex', flexWrap:'wrap', gap:24, fontSize:11 }}>
-          {[
-            { label:'MER Global/US/CA/AU/EU', rules:['<1.8 🔴','1.8–2.0 🟡','≥2.0 🟢'] },
-            { label:'MER Dubai/UAE',          rules:['<1.6 🔴','1.6–1.8 🟡','≥1.8 🟢'] },
-            { label:'ROAS Meta',              rules:['<1.6 🔴','1.6–1.8 🟡','≥1.8 🟢'] },
-            { label:'ROAS Google',            rules:['<2.0 🔴','2.0–3.0 🟡','≥3.0 🟢'] },
-            { label:'ROAS AppLovin',          rules:['<2.0 🔴','2.0–2.2 🟡','≥2.2 🟢'] },
-            { label:'NVP%',                   rules:['<45% 🔴','45–50% 🟡','≥50% 🟢'] },
-          ].map(t=>(
-            <div key={t.label}>
-              <div style={{ fontWeight:700, color:'var(--text3)', marginBottom:4, fontSize:10, textTransform:'uppercase', letterSpacing:'.04em' }}>{t.label}</div>
-              <div style={{ display:'flex', gap:8, color:'var(--text2)' }}>{t.rules.map(r=><span key={r}>{r}</span>)}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
     </CommentProvider>
   );
 }

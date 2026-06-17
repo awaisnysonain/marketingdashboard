@@ -1385,18 +1385,24 @@ const ALL_DAILY_TASKS = [
   'product_daily',       // recompute shopify_product_daily
 ];
 
+// Live/Snapshot page — lightweight hourly refresh (summary + channel + geo via tw_refresh)
+const LIVE_SNAPSHOT_TASKS = ['tw_refresh', 'tw_order_revenue'];
+
 const CRON_HARD_TIMEOUT_MS = 90 * 60 * 1000; // 90 min — TW API is serialized with retries
 
 // In-process flag prevents double-firing if cron + manual click overlap
 let cronRunning = false;
 let lastCronRunAt = null;
 let lastCronStatus = null; // { runId, ok, errors, ts }
+let lastLiveSnapshotAt = null;
+let lastLiveSnapshotStatus = null;
 
 try {
   const cron = require('node-cron');
   const { pgQuery, pgRun } = require('./db/postgres');
   const { sendAlert, ensureSchema: ensureAlertsSchema } = require('./etl/alerts');
   const { CRON_TZ, pakistanTodayStr, pakistanYesterdayStr, addDaysStr } = require('./utils/pakistanTime');
+  const { reportTodayStr, reportYesterdayStr } = require('./utils/reportTime');
 
   // Initialize alerts table on boot
   ensureAlertsSchema().catch(e => console.warn('[Alerts] schema init failed:', e.message));
@@ -1551,6 +1557,53 @@ try {
 
   console.log(`[Cron] Scheduled: 11:00 AM ${CRON_TZ} (PKT, UTC+5) daily — syncs yesterday, 10 tasks, 7-day backfill`);
 
+  async function runLiveSnapshotSync(opts = {}) {
+    if (cronRunning || syncEngine.isSyncRunning()) {
+      console.log('[LiveSnapshot] Skip — another sync is running');
+      return { skipped: true };
+    }
+
+    // TW date keys are America/New_York — use report TZ, not PKT (PKT can be +9h ahead of ET).
+    const today = reportTodayStr();
+    const yesterday = reportYesterdayStr();
+    const runId = opts.runId || `cron_live_snapshot_${today}_${Date.now()}`;
+    const t0 = Date.now();
+
+    try {
+      console.log(`[LiveSnapshot] ▶ ${runId} | ${yesterday} → ${today}`);
+      const result = await syncEngine.runSync({
+        runId,
+        tasks: LIVE_SNAPSHOT_TASKS,
+        startDate: yesterday,
+        endDate: today,
+        brands: ['NOBL', 'FLO'],
+      });
+      const elapsed = ((Date.now() - t0) / 60000).toFixed(1);
+      lastLiveSnapshotAt = new Date().toISOString();
+      lastLiveSnapshotStatus = {
+        runId,
+        ok: !result.errors?.length,
+        errors: result.errors?.length || 0,
+        elapsed_min: elapsed,
+        ts: lastLiveSnapshotAt,
+      };
+      console.log(`[LiveSnapshot] ✓ Done ${runId} in ${elapsed}min`);
+      return { runId, ...lastLiveSnapshotStatus };
+    } catch (e) {
+      console.error('[LiveSnapshot]', e.message);
+      lastLiveSnapshotAt = new Date().toISOString();
+      lastLiveSnapshotStatus = { runId, ok: false, errors: 1, ts: lastLiveSnapshotAt };
+      return { runId, ok: false, error: e.message };
+    }
+  }
+
+  // Hourly: refresh Live/Snapshot page data (today + yesterday, PKT). Skip 11:00 — daily cron hour.
+  cron.schedule('0 0-10,12-23 * * *', () => {
+    runLiveSnapshotSync().catch(e => console.error('[LiveSnapshot unhandled]', e));
+  }, { timezone: CRON_TZ });
+
+  console.log(`[Cron] Scheduled: hourly ${CRON_TZ} (skip 11:00) — Live snapshot tw_refresh + tw_order_revenue (ET yesterday→today)`);
+
   // ── Manual sync trigger — admin only, single-flight, rate-limited ────────
   // Tracks per-user manual triggers in this Map; purges every hour
   const manualTriggerLog = new Map(); // userId → [timestamps]
@@ -1621,6 +1674,11 @@ try {
       last_status: lastCronStatus,
       next_scheduled: 'Daily at 11:00 AM Asia/Karachi (PKT, UTC+5) — syncs yesterday',
       sync_end_date: pakistanYesterdayStr(),
+      live_snapshot: {
+        last_run_at: lastLiveSnapshotAt,
+        last_status: lastLiveSnapshotStatus,
+        next_scheduled: `Hourly at :00 ${CRON_TZ} (skips 11:00) — tw_refresh + tw_order_revenue (ET yesterday→today)`,
+      },
     });
   });
 } catch(e) {
