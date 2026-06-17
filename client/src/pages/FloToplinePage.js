@@ -18,7 +18,7 @@ import {
 } from '../utils/toplineData';
 import {
   FLO_ACCENT, FLO_WARN, GEO_COL, PROD_COL, TOOLTIP_STYLE, CHART_GRID, mer, chColor,
-  Y_AXIS_WIDTH_CURRENCY, Y_AXIS_WIDTH_RATIO, fmtChartTooltip,
+  Y_AXIS_WIDTH_CURRENCY, Y_AXIS_WIDTH_RATIO, fmtChartTooltip, fmtAxisCurrency, fmtAxisRatio,
 } from '../utils/chartHelpers';
 
 const PAGE_KEY = 'flo-topline';
@@ -263,7 +263,7 @@ export default function FloToplinePage() {
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
+                      <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={FLO_ACCENT} fill="url(#floGradRev)" strokeWidth={2} dot={false} />
@@ -275,7 +275,7 @@ export default function FloToplinePage() {
                     <ComposedChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
+                      <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={FLO_ACCENT} fill="rgba(20,184,166,.12)" strokeWidth={2} dot={false} />
@@ -296,7 +296,7 @@ export default function FloToplinePage() {
                   <ResponsiveContainer width="100%" height={Math.max(180, chAgg.length * 36)}>
                     <BarChart data={chAgg} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                      <XAxis type="number" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} stroke="var(--border2)" />
+                      <XAxis type="number" tickFormatter={fmtAxisCurrency} tick={{ fontSize: 10 }} stroke="var(--border2)" />
                       <YAxis dataKey="channel" type="category" tick={{ fontSize: 11, fontWeight: 600 }} width={72} stroke="var(--border2)" />
                       <Tooltip formatter={(v) => [fmt$(v), 'Revenue']} contentStyle={TOOLTIP_STYLE} />
                       <Bar dataKey="revenue" name="Revenue" radius={[0, 4, 4, 0]} maxBarSize={20}>
@@ -310,8 +310,8 @@ export default function FloToplinePage() {
                     <ComposedChart data={chAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis yAxisId="left" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
-                      <YAxis yAxisId="right" orientation="right" tickFormatter={fmtRatio} tick={{ fontSize: 10 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
+                      <YAxis yAxisId="left" tickFormatter={fmtAxisCurrency} tick={{ fontSize: 10 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
+                      <YAxis yAxisId="right" orientation="right" tickFormatter={fmtAxisRatio} tick={{ fontSize: 10 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
                       <Tooltip formatter={fmtChartTooltip} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar yAxisId="left" dataKey="spend" name="Spend" radius={[4, 4, 0, 0]}>
@@ -338,7 +338,7 @@ export default function FloToplinePage() {
                     <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
+                      <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Bar dataKey="revenue" name="Revenue" radius={[4, 4, 0, 0]}>
@@ -353,7 +353,7 @@ export default function FloToplinePage() {
                     <BarChart data={geoAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="region" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={fmtRatio} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
+                      <YAxis tickFormatter={fmtAxisRatio} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
                       <Tooltip formatter={(v) => fmtChartTooltip(v, 'MER')} contentStyle={TOOLTIP_STYLE} />
                       <Bar dataKey="mer" name="MER" radius={[4, 4, 0, 0]}>
                         {geoAgg.map((e, i) => <Cell key={i} fill={GEO_COL[i % GEO_COL.length]} />)}
@@ -377,7 +377,7 @@ export default function FloToplinePage() {
                   <ResponsiveContainer width="100%" height={Math.max(160, prodAgg.length * 40)}>
                     <BarChart data={prodAgg} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" horizontal={false} />
-                      <XAxis type="number" tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 10 }} stroke="var(--border2)" />
+                      <XAxis type="number" tickFormatter={fmtAxisCurrency} tick={{ fontSize: 10 }} stroke="var(--border2)" />
                       <YAxis dataKey="line" type="category" tick={{ fontSize: 11, fontWeight: 600 }} width={80} stroke="var(--border2)" />
                       <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
@@ -393,7 +393,7 @@ export default function FloToplinePage() {
                     <BarChart data={prodAgg} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="line" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                      <YAxis tickFormatter={fmtRatio} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
+                      <YAxis tickFormatter={fmtAxisRatio} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
                       <Tooltip formatter={(v) => fmtChartTooltip(v, 'MER')} contentStyle={TOOLTIP_STYLE} />
                       <Bar dataKey="mer" name="MER" radius={[4, 4, 0, 0]}>
                         {prodAgg.map((e, i) => <Cell key={i} fill={PROD_COL[e.line] || FLO_ACCENT} />)}

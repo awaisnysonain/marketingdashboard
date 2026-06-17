@@ -108,6 +108,7 @@ export const TIP = {
   cancelled: 'Subscriptions that were cancelled.',
   avgContract: 'Average monthly subscription price.',
   totalSubRevenue: 'All subscription money in the date range.',
+  subRevenue: 'All subscription money in the date range.',
   purchases: 'Number of purchase events attributed to ads.',
   amazonToplineRevenue: 'Total Amazon marketplace order revenue (Seller Central OPS basis). Included in topline Sales / Order Revenue for NOBL.',
   amazonAdsRevenue: 'Amazon Ads attributed sales when ads ran; otherwise marketplace order revenue (Seller Central). Purchases and new customers come from Amazon orders when ads conversions are unavailable.',

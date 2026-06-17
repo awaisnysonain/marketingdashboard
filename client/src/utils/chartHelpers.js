@@ -8,6 +8,16 @@ export function fmtChartRatio(v) {
   return fmtRatio(v);
 }
 
+/** Recharts Y-axis tick — currency (rounded dollars). */
+export function fmtAxisCurrency(v) {
+  return fmt$(v);
+}
+
+/** Recharts Y-axis tick — MER / ROAS (2 decimal places + x). */
+export function fmtAxisRatio(v) {
+  return fmtRatio(v);
+}
+
 /** Recharts tooltip — currency unless series name is MER/ROAS. */
 export function fmtChartTooltip(value, name) {
   if (name && /roas|mer|sales per ad/i.test(String(name))) {

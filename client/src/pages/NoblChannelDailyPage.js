@@ -14,7 +14,7 @@ import { getChannels, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../ut
 import { TIP } from '../copy/plainLanguage';
 import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
 import { enrichChannelRow } from '../utils/toplineData';
-import { NOBL_ACCENT, TOOLTIP_STYLE, CHART_GRID, mer, chColor } from '../utils/chartHelpers';
+import { NOBL_ACCENT, TOOLTIP_STYLE, CHART_GRID, mer, chColor, fmtAxisCurrency, fmtAxisRatio, Y_AXIS_WIDTH_RATIO } from '../utils/chartHelpers';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -154,7 +154,7 @@ export default function NoblChannelDailyPage() {
               <AreaChart data={spendChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
                 <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {channelNames.map((ch) => (
@@ -169,7 +169,7 @@ export default function NoblChannelDailyPage() {
               <AreaChart data={revChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
                 <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
                 <Legend wrapperStyle={{ fontSize: 11 }} />
                 {channelNames.map((ch) => (
@@ -185,7 +185,7 @@ export default function NoblChannelDailyPage() {
                 <BarChart data={channelTotals} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                  <YAxis tickFormatter={(v) => fmt$(v)} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
+                  <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={70} stroke="var(--border2)" />
                   <Tooltip formatter={(v, n) => [fmt$(v), n]} contentStyle={TOOLTIP_STYLE} />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Bar dataKey="spend" name="Spend" radius={[4, 4, 0, 0]}>
@@ -202,7 +202,7 @@ export default function NoblChannelDailyPage() {
                 <BarChart data={channelTotals} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="channel" tick={{ fontSize: 11 }} stroke="var(--border2)" />
-                  <YAxis tickFormatter={(v) => v.toFixed(1) + 'x'} tick={{ fontSize: 11 }} width={44} stroke="var(--border2)" />
+                  <YAxis tickFormatter={fmtAxisRatio} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_RATIO} stroke="var(--border2)" />
                   <Tooltip formatter={(v) => [fmtRatio(v), 'ROAS']} contentStyle={TOOLTIP_STYLE} />
                   <Bar dataKey="roas" name="ROAS" radius={[4, 4, 0, 0]}>
                     {channelTotals.map((e, i) => <Cell key={i} fill={chColor(e.channel, NOBL_ACCENT)} />)}

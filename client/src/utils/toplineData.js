@@ -22,7 +22,7 @@ const EMPTY_CHANNEL = {
   revenue_1d: 0,
   purchases_1d: 0,
   new_cust_orders: 0,
-  roas_1d: 0,
+  roas_1d: null,
   cac: null,
 };
 
@@ -36,7 +36,7 @@ export function enrichSummaryRow(row) {
     shopify_revenue: Number(row.shopify_revenue) || 0,
     amazon_revenue: Number(row.amazon_revenue) || 0,
     refund_amount: Number(row.refund_amount) || 0,
-    mer: mer(rev, spend),
+    mer: spend > 0 ? mer(rev, spend) : null,
   };
 }
 
@@ -53,12 +53,12 @@ export function enrichChannelRow(row, channel) {
     revenue_1d: rev,
     purchases_1d: purch,
     new_cust_orders: nc,
-    roas_1d: spend > 0 ? mer(rev, spend) : 0,
+    roas_1d: spend > 0 ? mer(rev, spend) : null,
     cac: channelCac(ch, spend, nc, purch),
   };
 }
 
-const EMPTY_GEO = { revenue_actual: 0, spend_actual: 0, mer: 0 };
+const EMPTY_GEO = { revenue_actual: 0, spend_actual: 0, mer: null };
 
 export function enrichGeoRow(row) {
   if (!row) return { ...EMPTY_GEO };
@@ -68,7 +68,7 @@ export function enrichGeoRow(row) {
     ...row,
     revenue_actual: rev,
     spend_actual: spend,
-    mer: mer(rev, spend),
+    mer: spend > 0 ? mer(rev, spend) : null,
   };
 }
 

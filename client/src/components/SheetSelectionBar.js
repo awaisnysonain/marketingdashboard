@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import CommentPopover from './CommentPopover';
 import { useComments } from './CommentProvider';
 import { useToast } from './ToastProvider';
-import { fmt$, fmtNum } from '../utils/api';
+import { formatAggValue, aggShowsSum } from '../utils/formatMetric';
 
 /**
  * Floating selection toolbar — count, sum/avg, Comment, clear.
@@ -17,6 +17,7 @@ export default function SheetSelectionBar({
   commentLabel,
   anchorRect,
   inline = false,
+  aggKind = null,
 }) {
   const comments = useComments();
   const toast = useToast();
@@ -64,14 +65,22 @@ export default function SheetSelectionBar({
         </span>
         {selNums?.length > 0 && (
           <>
-            <span style={{ color: 'var(--text3)' }}>|</span>
-            <span style={{ color: 'var(--text2)' }}>
-              Sum: <strong>{fmtNum(selSum)}</strong>
-            </span>
-            <span style={{ color: 'var(--text3)' }}>|</span>
-            <span style={{ color: 'var(--text2)' }}>
-              Avg: <strong>{fmtNum(selAvg)}</strong>
-            </span>
+            {aggShowsSum(aggKind) && selSum != null && (
+              <>
+                <span style={{ color: 'var(--text3)' }}>|</span>
+                <span style={{ color: 'var(--text2)' }}>
+                  Sum: <strong>{formatAggValue(selSum, aggKind)}</strong>
+                </span>
+              </>
+            )}
+            {selAvg != null && (
+              <>
+                <span style={{ color: 'var(--text3)' }}>|</span>
+                <span style={{ color: 'var(--text2)' }}>
+                  Avg: <strong>{formatAggValue(selAvg, aggKind)}</strong>
+                </span>
+              </>
+            )}
           </>
         )}
         {commentsEnabled && (

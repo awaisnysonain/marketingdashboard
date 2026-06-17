@@ -43,7 +43,47 @@ const KEY_KIND = {
   returning_customer_orders: 'num',
   new_cust_orders: 'num',
   purchases_1d: 'num',
+  spend: '$',
+  revenue: '$',
+  meta_spend: '$',
+  google_spend: '$',
+  tiktok_spend: '$',
+  snap_spend: '$',
+  pinterest_spend: '$',
+  bing_spend: '$',
+  applovin_spend: '$',
+  refund_count: 'num',
+  impressions: 'num',
+  clicks: 'num',
+  link_clicks: 'num',
+  add_to_cart: 'num',
+  initiate_checkout: 'num',
+  attach_rate: 'pct',
+  ttp_rate: 'pct',
+  activation_rate: 'pct',
+  nvp_pct: 'pct',
+  open_rate: 'pct',
+  click_rate: 'pct',
+  ctr: 'pct',
+  aov: '$',
+  cpc: '$',
+  cpm: '$',
 };
+
+/** Format sum or average for a multi-cell selection toolbar. */
+export function formatAggValue(value, kind) {
+  if (value == null || Number.isNaN(value)) return '—';
+  const k = kind === 'mixed' ? 'num' : (kind || 'num');
+  if (k === '$') return fmt$(value);
+  if (k === 'x') return fmtRatio(value);
+  if (k === 'pct') return fmtPct(value);
+  return fmtNum(value);
+}
+
+/** Whether selection sum is meaningful for this metric kind (ratios → avg only). */
+export function aggShowsSum(kind) {
+  return kind && kind !== 'x' && kind !== 'pct' && kind !== 'mixed';
+}
 
 export function inferMetricKind(metricKey, label) {
   if (metricKey && KEY_KIND[metricKey]) return KEY_KIND[metricKey];

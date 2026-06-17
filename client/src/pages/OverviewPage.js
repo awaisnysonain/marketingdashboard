@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getOverview, getSyncStatus, triggerSync, fmt$, fmtRatio } from '../utils/api';
+import { getOverview, getSyncStatus, triggerSync, fmt$, fmtRatio, fmtNum, fmtFullNum } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import PageFilterBar from '../components/PageFilterBar';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
@@ -13,6 +13,7 @@ import { commentTargetKey } from '../utils/commentKeys';
 import { dailyCellKey, dailyCellLabel } from '../utils/sheetComments';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 import { mtdRange } from '../utils/dateRange';
+import { fmtAxisCurrency } from '../utils/chartHelpers';
 function fmtDateLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -134,9 +135,9 @@ export default function OverviewPage({ showToast }) {
             <KpiCard label="Total ad spend" value={fmt$(totals.total_spend || 0)} fullValue={fmt$(totals.total_spend || 0)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
             <KpiCard label={L.blendedMer} value={fmtRatio(totals.blended_mer || 0)} copyValue={(totals.blended_mer || 0).toFixed(4)} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('blended_mer'), targetLabel: L.blendedMer }} />
             <KpiCard label="NOBL sales" value={fmt$(totals.nobl_revenue || 0)} fullValue={fmt$(totals.nobl_revenue || 0)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_sales'), targetLabel: 'NOBL Sales' }} />
-            <KpiCard label="NOBL orders" value={(totals.nobl_orders || 0).toLocaleString()} fullValue={String(totals.nobl_orders || 0)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_orders'), targetLabel: 'NOBL Orders' }} />
+            <KpiCard label="NOBL orders" value={fmtNum(totals.nobl_orders || 0)} fullValue={fmtFullNum(totals.nobl_orders || 0)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_orders'), targetLabel: 'NOBL Orders' }} />
             <KpiCard label="FLO sales" value={fmt$(totals.flo_revenue || 0)} fullValue={fmt$(totals.flo_revenue || 0)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('flo_sales'), targetLabel: 'FLO Sales' }} />
-            <KpiCard label="FLO orders" value={(totals.flo_orders || 0).toLocaleString()} fullValue={String(totals.flo_orders || 0)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('flo_orders'), targetLabel: 'FLO Orders' }} />
+            <KpiCard label="FLO orders" value={fmtNum(totals.flo_orders || 0)} fullValue={fmtFullNum(totals.flo_orders || 0)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('flo_orders'), targetLabel: 'FLO Orders' }} />
             <KpiCard label="NOBL subscription sales" value={fmt$(totals.nobl_sub_revenue || 0)} fullValue={fmt$(totals.nobl_sub_revenue || 0)} tooltip={TIP.subRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nobl_sub_revenue'), targetLabel: 'NOBL Subscription Sales' }} />
           </div>
 
@@ -157,7 +158,7 @@ export default function OverviewPage({ showToast }) {
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
-                  <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+                  <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
                   <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtDateLabel}
                     contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
                   <Legend wrapperStyle={{ fontSize:12 }} />
@@ -173,7 +174,7 @@ export default function OverviewPage({ showToast }) {
                 <BarChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                   <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
-                  <YAxis tickFormatter={v => fmt$(v)} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
+                  <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
                   <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtDateLabel}
                     contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
                   <Legend wrapperStyle={{ fontSize:12 }} />

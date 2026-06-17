@@ -3,7 +3,7 @@ import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
-import { getSubscriptions, fmt$ } from '../utils/api';
+import { getSubscriptions, fmt$, fmtNum } from '../utils/api';
 import KpiCard from '../components/KpiCard';
 import DateRangePicker from '../components/DateRangePicker';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
@@ -123,14 +123,14 @@ export default function SubsPage({ showToast }) {
               Bottom row: all-time subscriber counts (Appstle current state). */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 12 }}>
             <KpiCard label="Total subscription sales" sub="in date range" value={fmt$(totalSubRev)} tooltip={TIP.totalSubRevenue} color="purple" />
-            <KpiCard label={L.newSubs} sub="in date range" value={newSubCount.toLocaleString()} tooltip={TIP.newSubs} color="teal" />
+            <KpiCard label={L.newSubs} sub="in date range" value={fmtNum(newSubCount)} tooltip={TIP.newSubs} color="teal" />
             <KpiCard label={L.newSubRevenue} sub="in date range" value={fmt$(newSubTotal)} tooltip={TIP.newSubRevenue} color="teal" />
             <KpiCard label={L.rebillRevenue} sub="in date range" value={fmt$(rebillTotal)} tooltip={TIP.rebillRevenue} color="nobl" />
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
-            <KpiCard label={L.activeSubs} sub="right now" value={(summary.active || 0).toLocaleString()} tooltip={TIP.activeSubs} color="green" />
-            <KpiCard label={L.converted} sub="right now" value={(summary.converted || 0).toLocaleString()} tooltip={TIP.converted} color="nobl" />
-            <KpiCard label={L.cancelled} sub="right now" value={(summary.cancelled || 0).toLocaleString()} tooltip={TIP.cancelled} color="danger" />
+            <KpiCard label={L.activeSubs} sub="right now" value={fmtNum(summary.active || 0)} tooltip={TIP.activeSubs} color="green" />
+            <KpiCard label={L.converted} sub="right now" value={fmtNum(summary.converted || 0)} tooltip={TIP.converted} color="nobl" />
+            <KpiCard label={L.cancelled} sub="right now" value={fmtNum(summary.cancelled || 0)} tooltip={TIP.cancelled} color="danger" />
             <KpiCard label={L.avgContract} sub="right now" value={fmt$(summary.avg_order_amount || 0)} tooltip={TIP.avgContract} color="purple" />
           </div>
           {trimmedCount > 0 && (

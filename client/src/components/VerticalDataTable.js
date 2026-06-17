@@ -5,7 +5,7 @@ import SheetSelectionBar from './SheetSelectionBar';
 import { commentTargetKey } from '../utils/commentKeys';
 import { useComments } from './CommentProvider';
 import useSheetCellSelection, { sheetCellStyle } from '../hooks/useSheetCellSelection';
-import { formatMetricValue, rawMetricValue } from '../utils/formatMetric';
+import { formatMetricValue, rawMetricValue, inferMetricKind } from '../utils/formatMetric';
 
 function fmtDateLabel(s) {
   if (!s) return '';
@@ -60,6 +60,18 @@ export default function VerticalDataTable({ dates, getRow, metrics, tableScope =
     return targets;
   }, [selection.sel, cellMeta, commentsEnabled, comments]);
 
+  const aggKind = useMemo(() => {
+    if (!selection.sel.size) return null;
+    const kinds = new Set();
+    for (const k of selection.sel) {
+      const [, ci] = k.split(':').map(Number);
+      const m = metrics[ci];
+      if (m) kinds.add(m.type || inferMetricKind(m.key, m.label));
+    }
+    if (kinds.size === 1) return [...kinds][0];
+    return 'mixed';
+  }, [selection.sel, metrics]);
+
   return (
     <div style={{ position: 'relative' }} ref={tableRef}>
       <SheetSelectionBar
@@ -67,6 +79,7 @@ export default function VerticalDataTable({ dates, getRow, metrics, tableScope =
         selNums={selection.selNums}
         selSum={selection.selSum}
         selAvg={selection.selAvg}
+        aggKind={aggKind}
         onClear={selection.clearSelection}
         commentTargets={commentTargets}
         commentLabel={`${tableScope} · ${selection.sel.size} cells`}

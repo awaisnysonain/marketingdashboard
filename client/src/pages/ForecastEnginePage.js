@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   Bar, BarChart, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import { getDashboardForecast, fmt$, fmtNum, fmtPct } from '../utils/api';
+import { getDashboardForecast, fmt$, fmtNum, fmtPct, fmtRatio } from '../utils/api';
 import TablePagination from '../components/TablePagination';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
@@ -20,7 +20,7 @@ const TAB_META = [
 const money = (n) => (n === null || n === undefined ? '—' : fmt$(n));
 const num = (n) => (n === null || n === undefined ? '—' : fmtNum(n));
 const pct = (n) => (n === null || n === undefined ? '—' : fmtPct(n));
-const mer = (n) => (n === null || n === undefined ? '—' : `${Number(n || 0).toFixed(2)}x`);
+const mer = (n) => (n === null || n === undefined ? '—' : fmtRatio(n));
 const tooltipStyle = { background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:10, fontSize:12, boxShadow:'0 8px 22px rgba(15,23,42,.10)' };
 
 function monthOptionLabel(key) {
@@ -354,7 +354,7 @@ function NoblDaily({ rows, page, totalRows, onPageChange }) {
     { label:L.mer, render:r => mer(r.actual_mer || r.forecast_mer) },
     { label:'Sale', align:'left', render:r => r.sale_name },
     { label:'Drop', align:'left', render:r => r.drop_type || '—' },
-    { label:'Weight', render:r => `${Number(r.weight || 0).toFixed(2)}x` },
+    { label:'Weight', render:r => fmtRatio(r.weight || 0) },
     { label:'Reason', align:'left', wrap:true, minWidth:320, render:r => r.reason },
   ];
   return <Card title="NOBL Forecast Daily" subtitle="Daily audit view: actual rows from the database and future rows allocated from the forecast model."><DataTable columns={columns} rows={rows} page={page} pageSize={TABLE_PAGE_SIZE} totalRows={totalRows} onPageChange={onPageChange} /></Card>;

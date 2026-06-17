@@ -13,6 +13,7 @@ import { commentTargetKey } from '../utils/commentKeys';
 import { aggCellKey, dailyCellKey, dailyCellLabel, entityDateCellKey, entityDateCellLabel } from '../utils/sheetComments';
 import { L, TIP, PAGE } from '../copy/plainLanguage';
 import { mtdRange } from '../utils/dateRange';
+import { fmtAxisRatio, fmtAxisCurrency } from '../utils/chartHelpers';
 function fmtLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -271,7 +272,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
             <LineChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="date" tickFormatter={fmtLabel} tick={{ fontSize:10 }} stroke="var(--border2)" />
-              <YAxis domain={['auto','auto']} tickFormatter={v => v.toFixed(1)+'x'} tick={{ fontSize:10 }} width={42} stroke="var(--border2)" />
+              <YAxis domain={['auto','auto']} tickFormatter={fmtAxisRatio} tick={{ fontSize:10 }} width={42} stroke="var(--border2)" />
               <Tooltip formatter={(v) => [fmtRatio(v), 'MER']} labelFormatter={fmtLabel}
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
               <Line type="monotone" dataKey="mer" name="MER" stroke={FLO_ACCENT} strokeWidth={2} dot={false} />
@@ -371,7 +372,7 @@ function ChannelsTab({ channels, chAgg }) {
             <BarChart data={chAgg} margin={{ top:4, right:16, left:0, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="channel" tick={{ fontSize:11 }} stroke="var(--border2)" />
-              <YAxis domain={[0,'auto']} tickFormatter={v => v.toFixed(1)+'x'} tick={{ fontSize:11 }} width={50} stroke="var(--border2)" />
+              <YAxis domain={[0,'auto']} tickFormatter={fmtAxisRatio} tick={{ fontSize:11 }} width={50} stroke="var(--border2)" />
               <Tooltip formatter={(v) => [fmtRatio(v), 'ROAS']}
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
               <Bar dataKey="roas" radius={[4,4,0,0]}>
@@ -473,7 +474,7 @@ function RegionsTab({ geo, geoAgg }) {
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={geoAgg} layout="vertical" margin={{ top:4, right:16, left:40, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis type="number" domain={[0,'auto']} tickFormatter={v => v.toFixed(1)+'x'} tick={{ fontSize:10 }} stroke="var(--border2)" />
+              <XAxis type="number" domain={[0,'auto']} tickFormatter={fmtAxisRatio} tick={{ fontSize:10 }} stroke="var(--border2)" />
               <YAxis type="category" dataKey="region" tick={{ fontSize:11 }} stroke="var(--border2)" />
               <Tooltip formatter={(v) => [fmtRatio(v), 'MER']}
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
