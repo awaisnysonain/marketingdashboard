@@ -8,8 +8,9 @@ import SheetTable from '../components/SheetTable';
 import PageIntro from '../components/PageIntro';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
-import { L, TIP, PAGE } from '../copy/plainLanguage';
+import { L, TIP } from '../copy/plainLanguage';
 import { fmt$, fmtNum, fmtRatio, fmtPct } from '../utils/api';
+import { useDashboardFilters } from '../context/DashboardFilterContext';
 import {
   fmtAxisCurrency, fmtAxisRatio, fmtChartCurrency, fmtChartRatio,
   CHANNEL_COL, TOOLTIP_STYLE,
@@ -107,7 +108,7 @@ function SegBtn({ active, onClick, children }) {
     <button
       type="button"
       onClick={onClick}
-      className={`live-seg-btn${active ? ' live-seg-btn--active' : ''}`}
+      className={`seg__btn${active ? ' seg__btn--active' : ''}`}
     >
       {children}
     </button>
@@ -401,7 +402,8 @@ const THRESHOLDS = [
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function LivePage() {
-  const [brand, setBrand] = useState('nobl');
+  const { brandsApi, filterByChannels, filterByRegions } = useDashboardFilters();
+  const brand = brandsApi.live;
   const [dateMode, setDateMode] = useState('latest');
   const [customDate, setCustomDate] = useState('');
   const [trendDays, setTrendDays] = useState(30);
@@ -503,10 +505,13 @@ export default function LivePage() {
 
   const sum = live?.summary;
   const channels = useMemo(
-    () => [...(live?.channels || [])].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)),
-    [live?.channels],
+    () => filterByChannels(
+      [...(live?.channels || [])].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)),
+      'channel',
+    ),
+    [live?.channels, filterByChannels],
   );
-  const geo = live?.geo || [];
+  const geo = filterByRegions(live?.geo || [], 'region');
   const trendArr = trend?.trend || [];
   const euContrib = live?.eu_contribution || null;
 
@@ -524,35 +529,24 @@ export default function LivePage() {
   return (
     <CommentProvider pageKey="live">
       <div className="page-stack">
-        {/* Controls */}
-        <div className="page-filter-bar">
-          <div className="page-filter-bar__inner">
-            <span className="page-filter-bar__label">Store</span>
-            <div className="live-seg-group">
-              {BRANDS.map(b => (
-                <SegBtn key={b.k} active={brand === b.k} onClick={() => setBrand(b.k)}>
-                  {b.l}
-                </SegBtn>
-              ))}
-            </div>
-
-            <span className="page-filter-bar__label" style={{ marginLeft: 8 }}>Date</span>
-            <div className="live-seg-group">
-              <SegBtn active={dateMode === 'latest'} onClick={() => setDateMode('latest')}>Latest</SegBtn>
-              <SegBtn active={dateMode === 'custom'} onClick={() => setDateMode('custom')}>Pick date</SegBtn>
-            </div>
-            {dateMode === 'custom' && (
-              <input
-                type="date"
-                className="live-date-input"
-                value={customDate}
-                onChange={e => setCustomDate(e.target.value)}
-                min={availDates?.oldest_summary}
-                max={availDates?.latest_summary}
-              />
-            )}
-
-            <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 10 }}>
+        {/* Date + refresh controls (slim, right-aligned) */}
+        <PageIntro
+          actions={(
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <div className="seg">
+                <SegBtn active={dateMode === 'latest'} onClick={() => setDateMode('latest')}>Latest</SegBtn>
+                <SegBtn active={dateMode === 'custom'} onClick={() => setDateMode('custom')}>Pick date</SegBtn>
+              </div>
+              {dateMode === 'custom' && (
+                <input
+                  type="date"
+                  className="live-date-input"
+                  value={customDate}
+                  onChange={e => setCustomDate(e.target.value)}
+                  min={availDates?.oldest_summary}
+                  max={availDates?.latest_summary}
+                />
+              )}
               {refreshedAt && !loadL && (
                 <span style={{ fontSize: 11, color: 'var(--text3)' }} title="Auto-refreshes every hour">
                   Updated {refreshedAt} · hourly
@@ -560,7 +554,7 @@ export default function LivePage() {
               )}
               <button
                 type="button"
-                className="live-refresh-btn"
+                className="btn btn--sm"
                 onClick={() => { loadLive(); loadTrend(); }}
                 disabled={loadL}
               >
@@ -568,18 +562,8 @@ export default function LivePage() {
                 Refresh
               </button>
             </div>
-          </div>
-        </div>
-
-        <PageIntro title={PAGE.live.title} desc={PAGE.live.desc}>
-          <p style={{ fontSize: 12, color: 'var(--text3)', margin: '6px 0 0', lineHeight: 1.45 }}>
-            Viewing <strong style={{ color: 'var(--text2)' }}>{brandMeta.l}</strong>
-            {brandMeta.sub && <> — {brandMeta.sub}</>}
-            {availDates?.latest_summary && (
-              <> · Latest available: <strong style={{ color: 'var(--text2)' }}>{fmtDateLong(availDates.latest_summary)}</strong></>
-            )}
-          </p>
-        </PageIntro>
+          )}
+        />
 
         {errL && <ErrBox msg={errL} onRetry={loadLive} />}
 
@@ -589,6 +573,10 @@ export default function LivePage() {
             <div className="live-banner live-banner--date">
               <span style={{ fontSize: 14, lineHeight: 1 }}>📅</span>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text2)' }}>
+                  <strong style={{ color: 'var(--text)' }}>{brandMeta.l}</strong>
+                  {brandMeta.sub && <span style={{ color: 'var(--text3)' }}> — {brandMeta.sub}</span>}
+                </span>
                 <span style={{ color: 'var(--text2)' }}>
                   Summary KPIs: <strong style={{ color: 'var(--text)' }}>{fmtDateLong(summaryDate || resolvedDate)}</strong>
                 </span>
@@ -753,7 +741,7 @@ export default function LivePage() {
               ? 'Daily sales per ad $, sales, and ad spend · all regions'
               : 'Daily sales per ad $, sales, and ad spend'}
             right={(
-              <div className="live-seg-group">
+              <div className="seg">
                 {[7, 14, 30, 60].map(d => (
                   <SegBtn key={d} active={trendDays === d} onClick={() => setTrendDays(d)}>{d}d</SegBtn>
                 ))}

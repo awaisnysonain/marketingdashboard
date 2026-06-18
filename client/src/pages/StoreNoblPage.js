@@ -5,14 +5,15 @@ import {
 } from 'recharts';
 import { getStoreNobl, fmt$, fmtNum, fmtPct, fmtRatio } from '../utils/api';
 import KpiCard from '../components/KpiCard';
-import PageFilterBar from '../components/PageFilterBar';
+import PageIntro from '../components/PageIntro';
+import ChartPanel from '../components/ChartPanel';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import VerticalDataTable from '../components/VerticalDataTable';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
 import { aggCellKey, dailyCellKey, dailyCellLabel, entityDateCellKey, entityDateCellLabel } from '../utils/sheetComments';
-import { L, TIP, PAGE } from '../copy/plainLanguage';
-import { mtdRange } from '../utils/dateRange';
+import { L, TIP } from '../copy/plainLanguage';
+import { useDashboardFilters } from '../context/DashboardFilterContext';
 import { fmtAxisRatio, fmtAxisCurrency } from '../utils/chartHelpers';
 function fmtLabel(s) {
   if (!s) return '';
@@ -42,19 +43,12 @@ const TABS = [
   { id:'email',         label:'Email'         },
 ];
 
-/* ── colour helper for MER / ROAS ────────────────────────────────── */
-function merColor(v) {
-  if (!v) return 'var(--text3)';
-  if (v >= 2.0) return 'var(--success, #22c55e)';
-  if (v >= 1.8) return 'var(--warn, #f59e0b)';
-  return 'var(--danger, #ef4444)';
-}
-
 /* ═══════════════════════════════════════════════════════════════════
    MAIN PAGE
 ════════════════════════════════════════════════════════════════════ */
 export default function StoreNoblPage({ showToast }) {
-  const [range, setRange]   = useState(mtdRange());
+  const { dateRange, filterByChannels, filterByRegions, isAllRegions } = useDashboardFilters();
+  const range = dateRange;
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState(null);
@@ -71,19 +65,26 @@ export default function StoreNoblPage({ showToast }) {
 
   /* ── aggregations used across multiple tabs ── */
   const summary   = data?.summary   || [];
-  const channels  = data?.channels  || [];
-  const geo       = data?.geo       || [];
+  const channels  = filterByChannels(data?.channels  || [], 'channel');
+  const geo       = filterByRegions(data?.geo       || [], 'region');
   const subDaily  = data?.subs_daily || [];
   const subStats  = data?.subs_stats || {};
   const email     = data?.email      || [];
 
-  const totals = useMemo(() => summary.reduce((a, r) => ({
-    revenue: a.revenue + (r.order_revenue || r.total_revenue || 0),
-    spend:   a.spend   + (r.total_spend   || 0),
-    orders:  a.orders  + (r.total_orders  || 0),
-    nc:      a.nc      + (r.new_customer_orders      || 0),
-    rc:      a.rc      + (r.returning_customer_orders || 0),
-  }), { revenue:0, spend:0, orders:0, nc:0, rc:0 }), [summary]);
+  const totals = useMemo(() => {
+    if (!isAllRegions && geo.length) {
+      const revenue = geo.reduce((a, r) => a + (r.revenue || r.revenue_actual || 0), 0);
+      const spend = geo.reduce((a, r) => a + (r.spend || r.spend_actual || 0), 0);
+      return { revenue, spend, orders: 0, nc: 0, rc: 0 };
+    }
+    return summary.reduce((a, r) => ({
+      revenue: a.revenue + (r.order_revenue || r.total_revenue || 0),
+      spend:   a.spend   + (r.total_spend   || 0),
+      orders:  a.orders  + (r.total_orders  || 0),
+      nc:      a.nc      + (r.new_customer_orders      || 0),
+      rc:      a.rc      + (r.returning_customer_orders || 0),
+    }), { revenue:0, spend:0, orders:0, nc:0, rc:0 });
+  }, [summary, geo, isAllRegions]);
 
   const totalMer = mer(totals.revenue, totals.spend);
   const totalAov = totals.orders > 0 ? totals.revenue / totals.orders : 0;
@@ -136,55 +137,41 @@ export default function StoreNoblPage({ showToast }) {
   return (
     <CommentProvider pageKey={PAGE_KEY}>
     <div className="page-stack">
-      <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
 
-      <div className="page-header">
-        <div>
-          <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:4 }}>
-            <h1 style={{ fontSize:22, fontWeight:800, margin:0, fontFamily:'var(--font-head)', color:NOBL_ACCENT }}>
-              NOBL Travel
-            </h1>
-            <span style={{ fontSize:11, fontWeight:600, padding:'2px 8px', borderRadius:99,
-              background:'rgba(99,102,241,.15)', color:NOBL_ACCENT, border:'1px solid rgba(99,102,241,.3)' }}>
-              🇺🇸 US + 🇪🇺 EU — Combined
-            </span>
-          </div>
-          <p style={{ fontSize:13, color:'var(--text3)', margin:0 }}>
-            {PAGE.storeNobl.desc} · {range.start} → {range.end}
-          </p>
-        </div>
-      </div>
+      <PageIntro
+        actions={<span className="badge badge--accent">🇺🇸 US + 🇪🇺 EU — Combined</span>}
+      />
 
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
-          <div style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 14px',
-            background:'rgba(99,102,241,.07)', border:'1px solid rgba(99,102,241,.2)', borderRadius:8, fontSize:12 }}>
-            <span style={{ color:NOBL_ACCENT, fontWeight:700 }}>ℹ EU included</span>
+          <div className="card card--pad" style={{ display:'flex', alignItems:'center', gap:8, fontSize:12 }}>
+            <span className="badge badge--accent">ℹ EU included</span>
             <span style={{ color:'var(--text3)' }}>
               NOBL Travel operates one Shopify store for all regions. EU data is always summed into all metrics below.
             </span>
           </div>
 
-          <div className="page-kpi-grid">
-            <KpiCard label="Order Revenue" value={fmt$(totals.revenue)} fullValue={fmt$(totals.revenue)} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
-            <KpiCard label="Total ad spend" value={fmt$(totals.spend)} fullValue={fmt$(totals.spend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
-            <KpiCard label={L.mer} value={fmtRatio(totalMer)} copyValue={totalMer.toFixed(4)} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: L.mer }} />
-            <KpiCard label="Total orders" value={fmtNum(totals.orders)} fullValue={String(totals.orders)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
-            <KpiCard label={L.ncOrders} value={fmtNum(totals.nc)} fullValue={String(totals.nc)} tooltip={TIP.ncOrders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nc_orders'), targetLabel: L.ncOrders }} />
-            <KpiCard label={L.aov} value={fmt$(totalAov)} fullValue={fmt$(totalAov)} tooltip={TIP.aov} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('aov'), targetLabel: L.aov }} />
-            <KpiCard label={L.nvp} value={fmtPct(nvpPct)} copyValue={nvpPct.toFixed(2)} tooltip={TIP.nvp} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nvp'), targetLabel: L.nvp }} />
-            <KpiCard label={L.activeSubs} value={fmtNum(subStats.active||0)} fullValue={String(subStats.active||0)} tooltip={TIP.activeSubs} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('active_subs'), targetLabel: L.activeSubs }} />
+          <div className="section">
+            <div className="section__title">PERIOD TOTALS</div>
+            <div className="page-kpi-grid">
+              <KpiCard label="Order Revenue" value={fmt$(totals.revenue)} fullValue={fmt$(totals.revenue)} tooltip={TIP.orderRevenue} color="nobl" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
+              <KpiCard label="Total ad spend" value={fmt$(totals.spend)} fullValue={fmt$(totals.spend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Ad Spend' }} />
+              <KpiCard label={L.mer} value={fmtRatio(totalMer)} copyValue={totalMer.toFixed(4)} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: L.mer }} />
+              <KpiCard label="Total orders" value={fmtNum(totals.orders)} fullValue={String(totals.orders)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
+              <KpiCard label={L.ncOrders} value={fmtNum(totals.nc)} fullValue={String(totals.nc)} tooltip={TIP.ncOrders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nc_orders'), targetLabel: L.ncOrders }} />
+              <KpiCard label={L.aov} value={fmt$(totalAov)} fullValue={fmt$(totalAov)} tooltip={TIP.aov} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('aov'), targetLabel: L.aov }} />
+              <KpiCard label={L.nvp} value={fmtPct(nvpPct)} copyValue={nvpPct.toFixed(2)} tooltip={TIP.nvp} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('nvp'), targetLabel: L.nvp }} />
+              <KpiCard label={L.activeSubs} value={fmtNum(subStats.active||0)} fullValue={String(subStats.active||0)} tooltip={TIP.activeSubs} color="nobl" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('active_subs'), targetLabel: L.activeSubs }} />
+            </div>
           </div>
 
-          <div className="page-tabs">
+          <div className="seg">
             {TABS.map(t => (
-              <button key={t.id} onClick={() => setTab(t.id)} style={{
-                padding:'8px 16px', fontSize:13, fontWeight:600, border:'none',
-                background:'none', cursor:'pointer',
-                color: tab===t.id ? NOBL_ACCENT : 'var(--text3)',
-                borderBottom: tab===t.id ? `2px solid ${NOBL_ACCENT}` : '2px solid transparent',
-                transition:'color .15s',
-              }}>{t.label}</button>
+              <button
+                key={t.id}
+                onClick={() => setTab(t.id)}
+                className={`seg__btn${tab===t.id ? ' seg__btn--active' : ''}`}
+              >{t.label}</button>
             ))}
           </div>
 
@@ -232,8 +219,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {/* Revenue + Spend chart */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>Revenue & Spend — Daily</div>
+      <ChartPanel title="Revenue & Spend — Daily">
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <defs>
@@ -252,12 +238,11 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
             <Area type="monotone" dataKey="total_spend"   name="Spend"   stroke={NOBL_WARN}  fill="none" strokeWidth={2} strokeDasharray="4 2" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
-      </div>
+      </ChartPanel>
 
       {/* MER + New vs Returning */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-        <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>MER Daily</div>
+        <ChartPanel title="MER Daily">
           <ResponsiveContainer width="100%" height={200}>
             <LineChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -269,9 +254,8 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
               <Line type="monotone" dataKey="mer" name="MER" stroke={NOBL_ACCENT} strokeWidth={2} dot={false} />
             </LineChart>
           </ResponsiveContainer>
-        </div>
-        <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:16 }}>New vs Returning Orders</div>
+        </ChartPanel>
+        <ChartPanel title="New vs Returning Orders">
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -284,14 +268,13 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
               <Bar dataKey="returning_customer_orders" name="Returning" stackId="a" fill="#14b8a6" radius={[3,3,0,0]} />
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartPanel>
       </div>
 
       {/* Daily summary table */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Summary — All Days</div>
+      <ChartPanel title="Daily Summary — All Days">
         <VerticalDataTable dates={dates} getRow={(d) => summaryByDate[d]} metrics={OV_METRICS} tableScope="overview" />
-      </div>
+      </ChartPanel>
     </div>
   );
 }
@@ -326,28 +309,24 @@ function ChannelsTab({ channels, chAgg }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {/* Period KPIs per channel */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:10 }}>
-        {chAgg.map(ch => (
-          <div key={ch.channel} style={{
-            background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:10, padding:'12px 14px',
-          }}>
-            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-              <div style={{ width:8, height:8, borderRadius:'50%', background: CHANNEL_COL[ch.channel]||'#6366f1' }} />
-              <span style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{ch.channel}</span>
-            </div>
-            <div style={{ fontSize:14, fontWeight:800, color:'var(--text)', marginBottom:2 }}>{fmt$(ch.revenue)}</div>
-            <div style={{ fontSize:11, color:'var(--text3)' }}>Spend: {fmt$(ch.spend)}</div>
-            <div style={{ fontSize:12, fontWeight:700, color: merColor(ch.roas), marginTop:4 }}>
-              {fmtRatio(ch.roas)} ROAS
-            </div>
-          </div>
-        ))}
+      <div className="section">
+        <div className="section__title">REVENUE BY CHANNEL</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12 }}>
+          {chAgg.map(ch => (
+            <KpiCard
+              key={ch.channel}
+              label={ch.channel}
+              value={fmt$(ch.revenue)}
+              sub={`Spend ${fmt$(ch.spend)} · ${fmtRatio(ch.roas)} ROAS`}
+              accent={CHANNEL_COL[ch.channel] || NOBL_ACCENT}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Spend + ROAS charts */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-        <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Spend by Channel</div>
+        <ChartPanel title="Spend by Channel">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={chAgg} margin={{ top:4, right:16, left:0, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -360,9 +339,8 @@ function ChannelsTab({ channels, chAgg }) {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </div>
-        <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>ROAS by Channel</div>
+        </ChartPanel>
+        <ChartPanel title="ROAS by Channel">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={chAgg} margin={{ top:4, right:16, left:0, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -375,12 +353,11 @@ function ChannelsTab({ channels, chAgg }) {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartPanel>
       </div>
 
       {/* Aggregated channel table */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Period Totals by Channel</div>
+      <ChartPanel title="Period Totals by Channel">
         <PaginatedSheetTable
           headers={CH_AGG_HEADERS}
           rows={aggRows}
@@ -389,14 +366,10 @@ function ChannelsTab({ channels, chAgg }) {
           searchable={false}
           getCellCommentKey={(row, h) => aggCellKey('ch-agg', row, h, 'Channel')}
         />
-      </div>
+      </ChartPanel>
 
       {/* Daily channel table — every day × every channel */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Daily Channel Data — Every Day</div>
-        <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>
-          Each row = one day × one channel. Sort and filter to explore.
-        </div>
+      <ChartPanel title="Daily Channel Data — Every Day" subtitle="Each row = one day × one channel. Sort and filter to explore.">
         <PaginatedSheetTable
           headers={CH_DAILY_HEADERS}
           rows={dailyRows}
@@ -405,7 +378,7 @@ function ChannelsTab({ channels, chAgg }) {
           getCellCommentKey={(row, h) => entityDateCellKey('ch-daily', row, h, 'Channel')}
           getCellCommentLabel={(row, h) => entityDateCellLabel('channel', h, row, 'Channel')}
         />
-      </div>
+      </ChartPanel>
     </div>
   );
 }
@@ -441,38 +414,24 @@ function RegionsTab({ geo, geoAgg }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {/* Region cards */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(170px,1fr))', gap:10 }}>
-        {sortedGeo.map((r, i) => (
-          <div key={r.region} style={{
-            background:'var(--bg2)', border: r.region==='EU' ? '1px solid rgba(99,102,241,.4)' : '1px solid var(--border)',
-            borderRadius:10, padding:'12px 14px', position:'relative',
-          }}>
-            {r.region === 'EU' && (
-              <span style={{ position:'absolute', top:8, right:8, fontSize:9, fontWeight:700,
-                padding:'1px 6px', borderRadius:99, background:'rgba(99,102,241,.15)', color:NOBL_ACCENT }}>
-                ✓ IN TOTALS
-              </span>
-            )}
-            <div style={{ display:'flex', alignItems:'center', gap:6, marginBottom:8 }}>
-              <div style={{ width:8, height:8, borderRadius:'50%', background: GEO_COL[i % GEO_COL.length] }} />
-              <span style={{ fontSize:12, fontWeight:700, color:'var(--text)' }}>{r.region}</span>
-            </div>
-            <div style={{ fontSize:14, fontWeight:800, color:'var(--text)', marginBottom:2 }}>{fmt$(r.revenue)}</div>
-            <div style={{ fontSize:11, color:'var(--text3)', marginBottom:4 }}>Spend: {fmt$(r.spend)}</div>
-            <div style={{ fontSize:12, fontWeight:700, color: merColor(r.mer) }}>{fmtRatio(r.mer)} MER</div>
-            {totalRev > 0 && (
-              <div style={{ fontSize:11, color:'var(--text3)', marginTop:2 }}>
-                {Math.round((r.revenue / totalRev) * 100)}% of rev
-              </div>
-            )}
-          </div>
-        ))}
+      <div className="section">
+        <div className="section__title">REVENUE BY REGION</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))', gap:12 }}>
+          {sortedGeo.map((r, i) => (
+            <KpiCard
+              key={r.region}
+              label={r.region}
+              value={fmt$(r.revenue)}
+              sub={`Spend ${fmt$(r.spend)} · ${fmtRatio(r.mer)} MER${totalRev > 0 ? ` · ${Math.round((r.revenue / totalRev) * 100)}% of rev` : ''}${r.region === 'EU' ? ' · ✓ in totals' : ''}`}
+              accent={r.region === 'EU' ? NOBL_ACCENT : GEO_COL[i % GEO_COL.length]}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Revenue pie + Spend bar */}
       <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:16 }}>
-        <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Revenue by Region</div>
+        <ChartPanel title="Revenue by Region">
           <ResponsiveContainer width="100%" height={240}>
             <PieChart>
               <Pie data={geoAgg} dataKey="revenue" nameKey="region" cx="50%" cy="50%" outerRadius={90}
@@ -483,9 +442,8 @@ function RegionsTab({ geo, geoAgg }) {
                 contentStyle={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:8, fontSize:12 }} />
             </PieChart>
           </ResponsiveContainer>
-        </div>
-        <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-          <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>MER by Region</div>
+        </ChartPanel>
+        <ChartPanel title="MER by Region">
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={sortedGeo} layout="vertical" margin={{ top:4, right:16, left:40, bottom:4 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
@@ -498,12 +456,11 @@ function RegionsTab({ geo, geoAgg }) {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-        </div>
+        </ChartPanel>
       </div>
 
       {/* Aggregated geo table */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Period Totals by Region</div>
+      <ChartPanel title="Period Totals by Region">
         <PaginatedSheetTable
           headers={GEO_AGG_HEADERS}
           rows={aggRows}
@@ -512,12 +469,10 @@ function RegionsTab({ geo, geoAgg }) {
           searchable={false}
           getCellCommentKey={(row, h) => aggCellKey('geo-agg', row, h, 'Region')}
         />
-      </div>
+      </ChartPanel>
 
       {/* Daily geo table */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Daily Regional Data — Every Day</div>
-        <div style={{ fontSize:11, color:'var(--text3)', marginBottom:14 }}>Each row = one day × one region (EU always shown)</div>
+      <ChartPanel title="Daily Regional Data — Every Day" subtitle="Each row = one day × one region (EU always shown)">
         <PaginatedSheetTable
           headers={GEO_DAILY_HEADERS}
           rows={dailyRows}
@@ -526,7 +481,7 @@ function RegionsTab({ geo, geoAgg }) {
           getCellCommentKey={(row, h) => entityDateCellKey('geo-daily', row, h, 'Region')}
           getCellCommentLabel={(row, h) => entityDateCellLabel('region', h, row, 'Region')}
         />
-      </div>
+      </ChartPanel>
     </div>
   );
 }
@@ -559,23 +514,28 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
       {/* Period KPIs (move with the date picker) */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
-        <KpiCard label="Subscription sales" sub="in date range" value={fmt$(subTotals.total)} tooltip={TIP.totalSubRevenue} color="nobl"   />
-        <KpiCard label={L.newSubs}           sub="in date range" value={fmtNum(subTotals.newSubCount)} tooltip={TIP.newSubs} color="teal"   />
-        <KpiCard label={L.newSubRevenue}    sub="in date range" value={fmt$(subTotals.newSubRev)} tooltip={TIP.newSubRevenue} color="teal"   />
-        <KpiCard label={L.rebillRevenue}     sub="in date range" value={fmt$(subTotals.rebill)} tooltip={TIP.rebillRevenue} color="blue"   />
+      <div className="section">
+        <div className="section__title">IN DATE RANGE</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(165px,1fr))', gap:12 }}>
+          <KpiCard label="Subscription sales" sub="in date range" value={fmt$(subTotals.total)} tooltip={TIP.totalSubRevenue} color="nobl"   />
+          <KpiCard label={L.newSubs}           sub="in date range" value={fmtNum(subTotals.newSubCount)} tooltip={TIP.newSubs} color="teal"   />
+          <KpiCard label={L.newSubRevenue}    sub="in date range" value={fmt$(subTotals.newSubRev)} tooltip={TIP.newSubRevenue} color="teal"   />
+          <KpiCard label={L.rebillRevenue}     sub="in date range" value={fmt$(subTotals.rebill)} tooltip={TIP.rebillRevenue} color="blue"   />
+        </div>
       </div>
       {/* All-time subscriber snapshot */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
-        <KpiCard label={L.activeSubs}        sub="right now" value={fmtNum(subStats.active    || 0)} tooltip={TIP.activeSubs} color="nobl"   />
-        <KpiCard label={L.converted}          sub="right now" value={fmtNum(subStats.converted || 0)} tooltip={TIP.converted} color="blue"   />
-        <KpiCard label={L.cancelled}          sub="right now" value={fmtNum(subStats.cancelled || 0)} tooltip={TIP.cancelled} color="warn"   />
-        <KpiCard label={L.avgContract} sub="right now" value={fmt$(subStats.avg_order_amount || 0)} tooltip={TIP.avgContract} color="purple" />
+      <div className="section">
+        <div className="section__title">SUBSCRIBER SNAPSHOT</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(165px,1fr))', gap:12 }}>
+          <KpiCard label={L.activeSubs}        sub="right now" value={fmtNum(subStats.active    || 0)} tooltip={TIP.activeSubs} color="nobl"   />
+          <KpiCard label={L.converted}          sub="right now" value={fmtNum(subStats.converted || 0)} tooltip={TIP.converted} color="blue"   />
+          <KpiCard label={L.cancelled}          sub="right now" value={fmtNum(subStats.cancelled || 0)} tooltip={TIP.cancelled} color="warn"   />
+          <KpiCard label={L.avgContract} sub="right now" value={fmt$(subStats.avg_order_amount || 0)} tooltip={TIP.avgContract} color="purple" />
+        </div>
       </div>
 
       {/* Trend chart */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Subscription Revenue — Daily</div>
+      <ChartPanel title="Subscription Revenue — Daily">
         <ResponsiveContainer width="100%" height={240}>
           <AreaChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <defs>
@@ -595,11 +555,10 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
             <Area type="monotone" dataKey="new_sub_revenue"    name="New Subs"      stroke="#14b8a6" fill="none" strokeWidth={1.5} strokeDasharray="4 2" dot={false} />
           </AreaChart>
         </ResponsiveContainer>
-      </div>
+      </ChartPanel>
 
       {/* Daily table */}
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Subscription Detail</div>
+      <ChartPanel title="Daily Subscription Detail">
         <PaginatedSheetTable
           headers={SUB_HEADERS}
           rows={rows}
@@ -608,7 +567,7 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
           getCellCommentKey={(row, h) => dailyCellKey('subs', row, h, 'Date')}
           getCellCommentLabel={(row, h) => dailyCellLabel(h, row, 'Date')}
         />
-      </div>
+      </ChartPanel>
     </div>
   );
 }
@@ -643,17 +602,19 @@ function EmailTab({ email, emailTotals }) {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:16 }}>
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(150px,1fr))', gap:12 }}>
-        <KpiCard label={L.emailSent}  value={fmtNum(emailTotals.sent)}    color="blue"   />
-        <KpiCard label={L.emailOpened}       value={fmtNum(emailTotals.opened)}  color="teal"   />
-        <KpiCard label={L.emailClicked}      value={fmtNum(emailTotals.clicked)} color="nobl"   />
-        <KpiCard label={L.openRate} value={fmtPct(avgOpenRate)}        color="green"  />
-        <KpiCard label={L.clickRate}value={fmtPct(avgClickRate)}       color="purple" />
-        <KpiCard label={L.emailRevenue} value={fmt$(emailTotals.revenue)} tooltip={TIP.emailRevenue} color="nobl"   />
+      <div className="section">
+        <div className="section__title">EMAIL TOTALS</div>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(165px,1fr))', gap:12 }}>
+          <KpiCard label={L.emailSent}  value={fmtNum(emailTotals.sent)}    color="blue"   />
+          <KpiCard label={L.emailOpened}       value={fmtNum(emailTotals.opened)}  color="teal"   />
+          <KpiCard label={L.emailClicked}      value={fmtNum(emailTotals.clicked)} color="nobl"   />
+          <KpiCard label={L.openRate} value={fmtPct(avgOpenRate)}        color="green"  />
+          <KpiCard label={L.clickRate}value={fmtPct(avgClickRate)}       color="purple" />
+          <KpiCard label={L.emailRevenue} value={fmt$(emailTotals.revenue)} tooltip={TIP.emailRevenue} color="nobl"   />
+        </div>
       </div>
 
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Email Revenue — Daily</div>
+      <ChartPanel title="Email Revenue — Daily">
         <ResponsiveContainer width="100%" height={220}>
           <AreaChart data={chartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
             <defs>
@@ -670,10 +631,9 @@ function EmailTab({ email, emailTotals }) {
             <Area type="monotone" dataKey="email_revenue" name="Email Revenue" stroke="#14b8a6" fill="url(#nGradEmail)" strokeWidth={2} dot={false} />
           </AreaChart>
         </ResponsiveContainer>
-      </div>
+      </ChartPanel>
 
-      <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:16 }}>
-        <div style={{ fontSize:14, fontWeight:700, marginBottom:14 }}>Daily Email Stats</div>
+      <ChartPanel title="Daily Email Stats">
         <PaginatedSheetTable
           headers={EMAIL_HEADERS}
           rows={rows}
@@ -682,7 +642,7 @@ function EmailTab({ email, emailTotals }) {
           getCellCommentKey={(row, h) => dailyCellKey('email', row, h, 'Date')}
           getCellCommentLabel={(row, h) => dailyCellLabel(h, row, 'Date')}
         />
-      </div>
+      </ChartPanel>
     </div>
   );
 }
@@ -707,8 +667,7 @@ function ErrorMsg({ msg, onRetry }) {
   return (
     <div style={{ padding:'40px 0', textAlign:'center' }}>
       <div style={{ color:'var(--danger)', marginBottom:12, fontSize:14 }}>Failed to load: {msg}</div>
-      <button onClick={onRetry} style={{ padding:'8px 20px', background:'var(--accent)', color:'#fff',
-        border:'none', borderRadius:8, cursor:'pointer', fontWeight:600 }}>Retry</button>
+      <button onClick={onRetry} className="btn btn--primary">Retry</button>
     </div>
   );
 }

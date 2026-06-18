@@ -94,6 +94,9 @@ export async function cachedAnalyticsFetch(cacheKey, fetchFn, { onFreshVersion }
   if (hit != null) return { data: hit, fromCache: true };
 
   const data = await fetchFn();
-  setAnalyticsCache(cacheKey, data);
+  // Never cache error/empty responses (e.g. a transient DB-connection timeout) —
+  // otherwise a one-off failure would stick for the whole session.
+  const isError = !data || (typeof data === 'object' && 'error' in data);
+  if (!isError) setAnalyticsCache(cacheKey, data);
   return { data, fromCache: false };
 }

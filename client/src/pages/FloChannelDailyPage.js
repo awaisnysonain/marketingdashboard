@@ -3,16 +3,16 @@ import {
   AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from 'recharts';
-import PageIntro from '../components/PageIntro';
-import PageFilterBar from '../components/PageFilterBar';
+import { useDashboardFilters } from '../context/DashboardFilterContext';
 import KpiCard from '../components/KpiCard';
 import ChartCard from '../components/ChartCard';
+import ChartPanel from '../components/ChartPanel';
 import VerticalDataTable from '../components/VerticalDataTable';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
 import { getChannels, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../utils/api';
 import { TIP } from '../copy/plainLanguage';
-import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
+import { sortByRevenueDesc } from '../utils/dateRange';
 import { enrichChannelRow } from '../utils/toplineData';
 import { FLO_ACCENT, TOOLTIP_STYLE, CHART_GRID, mer, chColor, fmtAxisCurrency, fmtAxisRatio, Y_AXIS_WIDTH_RATIO } from '../utils/chartHelpers';
 function fmtDateLabel(s) {
@@ -22,32 +22,6 @@ function fmtDateLabel(s) {
 }
 
 const PAGE_KEY = 'flo-channel-daily';
-
-function Card({ title, subtitle, children, style }) {
-  return (
-    <section style={{ background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 14, padding: '18px 20px', boxShadow: '0 8px 22px rgba(15,23,42,.04)', ...style }}>
-      {(title || subtitle) && (
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 14 }}>
-          {title && <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{title}</div>}
-          {subtitle && <div style={{ fontSize: 11, color: 'var(--text3)' }}>{subtitle}</div>}
-        </div>
-      )}
-      {children}
-    </section>
-  );
-}
-
-function PillTab({ label, active, onClick }) {
-  return (
-    <button type="button" onClick={onClick} style={{
-      border: '1px solid var(--border2)',
-      background: active ? 'var(--accent)' : 'var(--bg2)',
-      color: active ? '#fff' : 'var(--text2)',
-      borderRadius: 999, padding: '7px 16px', fontSize: 12, fontWeight: 700,
-      cursor: 'pointer', transition: 'all .15s',
-    }}>{label}</button>
-  );
-}
 
 const METRICS = [
   { key: 'spend_1d',        label: 'Spend',           type: '$' },
@@ -71,25 +45,31 @@ function ErrorBox({ msg, onRetry }) {
   return (
     <div style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', borderRadius: 12, padding: '16px 20px', fontSize: 13, color: 'var(--danger)' }}>
       Failed to load data: {msg}
-      {onRetry && <button onClick={onRetry} style={{ marginLeft: 12, fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>}
+      {onRetry && <button onClick={onRetry} className="btn btn--primary btn--sm" style={{ marginLeft: 12 }}>Retry</button>}
     </div>
   );
 }
 
 export default function FloChannelDailyPage() {
-  const [rows, setRows] = useState([]);
+  const [rawRows, setRawRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [range, setRange] = useState(mtdRange());
+  const { dateRange, filterByChannels } = useDashboardFilters();
+  const range = dateRange;
   const [activeChannel, setActiveChannel] = useState(null);
 
   const load = useCallback(() => {
     setLoading(true); setError(null);
     getChannels(range.start, range.end, 'FLO')
-      .then(d => { setRows(d.rows || []); setLoading(false); })
+      .then(d => { setRawRows(d.rows || []); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [range]);
   useEffect(() => { load(); }, [load]);
+
+  const rows = useMemo(
+    () => filterByChannels(rawRows, 'channel'),
+    [rawRows, filterByChannels],
+  );
 
   const { channelNames, dates, byDateCh, chKpi, spendChartData, revChartData, channelTotals } = useMemo(() => {
     const chSet = new Set(), dateSet = new Set(), byDateCh = {}, chTotals = {};
@@ -133,20 +113,30 @@ export default function FloChannelDailyPage() {
   return (
     <CommentProvider pageKey={PAGE_KEY}>
     <div className="page-stack">
-      <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
-      <PageIntro title="FLO Channel Level Daily" desc="Per-channel daily performance metrics for Pilates FLO — Spend, Revenue, Purchases, ROAS, CAC across all paid channels." />
-
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
-            {channelNames.map(ch => <PillTab key={ch} label={ch} active={activeChannel === ch} onClick={() => setActiveChannel(ch)} />)}
+          <div className="section">
+            <div className="section__title">CHANNEL</div>
+            <div className="seg" style={{ flexWrap: 'wrap' }}>
+              {channelNames.map(ch => (
+                <button
+                  key={ch}
+                  type="button"
+                  className={`seg__btn${activeChannel === ch ? ' seg__btn--active' : ''}`}
+                  onClick={() => setActiveChannel(ch)}
+                >{ch}</button>
+              ))}
+            </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 20 }}>
-            <KpiCard label="Total Spend" value={fmt$(t.spend)} fullValue={fmtFull$(t.spend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'total_spend'), targetLabel: `${activeChannel} · Total Spend` }} />
-            <KpiCard label="Total Revenue" value={fmt$(t.revenue)} fullValue={fmtFull$(t.revenue)} tooltip={TIP.revenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'total_revenue'), targetLabel: `${activeChannel} · Total Revenue` }} />
-            <KpiCard label="Avg ROAS" value={fmtRatio(roas)} copyValue={roas.toFixed(4)} tooltip={TIP.roas} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'avg_roas'), targetLabel: `${activeChannel} · Avg ROAS` }} />
-            <KpiCard label="Total Purchases" value={fmtNum(t.purchases)} fullValue={fmtFullNum(t.purchases)} tooltip={TIP.purchases} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'total_purchases'), targetLabel: `${activeChannel} · Total Purchases` }} />
+          <div className="section">
+            <div className="section__title">{activeChannel} · PERIOD TOTALS</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))', gap: 12 }}>
+              <KpiCard label="Total Spend" value={fmt$(t.spend)} fullValue={fmtFull$(t.spend)} tooltip={TIP.spend} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'total_spend'), targetLabel: `${activeChannel} · Total Spend` }} />
+              <KpiCard label="Total Revenue" value={fmt$(t.revenue)} fullValue={fmtFull$(t.revenue)} tooltip={TIP.revenue} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'total_revenue'), targetLabel: `${activeChannel} · Total Revenue` }} />
+              <KpiCard label="Avg ROAS" value={fmtRatio(roas)} copyValue={roas.toFixed(4)} tooltip={TIP.roas} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'avg_roas'), targetLabel: `${activeChannel} · Avg ROAS` }} />
+              <KpiCard label="Total Purchases" value={fmtNum(t.purchases)} fullValue={fmtFullNum(t.purchases)} tooltip={TIP.purchases} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('channel', activeChannel, 'total_purchases'), targetLabel: `${activeChannel} · Total Purchases` }} />
+            </div>
           </div>
 
           <ChartCard title="Daily Spend by Channel" subtitle="Stacked area — all channels">
@@ -212,14 +202,14 @@ export default function FloChannelDailyPage() {
             </ChartCard>
           </div>
 
-          <Card title={activeChannel} subtitle={`${dates.length} days`}>
+          <ChartPanel title={activeChannel} subtitle={`${dates.length} days · Attribution revenue (1-day)`}>
             <VerticalDataTable
               dates={dates}
               getRow={(d) => enrichChannelRow(byDateCh[`${d}|${activeChannel}`], activeChannel)}
               metrics={METRICS}
               tableScope={commentTargetKey('channel', activeChannel)}
             />
-          </Card>
+          </ChartPanel>
         </>
       )}
     </div>

@@ -1,7 +1,7 @@
 import React from 'react';
 
 /**
- * Server-driven table pagination — shows full dataset size while only one page is loaded.
+ * Table pagination — page window + readable "showing X–Y of Z" info.
  */
 export default function TablePagination({
   page = 1,
@@ -20,53 +20,44 @@ export default function TablePagination({
     if (next !== safePage && onPageChange) onPageChange(next);
   };
 
-  const window = [];
+  const win = [];
   const maxButtons = 7;
   let lo = Math.max(1, safePage - 3);
-  let hi = Math.min(totalPages, lo + maxButtons - 1);
+  const hi = Math.min(totalPages, lo + maxButtons - 1);
   lo = Math.max(1, hi - maxButtons + 1);
-  for (let i = lo; i <= hi; i++) window.push(i);
+  for (let i = lo; i <= hi; i++) win.push(i);
 
   if (totalRows <= pageSize && totalPages <= 1) {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '10px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg3)',
-        fontSize: 12, color: 'var(--text3)',
-      }}>
-        <span>{totalRows.toLocaleString()} {totalRows === 1 ? 'row' : 'rows'}</span>
+      <div className="pager">
+        <span className="pager__info">{totalRows.toLocaleString()} {totalRows === 1 ? 'row' : 'rows'}</span>
       </div>
     );
   }
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10,
-      padding: '10px 16px', borderTop: '1px solid var(--border)', background: 'var(--bg3)',
-    }}>
-      <span style={{ fontSize: 12, color: 'var(--text3)' }}>
+    <div className="pager">
+      <span className="pager__info">
         {totalRows === 0
           ? 'No rows'
           : `Showing ${startRow.toLocaleString()}–${endRow.toLocaleString()} of ${totalRows.toLocaleString()} rows`}
-        {' · '}
-        Page {safePage} of {totalPages}
-        {loading ? ' · loading…' : ''}
+        {' · '}Page {safePage} of {totalPages}{loading ? ' · loading…' : ''}
       </span>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+      <div className="pager__btns">
         <PagerBtn label="«" disabled={safePage <= 1 || loading} onClick={() => go(1)} />
         <PagerBtn label="‹" disabled={safePage <= 1 || loading} onClick={() => go(safePage - 1)} />
         {lo > 1 && (
           <>
             <PagerBtn label="1" active={safePage === 1} disabled={loading} onClick={() => go(1)} />
-            {lo > 2 && <span style={{ color: 'var(--text3)', fontSize: 12, padding: '0 4px' }}>…</span>}
+            {lo > 2 && <span className="pager__dots">…</span>}
           </>
         )}
-        {window.map((n) => (
+        {win.map((n) => (
           <PagerBtn key={n} label={String(n)} active={n === safePage} disabled={loading} onClick={() => go(n)} />
         ))}
         {hi < totalPages && (
           <>
-            {hi < totalPages - 1 && <span style={{ color: 'var(--text3)', fontSize: 12, padding: '0 4px' }}>…</span>}
+            {hi < totalPages - 1 && <span className="pager__dots">…</span>}
             <PagerBtn label={String(totalPages)} active={safePage === totalPages} disabled={loading} onClick={() => go(totalPages)} />
           </>
         )}
@@ -83,15 +74,7 @@ function PagerBtn({ label, onClick, disabled, active }) {
       type="button"
       onClick={onClick}
       disabled={disabled}
-      style={{
-        minWidth: 32, padding: '4px 10px', borderRadius: 6,
-        border: `1px solid ${active ? 'var(--accent)' : 'var(--border2)'}`,
-        background: active ? 'var(--accent-dim)' : 'transparent',
-        color: disabled ? 'var(--text3)' : active ? 'var(--accent)' : 'var(--text2)',
-        fontSize: 13, fontWeight: active ? 600 : 400,
-        cursor: disabled ? 'default' : 'pointer',
-        opacity: disabled ? 0.4 : 1,
-      }}
+      className={`pager__btn${active ? ' pager__btn--active' : ''}`}
     >
       {label}
     </button>

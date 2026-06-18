@@ -157,30 +157,57 @@ export function isDateField(header){
 }
 
 // ── Analytics API ─────────────────────────────────────────────────
-export const getOverview = (start, end) => fetch(`${B}/api/analytics/overview?start=${start}&end=${end}`).then(r=>r.json());
-export const getNoblTopline = (start, end) => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(async r => {
-  const data = await r.json();
-  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
-  return data;
-});
-export const getFloTopline = (start, end) => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(async r => {
-  const data = await r.json();
-  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
-  return data;
-});
-export const getChannels = (start, end, brand='') => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(async r => {
-  const data = await r.json();
-  if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
-  return data;
-});
+// Heavy read endpoints are cached client-side (sessionStorage, keyed by the
+// NOBL Air data version) so re-visits and date/tab switches return instantly.
+// The cache busts automatically when new data lands (version changes after a sync).
+export const getOverview = (start, end) =>
+  cachedAnalyticsFetch(`overview:${start}:${end}`,
+    () => fetch(`${B}/api/analytics/overview?start=${start}&end=${end}`).then(async r => {
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
+      return d;
+    }),
+  ).then(x => x.data);
+export const getNoblTopline = (start, end) =>
+  cachedAnalyticsFetch(`nobl-topline:${start}:${end}`,
+    () => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(async r => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+      return data;
+    }),
+  ).then(x => x.data);
+export const getFloTopline = (start, end) =>
+  cachedAnalyticsFetch(`flo-topline:${start}:${end}`,
+    () => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(async r => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+      return data;
+    }),
+  ).then(x => x.data);
+export const getChannels = (start, end, brand='') =>
+  cachedAnalyticsFetch(`channels:${start}:${end}:${brand}`,
+    () => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(async r => {
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
+      return data;
+    }),
+  ).then(x => x.data);
 export const getNoblSubs = (start, end) =>
   fetchJson(`${B}/api/analytics/nobl/subscriptions?start=${start}&end=${end}`, '/api/analytics/nobl/subscriptions');
 export const getSubscriptions = (start, end, brand = 'NOBL') =>
-  fetchJson(
-    `${B}/api/analytics/subscriptions?start=${start}&end=${end}&brand=${encodeURIComponent(brand)}`,
-    '/api/analytics/subscriptions'
-  );
+  cachedAnalyticsFetch(`subs:${start}:${end}:${brand}`,
+    () => fetchJson(
+      `${B}/api/analytics/subscriptions?start=${start}&end=${end}&brand=${encodeURIComponent(brand)}`,
+      '/api/analytics/subscriptions'
+    ),
+  ).then(x => x.data);
 export const getNoblAirDataVersion = () => fetchNoblAirDataVersionCached();
+
+/** Earliest & latest dates that actually have data (for the "All" date preset). */
+export const getDataBounds = () =>
+  cachedAnalyticsFetch('data-bounds',
+    () => fetch(`${B}/api/analytics/data-bounds`).then((r) => r.json()),
+  ).then((x) => x.data);
 
 export const getNoblAirSubscribers = (start, end) =>
   cachedAnalyticsFetch(
@@ -207,6 +234,20 @@ export const getNoblAirPerformance = async (start, end, rollingDays = 14, foreca
           : 'Unexpected response format from server.'
       );
     }
+    const json = await res.json();
+    if (!res.ok) throw new Error(json?.error || `Request failed (${res.status})`);
+    return json;
+  });
+  return data;
+};
+
+/** Fetch global + base-region Air data once per date range; filter client-side via resolveAirPerfFromBundle. */
+export const getNoblAirPerformanceBundle = async (start, end) => {
+  const cacheKey = `perf-bundle:${start}:${end}`;
+  const { data } = await cachedAnalyticsFetch(cacheKey, async () => {
+    const res = await fetch(
+      `${B}/api/analytics/nobl/air-performance-bundle?start=${start}&end=${end}`
+    );
     const json = await res.json();
     if (!res.ok) throw new Error(json?.error || `Request failed (${res.status})`);
     return json;
@@ -272,21 +313,38 @@ export const getNoblAirAttribution = (
   });
 };
 export const getForecastEngine = (brand = 'ALL', asOf = '') =>
-  fetchJson(
-    `${B}/api/analytics/forecast-engine?brand=${encodeURIComponent(brand)}${asOf ? `&asOf=${encodeURIComponent(asOf)}` : ''}`,
-    '/api/analytics/forecast-engine'
-  );
+  cachedAnalyticsFetch(`forecast-engine:${brand}:${asOf}`,
+    () => fetchJson(
+      `${B}/api/analytics/forecast-engine?brand=${encodeURIComponent(brand)}${asOf ? `&asOf=${encodeURIComponent(asOf)}` : ''}`,
+      '/api/analytics/forecast-engine'
+    ),
+  ).then(x => x.data);
 
 export const getDashboardForecast = (asOf = '') =>
-  fetchJson(
-    `${B}/api/analytics/dashboard-forecast${asOf ? `?asOf=${encodeURIComponent(asOf)}` : ''}`,
-    '/api/analytics/dashboard-forecast'
-  );
-export const getFloProducts = (start, end) => fetch(`${B}/api/analytics/flo/products?start=${start}&end=${end}`).then(r=>r.json());
+  cachedAnalyticsFetch(`dashboard-forecast:${asOf}`,
+    () => fetchJson(
+      `${B}/api/analytics/dashboard-forecast${asOf ? `?asOf=${encodeURIComponent(asOf)}` : ''}`,
+      '/api/analytics/dashboard-forecast'
+    ),
+  ).then(x => x.data);
+export const getFloProducts = (start, end) =>
+  cachedAnalyticsFetch(`flo-products:${start}:${end}`,
+    () => fetch(`${B}/api/analytics/flo/products?start=${start}&end=${end}`).then(async r => {
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
+      return d;
+    }),
+  ).then(x => x.data);
 
 // ── Store pages (comprehensive per-store data) ────────────────────
-export const getStoreNobl = (start, end) => fetch(`${B}/api/store/nobl?start=${start}&end=${end}`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
-export const getStoreFlo  = (start, end) => fetch(`${B}/api/store/flo?start=${start}&end=${end}`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); });
+export const getStoreNobl = (start, end) =>
+  cachedAnalyticsFetch(`store-nobl:${start}:${end}`,
+    () => fetch(`${B}/api/store/nobl?start=${start}&end=${end}`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
+  ).then(x => x.data);
+export const getStoreFlo  = (start, end) =>
+  cachedAnalyticsFetch(`store-flo:${start}:${end}`,
+    () => fetch(`${B}/api/store/flo?start=${start}&end=${end}`).then(r=>{ if(!r.ok) throw new Error(r.status); return r.json(); }),
+  ).then(x => x.data);
 export const getSyncStatus = () => fetch(`${B}/api/sync/status`).then(r=>r.json());
 export const triggerSync = (opts={}) => fetch(`${B}/api/sync/trigger`, {
   method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(opts),

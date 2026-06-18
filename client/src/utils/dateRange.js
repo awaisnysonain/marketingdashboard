@@ -82,9 +82,41 @@ export function mtdRange({ throughYesterday = true } = {}) {
   return { start, end: mtdEndISO(throughYesterday) };
 }
 
-/** Year-to-date: Jan 1 of the **current** year through today. */
-export function ytdRange() {
-  return { start: currentYearStartISO(), end: todayISO() };
+/** YTD end date for the given mode (clamped to year start on Jan 1). */
+export function ytdEndISO(throughYesterday = true) {
+  const start = currentYearStartISO();
+  if (!throughYesterday) return todayISO();
+  const y = yesterdayISO();
+  return y < start ? start : y;
+}
+
+/** True when range is year-start through today or yesterday (YTD preset shapes). */
+export function isYtdRange(start, end) {
+  const yearStart = currentYearStartISO();
+  if (start !== yearStart) return false;
+  return end === todayISO() || end === ytdEndISO(true);
+}
+
+/** Year-to-date: Jan 1 of the **current** year through today or yesterday. */
+export function ytdRange({ throughYesterday = true } = {}) {
+  return { start: currentYearStartISO(), end: ytdEndISO(throughYesterday) };
+}
+
+/**
+ * Earliest date the "All" (all-time) preset reaches back to. Set well before any
+ * real data — the read endpoints only return rows that actually exist, so an
+ * early bound simply means "everything we have".
+ */
+export const ALL_TIME_START = '2020-01-01';
+
+/** All-time: every past day through today or yesterday. */
+export function allTimeRange({ throughYesterday = true } = {}) {
+  return { start: ALL_TIME_START, end: throughYesterday ? yesterdayISO() : todayISO() };
+}
+
+/** True when range starts at the all-time bound (through today or yesterday). */
+export function isAllTimeRange(start, end) {
+  return start === ALL_TIME_START && (end === todayISO() || end === yesterdayISO());
 }
 
 export function yesterdayRange() {

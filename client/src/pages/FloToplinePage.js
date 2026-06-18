@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from 'recharts';
 import PageIntro from '../components/PageIntro';
-import PageFilterBar from '../components/PageFilterBar';
+import { useDashboardFilters } from '../context/DashboardFilterContext';
 import KpiCard from '../components/KpiCard';
 import ChartCard from '../components/ChartCard';
 import VerticalDataTable from '../components/VerticalDataTable';
@@ -12,7 +12,7 @@ import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
 import { getFloTopline, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../utils/api';
 import { TIP } from '../copy/plainLanguage';
-import { mtdRange, sortByRevenueDesc } from '../utils/dateRange';
+import { sortByRevenueDesc } from '../utils/dateRange';
 import {
   enrichSummaryRow, enrichChannelRow, enrichGeoRow, enrichProductRow, mergeToplineDates,
 } from '../utils/toplineData';
@@ -40,18 +40,6 @@ function Card({ title, subtitle, children, style }) {
       )}
       {children}
     </section>
-  );
-}
-
-function PillTab({ label, active, onClick }) {
-  return (
-    <button type="button" onClick={onClick} style={{
-      border: '1px solid var(--border2)',
-      background: active ? 'var(--accent)' : 'var(--bg2)',
-      color: active ? '#fff' : 'var(--text2)',
-      borderRadius: 999, padding: '7px 16px', fontSize: 12, fontWeight: 700,
-      cursor: 'pointer', transition: 'all .15s',
-    }}>{label}</button>
   );
 }
 
@@ -102,7 +90,7 @@ function ErrorBox({ msg, onRetry }) {
   return (
     <div style={{ background: 'rgba(239,68,68,.08)', border: '1px solid rgba(239,68,68,.25)', borderRadius: 12, padding: '16px 20px', fontSize: 13, color: 'var(--danger)' }}>
       Failed to load data: {msg}
-      {onRetry && <button onClick={onRetry} style={{ marginLeft: 12, fontSize: 12, color: 'var(--accent)', background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Retry</button>}
+      {onRetry && <button onClick={onRetry} className="btn btn--primary btn--sm" style={{ marginLeft: 12 }}>Retry</button>}
     </div>
   );
 }
@@ -111,7 +99,8 @@ export default function FloToplinePage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [range, setRange] = useState(mtdRange());
+  const { dateRange, filterByChannels, filterByRegions, isAllRegions } = useDashboardFilters();
+  const range = dateRange;
   const [activeView, setActiveView] = useState('summary');
   const [activeChannel, setActiveChannel] = useState(null);
   const [activeRegion, setActiveRegion] = useState(null);
@@ -127,23 +116,33 @@ export default function FloToplinePage() {
 
   const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, productNames, productByDatePr, kpi, chartData, chAgg, geoAgg, prodAgg } = useMemo(() => {
     if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, productNames: [], productByDatePr: {}, kpi: {}, chartData: [], chAgg: [], geoAgg: [], prodAgg: [] };
+    const channelsData = filterByChannels(data.channels || [], 'channel');
+    const geoData = filterByRegions(data.geo || [], 'region');
     const summaryByDate = {};
     let totalRev = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
     for (const r of (data.summary || [])) {
       summaryByDate[r.date] = r;
-      totalRev += Number(r.order_revenue || r.total_revenue) || 0;
-      totalSpend += Number(r.total_spend) || 0;
-      totalOrders += Number(r.total_orders) || 0;
-      totalNew += Number(r.new_customer_orders) || 0;
+      if (isAllRegions) {
+        totalRev += Number(r.order_revenue || r.total_revenue) || 0;
+        totalSpend += Number(r.total_spend) || 0;
+        totalOrders += Number(r.total_orders) || 0;
+        totalNew += Number(r.new_customer_orders) || 0;
+      }
+    }
+    if (!isAllRegions) {
+      for (const r of geoData) {
+        totalRev += Number(r.revenue_actual || r.revenue) || 0;
+        totalSpend += Number(r.spend_actual || r.spend) || 0;
+      }
     }
     const chSet = new Set(), channelByDateCh = {}, channelRev = {};
-    for (const r of (data.channels || [])) {
+    for (const r of channelsData) {
       chSet.add(r.channel);
       channelByDateCh[`${r.date}|${r.channel}`] = r;
       channelRev[r.channel] = (channelRev[r.channel] || 0) + (Number(r.revenue_1d) || 0);
     }
     const rgSet = new Set(), geoByDateRg = {}, regionRev = {};
-    for (const r of (data.geo || [])) {
+    for (const r of geoData) {
       rgSet.add(r.region);
       geoByDateRg[`${r.date}|${r.region}`] = r;
       regionRev[r.region] = (regionRev[r.region] || 0) + (Number(r.revenue_actual || r.revenue) || 0);
@@ -154,7 +153,7 @@ export default function FloToplinePage() {
       productByDatePr[`${r.date}|${r.product_line}`] = r;
       productRev[r.product_line] = (productRev[r.product_line] || 0) + (Number(r.revenue) || 0);
     }
-    const allDates = mergeToplineDates(data.summary, data.channels, data.geo, data.products);
+    const allDates = mergeToplineDates(data.summary, channelsData, geoData, data.products);
     const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
 
     const chartData = allDates.map((d) => {
@@ -170,7 +169,7 @@ export default function FloToplinePage() {
     });
 
     const chMap = {};
-    for (const r of (data.channels || [])) {
+    for (const r of channelsData) {
       if (!chMap[r.channel]) chMap[r.channel] = { channel: r.channel, spend: 0, revenue: 0 };
       chMap[r.channel].spend += Number(r.spend_1d) || 0;
       chMap[r.channel].revenue += Number(r.revenue_1d) || 0;
@@ -180,7 +179,7 @@ export default function FloToplinePage() {
       .sort((a, b) => b.revenue - a.revenue);
 
     const geoMap = {};
-    for (const r of (data.geo || [])) {
+    for (const r of geoData) {
       if (!geoMap[r.region]) geoMap[r.region] = { region: r.region, revenue: 0, spend: 0 };
       geoMap[r.region].revenue += Number(r.revenue_actual || r.revenue) || 0;
       geoMap[r.region].spend += Number(r.spend_actual || r.spend) || 0;
@@ -215,7 +214,7 @@ export default function FloToplinePage() {
       geoAgg,
       prodAgg,
     };
-  }, [data]);
+  }, [data, filterByChannels, filterByRegions, isAllRegions]);
 
   useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
   useEffect(() => { if (regionNames.length && !activeRegion) setActiveRegion(regionNames[0]); }, [regionNames, activeRegion]);
@@ -231,22 +230,32 @@ export default function FloToplinePage() {
   return (
     <CommentProvider pageKey={PAGE_KEY}>
     <div className="page-stack">
-      <PageFilterBar start={range.start} end={range.end} onChange={setRange} />
-
-      <PageIntro title="FLO Topline" desc="Daily topline performance for Pilates FLO — revenue, spend, MER, channel breakdowns, geo splits, and product line data." />
+      <PageIntro
+        actions={(
+          <div className="seg">
+            {VIEWS.map(v => (
+              <button
+                key={v.id}
+                type="button"
+                className={`seg__btn${activeView === v.id ? ' seg__btn--active' : ''}`}
+                onClick={() => setActiveView(v.id)}
+              >{v.label}</button>
+            ))}
+          </div>
+        )}
+      />
 
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
-          <div className="page-kpi-grid">
-            <KpiCard label="Order Revenue" value={fmt$(kpi.totalRev)} fullValue={fmtFull$(kpi.totalRev)} tooltip={TIP.orderRevenue} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
-            <KpiCard label="Total Spend" value={fmt$(kpi.totalSpend)} fullValue={fmtFull$(kpi.totalSpend)} tooltip={TIP.spend} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Spend' }} />
-            <KpiCard label="MER" value={fmtRatio(kpi.mer)} copyValue={kpi.mer != null ? Number(kpi.mer).toFixed(4) : undefined} tooltip={TIP.mer} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: 'MER' }} />
-            <KpiCard label="Total Orders" value={fmtNum(kpi.totalOrders)} fullValue={fmtFullNum(kpi.totalOrders)} tooltip={TIP.orders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
-            <KpiCard label="New Customers" value={fmtNum(kpi.totalNew)} fullValue={fmtFullNum(kpi.totalNew)} tooltip={TIP.ncOrders} commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }} />
-          </div>
-
-          <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border)', paddingBottom: 10 }}>
-            {VIEWS.map(v => <PillTab key={v.id} label={v.label} active={activeView === v.id} onClick={() => setActiveView(v.id)} />)}
+          <div className="section">
+            <div className="section__title">TOPLINE</div>
+            <div className="page-kpi-grid">
+              <KpiCard label="Order Revenue" value={fmt$(kpi.totalRev)} fullValue={fmtFull$(kpi.totalRev)} tooltip={TIP.orderRevenue} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
+              <KpiCard label="Total Spend" value={fmt$(kpi.totalSpend)} fullValue={fmtFull$(kpi.totalSpend)} tooltip={TIP.spend} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Spend' }} />
+              <KpiCard label="MER" value={fmtRatio(kpi.mer)} copyValue={kpi.mer != null ? Number(kpi.mer).toFixed(4) : undefined} tooltip={TIP.mer} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: 'MER' }} />
+              <KpiCard label="Total Orders" value={fmtNum(kpi.totalOrders)} fullValue={fmtFullNum(kpi.totalOrders)} tooltip={TIP.orders} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
+              <KpiCard label="New Customers" value={fmtNum(kpi.totalNew)} fullValue={fmtFullNum(kpi.totalNew)} tooltip={TIP.ncOrders} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }} />
+            </div>
           </div>
 
           {activeView === 'summary' && (
@@ -322,8 +331,13 @@ export default function FloToplinePage() {
                   </ResponsiveContainer>
                 </ChartCard>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-                {channelNames.map(ch => <PillTab key={ch} label={ch} active={activeChannel === ch} onClick={() => setActiveChannel(ch)} />)}
+              <div className="section">
+                <div className="section__title">CHANNEL</div>
+                <div className="seg" style={{ flexWrap: 'wrap' }}>
+                  {channelNames.map(ch => (
+                    <button key={ch} type="button" className={`seg__btn${activeChannel === ch ? ' seg__btn--active' : ''}`} onClick={() => setActiveChannel(ch)}>{ch}</button>
+                  ))}
+                </div>
               </div>
               <Card title={activeChannel || 'Channel'} subtitle={`${dates.length} days`}>
                 <VerticalDataTable dates={dates} getRow={d => enrichChannelRow(channelByDateCh[`${d}|${activeChannel}`], activeChannel)} metrics={CHANNEL_METRICS} tableScope={commentTargetKey('channel', activeChannel)} />
@@ -362,8 +376,13 @@ export default function FloToplinePage() {
                   </ResponsiveContainer>
                 </ChartCard>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-                {regionNames.map(r => <PillTab key={r} label={r} active={activeRegion === r} onClick={() => setActiveRegion(r)} />)}
+              <div className="section">
+                <div className="section__title">REGION</div>
+                <div className="seg" style={{ flexWrap: 'wrap' }}>
+                  {regionNames.map(r => (
+                    <button key={r} type="button" className={`seg__btn${activeRegion === r ? ' seg__btn--active' : ''}`} onClick={() => setActiveRegion(r)}>{r}</button>
+                  ))}
+                </div>
               </div>
               <Card title={activeRegion || 'Region'} subtitle={`${dates.length} days`}>
                 <VerticalDataTable dates={dates} getRow={d => enrichGeoRow(geoByDateRg[`${d}|${activeRegion}`])} metrics={GEO_METRICS} tableScope={commentTargetKey('geo', activeRegion)} />
@@ -402,8 +421,13 @@ export default function FloToplinePage() {
                   </ResponsiveContainer>
                 </ChartCard>
               </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
-                {productNames.map(p => <PillTab key={p} label={p} active={activeProduct === p} onClick={() => setActiveProduct(p)} />)}
+              <div className="section">
+                <div className="section__title">PRODUCT LINE</div>
+                <div className="seg" style={{ flexWrap: 'wrap' }}>
+                  {productNames.map(p => (
+                    <button key={p} type="button" className={`seg__btn${activeProduct === p ? ' seg__btn--active' : ''}`} onClick={() => setActiveProduct(p)}>{p}</button>
+                  ))}
+                </div>
               </div>
               <Card title={activeProduct || 'Product'} subtitle={`${dates.length} days`}>
                 <VerticalDataTable dates={dates} getRow={d => enrichProductRow(productByDatePr[`${d}|${activeProduct}`])} metrics={PRODUCT_METRICS} tableScope={commentTargetKey('product', activeProduct)} />

@@ -5,7 +5,9 @@ import {
 } from 'react-router-dom';
 import { appStatus, verifyErpToken, getSyncStatus } from './utils/api';
 import TopBar from './components/TopBar';
+import GlobalFilterBar from './components/GlobalFilterBar';
 import Sidebar from './components/Sidebar';
+import { DashboardFilterProvider } from './context/DashboardFilterContext';
 import AiAssistant from './components/AiAssistant';
 import { ToastProvider, useToast } from './components/ToastProvider';
 import AccessDeniedPage from './pages/AccessDeniedPage';
@@ -363,9 +365,11 @@ function Layout({ appUser }) {
     TAB_DISPLAY_NAMES[activeTab] || activeTab;
 
   return (
+    <DashboardFilterProvider pageKey={location.pathname}>
     <div style={{ display:'flex', height:'100vh', overflow:'hidden', background:'var(--bg)' }}>
       <Sidebar
         active={activeTab}
+        appUser={appUser}
         onChange={handleTabChange}
         dynamicTabs={dynamicTabs}
         onAddDashboard={handleAddDashboard}
@@ -393,6 +397,7 @@ function Layout({ appUser }) {
             key={location.pathname}
             className={isBuilderRoute ? 'page-content page-content--fill' : 'page-content'}
           >
+            <GlobalFilterBar pathname={location.pathname} />
             <ErrorBoundary key={location.pathname}>
               <Outlet context={{ showToast, dynamicTabs, onDashboardCreated: handleDashboardCreated }} />
             </ErrorBoundary>
@@ -402,6 +407,7 @@ function Layout({ appUser }) {
 
       <AiAssistant activeTab={activeTab} />
     </div>
+    </DashboardFilterProvider>
   );
 }
 

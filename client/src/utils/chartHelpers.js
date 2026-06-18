@@ -26,10 +26,10 @@ export function fmtChartTooltip(value, name) {
   return [fmt$(value), name];
 }
 
-export const NOBL_ACCENT = '#6366f1';
-export const FLO_ACCENT = '#14b8a6';
-export const NOBL_WARN = '#f59e0b';
-export const FLO_WARN = '#f59e0b';
+export const NOBL_ACCENT = '#1f7a5c';  /* NOBL Travel — evergreen */
+export const FLO_ACCENT = '#c45b7c';   /* Pilates FLO — warm rose */
+export const NOBL_WARN = '#b07d18';
+export const FLO_WARN = '#b07d18';
 
 export const CHANNEL_COL = {
   META: '#1877f2',
@@ -42,7 +42,7 @@ export const CHANNEL_COL = {
   X: '#657786',
 };
 
-export const GEO_COL = ['#6366f1', '#14b8a6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'];
+export const GEO_COL = ['#1f7a5c', '#c45b7c', '#b07d18', '#3b7ea1', '#8b5cf6', '#06b6d4'];
 export const PROD_COL = { portable: '#14b8a6', wooden: '#f59e0b', metal: '#6366f1', mixed: '#94a3b8', unclassified: '#64748b' };
 
 export const Y_AXIS_WIDTH_CURRENCY = 92;

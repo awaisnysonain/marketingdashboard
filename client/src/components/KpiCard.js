@@ -13,6 +13,28 @@ function fmtV(value, prefix, suffix) {
   return `${prefix || ''}${s}${suffix || ''}`;
 }
 
+/** Named accent colors (also accepts a raw color string). */
+const ACCENT_MAP = {
+  nobl: 'var(--nobl)',
+  flo: 'var(--flo)',
+  accent: 'var(--accent)',
+  green: 'var(--success)',
+  success: 'var(--success)',
+  teal: '#0f9b8e',
+  purple: '#8b5cf6',
+  indigo: '#6366f1',
+  amber: 'var(--warn)',
+  warn: 'var(--warn)',
+  danger: 'var(--danger)',
+  red: 'var(--danger)',
+};
+
+function resolveAccent(accent, color) {
+  const key = accent || color;
+  if (!key) return null;
+  return ACCENT_MAP[key] || key; // raw color falls through
+}
+
 export default function KpiCard({
   label,
   value,
@@ -28,8 +50,10 @@ export default function KpiCard({
   tooltip,
   commentTarget,
   copyValue,
+  accent,
+  color,
 }) {
-  const fs = size === 'lg' ? 24 : size === 'sm' ? 16 : 20;
+  const fs = size === 'lg' ? 27 : size === 'sm' ? 17 : 21;
   const trendNum = parseFloat(trend);
   const isPos = !isNaN(trendNum) && trendNum > 0;
   const isNeg = !isNaN(trendNum) && trendNum < 0;
@@ -46,22 +70,23 @@ export default function KpiCard({
   const cellComment = commentEnabled
     ? comments.getForTarget(commentTarget.targetType || 'kpi', commentTarget.targetKey)
     : null;
+  const accentColor = resolveAccent(accent, color);
+
+  const cls = ['kpi'];
+  if (onClick) cls.push('kpi--clickable', 'kpi--hoverable');
+  else if (tooltip) cls.push('kpi--hoverable');
 
   return (
     <div
       onClick={onClick}
       title={tooltip || undefined}
+      className={cls.join(' ')}
       style={{
-        background: 'var(--card-bg)',
-        border: '1px solid var(--card-border)',
-        borderRadius: 'var(--radius-lg)',
-        padding: size === 'sm' ? '11px 14px' : '15px 18px',
+        paddingTop: accentColor ? 16 : undefined,
         cursor: onClick ? 'pointer' : tooltip ? 'help' : 'default',
-        transition: 'border-color .15s',
-        position: 'relative',
       }}
-      onMouseEnter={e => { if (onClick || tooltip) e.currentTarget.style.borderColor = 'var(--border3)'; if (tooltip) setShowTip(true); }}
-      onMouseLeave={e => { if (onClick || tooltip) e.currentTarget.style.borderColor = 'var(--card-border)'; if (tooltip) setShowTip(false); setHeaderHovered(false); }}
+      onMouseEnter={() => { if (tooltip) setShowTip(true); }}
+      onMouseLeave={() => { if (tooltip) setShowTip(false); setHeaderHovered(false); }}
       onFocus={tooltip ? () => setShowTip(true) : undefined}
       onBlur={tooltip ? () => setShowTip(false) : undefined}
       tabIndex={tooltip ? 0 : undefined}
@@ -70,15 +95,11 @@ export default function KpiCard({
         commentRef.current?.open();
       } : undefined}
     >
+      {accentColor && <div className="kpi__accent" style={{ background: accentColor }} />}
+
       <div
         ref={headerRef}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          marginBottom: 7,
-          minHeight: 16,
-        }}
+        className="kpi__head"
         onMouseEnter={() => {
           setHeaderHovered(true);
           if (cellComment && headerRef.current) {
@@ -90,9 +111,7 @@ export default function KpiCard({
           setCommentHover(null);
         }}
       >
-        <div style={{ flex: 1, fontSize: 11, fontWeight: 500, color: 'var(--text3)', letterSpacing: '.2px', userSelect: 'text' }}>
-          {label}
-        </div>
+        <div className="kpi__label">{label}</div>
         {commentEnabled && (
           <CommentAnchor
             ref={commentRef}
@@ -104,33 +123,29 @@ export default function KpiCard({
           />
         )}
       </div>
+
       <CopyableValue
         copyValue={textToCopy}
         title={fullValue || undefined}
-        style={{
-          fontSize: fs, fontWeight: 600, lineHeight: 1.15,
-          color: 'var(--text)', fontVariantNumeric: 'tabular-nums',
-          whiteSpace: 'nowrap',
-          display: 'block',
-          paddingRight: commentEnabled ? 2 : 0,
-        }}
+        className="kpi__value"
+        style={{ fontSize: fs, paddingRight: commentEnabled ? 2 : 0 }}
       >
         {displayValue}
       </CopyableValue>
+
       {(subValue || sub) && (
-        <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 5, fontFamily: 'var(--font-mono)', userSelect: 'text' }}>
+        <div className="kpi__sub">
           <CopyableValue copyValue={subValue || sub} clickToCopy={!!(subValue || sub)}>
             {subValue || sub}
           </CopyableValue>
         </div>
       )}
+
       {trend !== undefined && !isNaN(trendNum) && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 3, marginTop: 7,
-          fontSize: 11, fontWeight: 500,
-          color: isPos ? 'var(--success)' : isNeg ? 'var(--danger)' : 'var(--text3)',
-          userSelect: 'text',
-        }}>
+        <div
+          className="kpi__trend"
+          style={{ color: isPos ? 'var(--success)' : isNeg ? 'var(--danger)' : 'var(--text3)' }}
+        >
           <span style={{ fontSize: 8 }}>{isPos ? '▲' : isNeg ? '▼' : '—'}</span>
           <CopyableValue copyValue={`${Math.round(Math.abs(trendNum))}%`}>
             <span>{Math.round(Math.abs(trendNum))}%</span>
@@ -138,6 +153,7 @@ export default function KpiCard({
           {trendLabel && <span style={{ color: 'var(--text3)', fontWeight: 400 }}>{trendLabel}</span>}
         </div>
       )}
+
       {tooltip && showTip && (
         <div style={{
           position: 'absolute',

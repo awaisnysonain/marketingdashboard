@@ -5,7 +5,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import {
-  getNoblAirPerformance,
+  getNoblAirPerformanceBundle,
   getNoblAirSubscribers,
   getNoblAirAttribution,
   getNoblAirForecast,
@@ -21,7 +21,7 @@ import {
   setAnalyticsCache,
   getCachedNoblAirDataVersion,
 } from '../utils/analyticsCache';
-import DateRangePicker from '../components/DateRangePicker';
+import { resolveAirPerfFromBundle } from '../utils/noblAirRegional';
 import KpiCard from '../components/KpiCard';
 import PaginatedSheetTable from '../components/PaginatedSheetTable';
 import ServerPaginatedSheetTable from '../components/ServerPaginatedSheetTable';
@@ -31,7 +31,9 @@ import TablePagination from '../components/TablePagination';
 import { useClientPagination } from '../hooks/useClientPagination';
 import { TABLE_PAGE_SIZE } from '../constants/pagination';
 import PageIntro from '../components/PageIntro';
-import { L, TIP, PAGE } from '../copy/plainLanguage';
+import ChartPanel from '../components/ChartPanel';
+import { L, TIP } from '../copy/plainLanguage';
+import { useDashboardFilters } from '../context/DashboardFilterContext';
 
 /* ────────────── helpers ────────────── */
 function toISO(d) {
@@ -120,188 +122,6 @@ const KPI_TOOLTIPS = {
   cancelRate30d: `${L.cancelRate30d}\n${TIP.cancelRate30d}`,
   newSubRevenue: `${L.newSubRevenue}\n${TIP.newSubRevenue}`,
 };
-const REGION_OPTIONS = [
-  { value: 'ALL', label: 'All Regions' },
-  { value: 'US',    label: 'US — United States' },
-  { value: 'CA',    label: 'CA — Canada' },
-  { value: 'AUS',   label: 'AUS — Australia' },
-  { value: 'DUBAI', label: 'DUBAI — United Arab Emirates' },
-  { value: 'HK',    label: 'HK — Hong Kong' },
-  { value: 'INTL',  label: 'INTL — International / Unknown' },
-];
-
-function normalizeRegions(next) {
-  const vals = Array.from(new Set((next || []).map(v => String(v).toUpperCase()))).filter(Boolean);
-  if (vals.length === 0) return ['ALL'];
-  if (vals.includes('ALL')) return ['ALL'];
-  // Only allow known values
-  const allowed = new Set(REGION_OPTIONS.filter(o => o.value !== 'ALL').map(o => o.value));
-  const cleaned = vals.filter(v => allowed.has(v));
-  return cleaned.length ? cleaned : ['ALL'];
-}
-
-function regionsLabel(selected) {
-  const s = normalizeRegions(selected);
-  if (s.length === 1 && s[0] === 'ALL') return 'All Regions';
-  const map = Object.fromEntries(REGION_OPTIONS.map(o => [o.value, o.label]));
-  return s.map(v => map[v] || v).join(' + ');
-}
-
-function regionsParam(selected) {
-  const s = normalizeRegions(selected);
-  return (s.length === 1 && s[0] === 'ALL') ? 'ALL' : s.join(',');
-}
-
-function RegionMultiSelect({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const selected = normalizeRegions(value);
-  const [draft, setDraft] = useState(selected);
-
-  // When opening, take a snapshot so toggles don't immediately trigger reloads.
-  useEffect(() => {
-    if (open) setDraft(normalizeRegions(value));
-  }, [open, value]);
-
-  function toggle(v) {
-    const vv = String(v).toUpperCase();
-    if (vv === 'ALL') {
-      setDraft(['ALL']);
-      return;
-    }
-    if (draft.includes('ALL')) {
-      setDraft([vv]);
-      return;
-    }
-    if (draft.includes(vv)) {
-      setDraft(draft.filter(x => x !== vv));
-    } else {
-      setDraft([...draft, vv]);
-    }
-  }
-
-  return (
-    <div style={{ position:'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        style={{
-          appearance:'none',
-          minWidth: 180,
-          height: 34,
-          padding: '0 34px 0 12px',
-          fontSize: 13,
-          borderRadius: 8,
-          border: '1px solid var(--border)',
-          background: 'var(--bg2)',
-          color: 'var(--text)',
-          cursor: 'pointer',
-          boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
-          fontWeight: 500,
-          textAlign: 'left',
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-        title={regionsLabel(selected)}
-      >
-        {regionsLabel(selected)}
-      </button>
-      <span style={{ position:'absolute', right:11, top:'50%', transform:'translateY(-50%)', pointerEvents:'none', color:'var(--text3)', fontSize:11 }}>▼</span>
-
-      {open && (
-        <>
-          <div
-            onClick={() => setOpen(false)}
-            style={{ position:'fixed', inset:0, zIndex: 500 }}
-          />
-          <div
-            style={{
-              position:'absolute',
-              top: 38,
-              left: 0,
-              zIndex: 600,
-              minWidth: 220,
-              background:'var(--bg2)',
-              border:'1px solid var(--border2)',
-              borderRadius: 10,
-              boxShadow:'var(--shadow)',
-              padding: '8px 8px',
-            }}
-          >
-            {REGION_OPTIONS.map(opt => {
-              const checked = opt.value === 'ALL'
-                ? (draft.length === 1 && draft[0] === 'ALL')
-                : draft.includes(opt.value);
-              return (
-                <label
-                  key={opt.value}
-                  style={{
-                    display:'flex',
-                    alignItems:'center',
-                    gap: 8,
-                    padding: '7px 8px',
-                    borderRadius: 8,
-                    cursor:'pointer',
-                    userSelect:'none',
-                    color:'var(--text2)',
-                    fontSize: 12,
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggle(opt.value)}
-                    style={{ width: 14, height: 14 }}
-                  />
-                  <span style={{ fontWeight: opt.value === 'ALL' ? 600 : 500, color:'var(--text)' }}>{opt.label}</span>
-                </label>
-              );
-            })}
-
-            <div style={{ height: 1, background:'var(--border)', margin:'6px 6px' }} />
-            <div style={{ display:'flex', justifyContent:'space-between', gap: 8, padding:'0 6px 4px' }}>
-              <button
-                type="button"
-                onClick={() => setDraft(['ALL'])}
-                style={{
-                  padding:'6px 10px',
-                  fontSize: 11,
-                  background:'var(--bg3)',
-                  border:'1px solid var(--border2)',
-                  borderRadius: 8,
-                  color:'var(--text2)',
-                  cursor:'pointer',
-                  fontFamily: 'var(--font-body)',
-                }}
-              >
-                Reset
-              </button>
-              <button
-                type="button"
-                onClick={() => { onChange(normalizeRegions(draft)); setOpen(false); }}
-                style={{
-                  padding:'6px 10px',
-                  fontSize: 11,
-                  background:'var(--accent)',
-                  border:'1px solid var(--accent)',
-                  borderRadius: 8,
-                  color:'#fff',
-                  cursor:'pointer',
-                  fontFamily: 'var(--font-body)',
-                  fontWeight: 600,
-                }}
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
 
 /* ────────────── headers (full table) ────────────── */
 const HEADERS = [
@@ -381,11 +201,13 @@ function toAirAttributionTableRow(r) {
 
 /* ────────────── PAGE ────────────── */
 export default function NoblAirPerformancePage() {
-  // Default range: current month-to-date.
-  const [range, setRange] = useState({ start: startOfMonthISO(), end: toISO(new Date()) });
+  const { dateRange, regions, regionsParam, isAllRegions } = useDashboardFilters();
+  const range = dateRange;
+  const regionScoped = !isAllRegions;
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [data, setData] = useState({ rows: [], totals: {}, active_count: null, active_arr: null });
+  const [airBundle, setAirBundle] = useState(null);
   const [subData, setSubData] = useState(null);
   const [airAttr, setAirAttr] = useState({ rows: [], totals: {}, pagination: {}, chart_rows: [], error: null });
   const [airAttrPage, setAirAttrPage] = useState(1);
@@ -399,21 +221,14 @@ export default function NoblAirPerformancePage() {
   const [airAttrTableLoading, setAirAttrTableLoading] = useState(false);
   const [forecastLoading, setForecastLoading] = useState(false);
   const [revenueForecast, setRevenueForecast] = useState(null);
-  const [regions, setRegions] = useState(['ALL']);
   const [activeTab, setActiveTab] = useState('performance');
 
-  const regionParam = useMemo(() => regionsParam(regions), [regions]);
-  const regionScoped = regionParam !== 'ALL';
-
-  const applyPerf = useCallback((perf) => {
-    setData({
-      rows: perf?.rows || [],
-      totals: perf?.totals || {},
-      ttpCohort: perf?.ttp_cohort || {},
-      active_count: perf?.active_count ?? null,
-      active_arr: perf?.active_arr ?? null,
-    });
-  }, []);
+  const data = useMemo(
+    () => resolveAirPerfFromBundle(airBundle, regions, 14, 0) || {
+      rows: [], totals: {}, ttp_cohort: {}, active_count: null, active_arr: null,
+    },
+    [airBundle, regions],
+  );
 
   const applyAirAttr = useCallback((attr, pageNum = 1) => {
     setAirAttr({
@@ -511,11 +326,11 @@ export default function NoblAirPerformancePage() {
 
   const load = useCallback(async () => {
     setError(null);
-    const perfKey = `perf:${range.start}:${range.end}:${regionParam}:14:0`;
-    const cachedPerf = getCachedNoblAirDataVersion() ? getAnalyticsCache(perfKey) : null;
+    const bundleKey = `perf-bundle:${range.start}:${range.end}`;
+    const cachedBundle = getCachedNoblAirDataVersion() ? getAnalyticsCache(bundleKey) : null;
 
-    if (cachedPerf) {
-      applyPerf(cachedPerf);
+    if (cachedBundle) {
+      setAirBundle(cachedBundle);
       setLoading(false);
       loadSecondary(false);
       return;
@@ -525,16 +340,15 @@ export default function NoblAirPerformancePage() {
     setRevenueForecast(null);
     try {
       await getNoblAirDataVersion();
-      const perf = await getNoblAirPerformance(range.start, range.end, 14, 0, regionParam);
-      applyPerf(perf);
-      setAnalyticsCache(perfKey, perf);
+      const bundle = await getNoblAirPerformanceBundle(range.start, range.end);
+      setAirBundle(bundle);
       setLoading(false);
       loadSecondary(true);
     } catch (e) {
       setError(e.message || 'Failed to load');
       setLoading(false);
     }
-  }, [range, regionParam, regionScoped, loadSecondary, applyPerf]);
+  }, [range, loadSecondary]);
 
   const loadForecast = useCallback(async () => {
     if (regionScoped) return;
@@ -591,7 +405,7 @@ export default function NoblAirPerformancePage() {
   const kpi = useMemo(() => {
     const t = data.totals || {};
     const attach = t.attach_rate;
-    const ttpCohort = data.ttpCohort || {};
+    const ttpCohort = data.ttp_cohort || {};
     const ttpAsOf = ttpCohort.ttp_rate_as_of ?? ttpCohort.ttp_rate ?? t.ttp_rate;
     const ttpInPeriod = ttpCohort.ttp_rate_in_period ?? (
       (ttpCohort.mature_in_period || 0) > 0
@@ -691,69 +505,52 @@ export default function NoblAirPerformancePage() {
   );
 
   return (
-    <div>
-      {/* ── Header ── */}
-      <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:20, gap:12, flexWrap:'wrap' }}>
-        <PageIntro title={PAGE.noblAir.title} desc={PAGE.noblAir.desc} accent="#6366f1" />
-        <div style={{ display:'flex', gap:10, alignItems:'center', flexWrap:'wrap' }}>
-          <RegionMultiSelect value={regions} onChange={(next) => setRegions(normalizeRegions(next))} />
-          <DateRangePicker
-            start={range.start}
-            end={range.end}
-            onChange={setRange}
-            scope="nobl-air-performance"
-          />
-        </div>
-      </div>
-
-      <div style={{ display:'flex', gap:8, marginBottom:18, borderBottom:'1px solid var(--border)', paddingBottom:8 }}>
-        {[
-          ['performance', 'Results'],
-          ['forecast', 'Forecast'],
-        ].map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setActiveTab(key)}
-            style={{
-              border:'1px solid var(--border2)',
-              background: activeTab === key ? 'var(--accent)' : 'var(--bg2)',
-              color: activeTab === key ? '#fff' : 'var(--text2)',
-              borderRadius: 999,
-              padding:'8px 14px',
-              fontSize:12,
-              fontWeight:700,
-              cursor:'pointer',
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className="page-stack">
+      <PageIntro
+        actions={(
+          <div className="seg">
+            {[
+              ['performance', 'Results'],
+              ['forecast', 'Forecast'],
+            ].map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setActiveTab(key)}
+                className={`seg__btn${activeTab === key ? ' seg__btn--active' : ''}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+      />
 
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
           {activeTab === 'performance' && (
           <>
           {/* ── Top KPI row ── */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label={L.airOrders} value={fmtNum(kpi.airOrders)} fullValue={fmtFullNum(kpi.airOrders)} color="nobl" tooltip={KPI_TOOLTIPS.airOrders} />
-            <KpiCard label={L.attachRate} value={fmtPct(kpi.attachRate || 0)} fullValue={fmtPct(kpi.attachRate || 0)} color="teal" tooltip={KPI_TOOLTIPS.attachRate} sub="selected dates" />
-            <KpiCard label={L.ttpRateAsOf} value={fmtPct(kpi.ttpRateAsOf || 0)} fullValue={fmtPct(kpi.ttpRateAsOf || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRateAsOf} sub="as of end date" />
-            <KpiCard label={L.ttpRateInPeriod} value={fmtPct(kpi.ttpRateInPeriod || 0)} fullValue={fmtPct(kpi.ttpRateInPeriod || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRateInPeriod} sub="trial ended in range" />
-            <KpiCard label={L.activationRateAsOf} value={fmtPct(kpi.activationRateAsOf || 0)} fullValue={fmtPct(kpi.activationRateAsOf || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRateAsOf} sub="as of end date" />
-            <KpiCard label={L.activationRateInPeriod} value={fmtPct(kpi.activationRateInPeriod || 0)} fullValue={fmtPct(kpi.activationRateInPeriod || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRateInPeriod} sub="trial ended in range" />
-            <KpiCard label={L.combinedNetRevenue} value={fmt$(kpi.combinedNetRevenue)} fullValue={fmtFull$(kpi.combinedNetRevenue)} color="blue" tooltip={KPI_TOOLTIPS.combinedNetRevenue} />
-            <KpiCard label={L.rebillRevenue} value={fmt$(kpi.rebillRevenue)} fullValue={fmtFull$(kpi.rebillRevenue)} color="warn" tooltip={KPI_TOOLTIPS.rebillRevenue} />
-            {!regionScoped && <KpiCard label={L.activeSubs} value={fmtNum(kpi.activeSubs)} fullValue={fmtFullNum(kpi.activeSubs)} color="green" tooltip={KPI_TOOLTIPS.activeSubscribers} />}
-            {!regionScoped && <KpiCard label="Est. yearly sub value" value={fmt$(kpi.activeArr)} fullValue={fmtFull$(kpi.activeArr)} color="purple" tooltip={KPI_TOOLTIPS.activeArr} />}
+          <div className="section">
+            <div className="section__title">HEADLINE METRICS</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(170px, 1fr))', gap:12 }}>
+              <KpiCard label={L.airOrders} value={fmtNum(kpi.airOrders)} fullValue={fmtFullNum(kpi.airOrders)} color="nobl" tooltip={KPI_TOOLTIPS.airOrders} />
+              <KpiCard label={L.attachRate} value={fmtPct(kpi.attachRate || 0)} fullValue={fmtPct(kpi.attachRate || 0)} color="teal" tooltip={KPI_TOOLTIPS.attachRate} sub="selected dates" />
+              <KpiCard label={L.ttpRateAsOf} value={fmtPct(kpi.ttpRateAsOf || 0)} fullValue={fmtPct(kpi.ttpRateAsOf || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRateAsOf} sub="as of end date" />
+              <KpiCard label={L.ttpRateInPeriod} value={fmtPct(kpi.ttpRateInPeriod || 0)} fullValue={fmtPct(kpi.ttpRateInPeriod || 0)} color="purple" tooltip={KPI_TOOLTIPS.ttpRateInPeriod} sub="trial ended in range" />
+              <KpiCard label={L.activationRateAsOf} value={fmtPct(kpi.activationRateAsOf || 0)} fullValue={fmtPct(kpi.activationRateAsOf || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRateAsOf} sub="as of end date" />
+              <KpiCard label={L.activationRateInPeriod} value={fmtPct(kpi.activationRateInPeriod || 0)} fullValue={fmtPct(kpi.activationRateInPeriod || 0)} color="green" tooltip={KPI_TOOLTIPS.activationRateInPeriod} sub="trial ended in range" />
+              <KpiCard label={L.combinedNetRevenue} value={fmt$(kpi.combinedNetRevenue)} fullValue={fmtFull$(kpi.combinedNetRevenue)} color="blue" tooltip={KPI_TOOLTIPS.combinedNetRevenue} />
+              <KpiCard label={L.rebillRevenue} value={fmt$(kpi.rebillRevenue)} fullValue={fmtFull$(kpi.rebillRevenue)} color="warn" tooltip={KPI_TOOLTIPS.rebillRevenue} />
+              {!regionScoped && <KpiCard label={L.activeSubs} value={fmtNum(kpi.activeSubs)} fullValue={fmtFullNum(kpi.activeSubs)} color="green" tooltip={KPI_TOOLTIPS.activeSubscribers} />}
+              {!regionScoped && <KpiCard label="Est. yearly sub value" value={fmt$(kpi.activeArr)} fullValue={fmtFull$(kpi.activeArr)} color="purple" tooltip={KPI_TOOLTIPS.activeArr} />}
+            </div>
           </div>
 
           <div style={{
             fontSize: 12,
             color: 'var(--text3)',
             lineHeight: 1.5,
-            marginBottom: 14,
             padding: '10px 14px',
             borderRadius: 8,
             border: '1px solid var(--border)',
@@ -765,16 +562,19 @@ export default function NoblAirPerformancePage() {
           </div>
 
           {/* ── Secondary KPI row ── */}
-          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12, marginBottom:20 }}>
-            <KpiCard label={L.eligibleOrders} value={fmtNum(kpi.eligibleOrders)} fullValue={fmtFullNum(kpi.eligibleOrders)} color="text" tooltip={KPI_TOOLTIPS.eligibleOrders} />
-            <KpiCard label={L.paidAir} value={fmtNum(kpi.paidAirOrders)} fullValue={fmtFullNum(kpi.paidAirOrders)} color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
-            <KpiCard label={L.zeroAir} value={fmtNum(kpi.zeroAirOrders)} fullValue={fmtFullNum(kpi.zeroAirOrders)} color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
-            <KpiCard label={L.matureSubsAsOf} value={fmtNum(kpi.matureSubs)} fullValue={fmtFullNum(kpi.matureSubs)} color="purple" tooltip={KPI_TOOLTIPS.matureSubs} sub="as of end date" />
-            <KpiCard label={L.matureInPeriod} value={fmtNum(kpi.matureInPeriod)} fullValue={fmtFullNum(kpi.matureInPeriod)} color="purple" tooltip={KPI_TOOLTIPS.matureInPeriod} sub="trial ended in range" />
-            <KpiCard label={L.paidConversions} value={fmtNum(kpi.convertedMatureSubs)} fullValue={fmtFullNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.paidConversions} sub="paid · in range" />
-            <KpiCard label={L.cancels30d} value={fmtNum(kpi.cancelled30d)} fullValue={fmtFullNum(kpi.cancelled30d)} color="red" tooltip={KPI_TOOLTIPS.cancels30d} />
-            <KpiCard label={L.cancelRate30d} value={fmtPct(kpi.cancelRate30d || 0)} fullValue={fmtPct(kpi.cancelRate30d || 0)} color="red" tooltip={KPI_TOOLTIPS.cancelRate30d} />
-            <KpiCard label={L.newSubRevenue} value={fmt$(kpi.newSubRevenue)} fullValue={fmtFull$(kpi.newSubRevenue)} color="blue" tooltip={KPI_TOOLTIPS.newSubRevenue} />
+          <div className="section">
+            <div className="section__title">ORDERS, TRIALS &amp; CANCELS</div>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:12 }}>
+              <KpiCard label={L.eligibleOrders} value={fmtNum(kpi.eligibleOrders)} fullValue={fmtFullNum(kpi.eligibleOrders)} color="text" tooltip={KPI_TOOLTIPS.eligibleOrders} />
+              <KpiCard label={L.paidAir} value={fmtNum(kpi.paidAirOrders)} fullValue={fmtFullNum(kpi.paidAirOrders)} color="nobl" tooltip={KPI_TOOLTIPS.paidAirOrders} />
+              <KpiCard label={L.zeroAir} value={fmtNum(kpi.zeroAirOrders)} fullValue={fmtFullNum(kpi.zeroAirOrders)} color="warn" tooltip={KPI_TOOLTIPS.zeroAirOrders} />
+              <KpiCard label={L.matureSubsAsOf} value={fmtNum(kpi.matureSubs)} fullValue={fmtFullNum(kpi.matureSubs)} color="purple" tooltip={KPI_TOOLTIPS.matureSubs} sub="as of end date" />
+              <KpiCard label={L.matureInPeriod} value={fmtNum(kpi.matureInPeriod)} fullValue={fmtFullNum(kpi.matureInPeriod)} color="purple" tooltip={KPI_TOOLTIPS.matureInPeriod} sub="trial ended in range" />
+              <KpiCard label={L.paidConversions} value={fmtNum(kpi.convertedMatureSubs)} fullValue={fmtFullNum(kpi.convertedMatureSubs)} color="green" tooltip={KPI_TOOLTIPS.paidConversions} sub="paid · in range" />
+              <KpiCard label={L.cancels30d} value={fmtNum(kpi.cancelled30d)} fullValue={fmtFullNum(kpi.cancelled30d)} color="red" tooltip={KPI_TOOLTIPS.cancels30d} />
+              <KpiCard label={L.cancelRate30d} value={fmtPct(kpi.cancelRate30d || 0)} fullValue={fmtPct(kpi.cancelRate30d || 0)} color="red" tooltip={KPI_TOOLTIPS.cancelRate30d} />
+              <KpiCard label={L.newSubRevenue} value={fmt$(kpi.newSubRevenue)} fullValue={fmtFull$(kpi.newSubRevenue)} color="blue" tooltip={KPI_TOOLTIPS.newSubRevenue} />
+            </div>
           </div>
 
           {/* ── Row 1: revenue trend + attach/TTP trend ── */}
@@ -961,7 +761,7 @@ export default function NoblAirPerformancePage() {
               headers={HEADERS}
               rows={tableRows}
               keyField="_date"
-              resetDeps={[range.start, range.end, regionParam]}
+              resetDeps={[range.start, range.end, regionsParam]}
               defaultSortField={L.date}
               defaultSortDir="desc"
             />
@@ -1167,11 +967,9 @@ export default function NoblAirPerformancePage() {
 /* ────────────── helper components ────────────── */
 function Card({ title, subtitle, children, style }) {
   return (
-    <div style={{ background:'var(--bg2)', border:'1px solid var(--border)', borderRadius:12, padding:20, ...style }}>
-      <div style={{ fontSize:14, fontWeight:700, marginBottom: subtitle ? 4 : 14 }}>{title}</div>
-      {subtitle && <div style={{ fontSize:11.5, color:'var(--text3)', marginBottom:14 }}>{subtitle}</div>}
+    <ChartPanel title={title} subtitle={subtitle} style={style}>
       {children}
-    </div>
+    </ChartPanel>
   );
 }
 
@@ -1201,10 +999,7 @@ function ErrorBox({ msg, onRetry }) {
   return (
     <div style={{ textAlign:'center', padding:'40px 0' }}>
       <div style={{ color:'var(--danger)', marginBottom:12, fontSize:14 }}>Failed to load: {msg}</div>
-      <button
-        onClick={onRetry}
-        style={{ padding:'8px 20px', background:'var(--accent)', color:'#fff', border:'none', borderRadius:8, cursor:'pointer', fontWeight:600 }}
-      >
+      <button onClick={onRetry} className="btn btn--primary">
         Retry
       </button>
     </div>

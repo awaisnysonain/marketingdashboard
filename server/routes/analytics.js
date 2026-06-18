@@ -5,6 +5,7 @@ const { METRICS: REVENUE_METRICS } = require('../config/revenueMetrics');
 const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
 const { metaAdsDailySourceSql } = require('../etl/metaAdsSync');
 const { getNoblAirDataVersion } = require('../utils/noblAirDataVersion');
+const { getDataVersion } = require('../utils/dataVersion');
 const { withResponseCache } = require('../utils/responseCache');
 
 const metaAirWarmInFlight = new Set();
@@ -1384,6 +1385,8 @@ function buildNoblAirDailyForecast(storeDailyRows, airActualByDate, airForecast)
 router.get('/dashboard-forecast', async (req, res) => {
   try {
     const requestedAsOf = req.query.asOf ? String(req.query.asOf).slice(0, 10) : null;
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('forecast', `df:${requestedAsOf || 'latest'}`, version, async () => {
     const nobl = await loadForecastBrand('NOBL', requestedAsOf);
     const airAsOf = await capNoblAirEndDate(nobl.as_of);
     const ttpCohort = await loadNoblAirTtpAsOfEnd(airAsOf, null);
@@ -1393,7 +1396,7 @@ router.get('/dashboard-forecast', async (req, res) => {
     const airActuals = await loadNoblAirActualDailyMap('2026-03-01', '2026-12-31');
     const airDaily = buildNoblAirDailyForecast(storeDaily.filter(r => r.date >= '2026-03-01'), airActuals, air);
 
-    res.json({
+    return {
       as_of: nobl.as_of,
       air_as_of: airAsOf,
       data_source: 'Database first: nobl_brand_tw_summary_daily + nobl_air_daily. Google Sheets are not used for dashboard values.',
@@ -1416,7 +1419,9 @@ router.get('/dashboard-forecast', async (req, res) => {
         checks: ['actuals come from database tables first', 'future rows use weighted forecast model', 'missing completed days are shown as Missing Actual instead of silently using sheet values'],
         database_tables: ['nobl_brand_tw_summary_daily', 'nobl_air_daily'],
       },
+    };
     });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /dashboard-forecast]', e.message);
     res.status(500).json({ error: e.message });
@@ -1439,6 +1444,8 @@ router.get('/forecast-engine', async (req, res) => {
   try {
     const brandParam = String(req.query.brand || 'ALL').toUpperCase();
     const asOf = req.query.asOf ? String(req.query.asOf).slice(0, 10) : null;
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('forecast', `fe:${brandParam}:${asOf || 'latest'}`, version, async () => {
     const brands = brandParam === 'ALL'
       ? ['NOBL', 'FLO']
       : brandParam.split(',').map(s => s.trim()).filter(b => FORECAST_BRANDS[b]);
@@ -1457,7 +1464,7 @@ router.get('/forecast-engine', async (req, res) => {
     combined.variance = combined.plan_revenue > 0 ? combined.projected_revenue - combined.plan_revenue : null;
     combined.variance_pct = combined.plan_revenue > 0 ? combined.variance / combined.plan_revenue : null;
     combined.status = forecastStatus(combined.variance_pct);
-    res.json({
+    return {
       as_of: results.map(r => r.as_of).sort()[0] || asOf,
       brands: results,
       combined,
@@ -1466,7 +1473,9 @@ router.get('/forecast-engine', async (req, res) => {
         factors: ['day-of-week weights', 'sale calendar and strength tier', 'monthly seasonality', 'MER targets', 'manufactured drop windows', 'regional pacing'],
         redlines: ['no flat rolling average', 'drop windows remain discrete', 'BFCM is model anchored', 'full-year below P25 triggers review'],
       },
+    };
     });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /forecast-engine]', e.message);
     res.status(500).json({ error: e.message });
@@ -1490,6 +1499,8 @@ async function clampNoblAirStartDate(start) {
 router.get('/overview', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('overview', `ov:${start}:${end}`, version, async () => {
     const [noblRes, floRes, subsRes] = await Promise.all([
       pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -1599,7 +1610,9 @@ router.get('/overview', async (req, res) => {
     totals.flo_mer = totals.flo_spend > 0
       ? parseFloat((totals.flo_revenue / totals.flo_spend).toFixed(4)) : 0;
 
-    res.json({ rows, totals, revenue_metrics: REVENUE_METRICS });
+    return { rows, totals, revenue_metrics: REVENUE_METRICS };
+    });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /overview]', e.message);
     res.status(500).json({ error: e.message });
@@ -1610,6 +1623,8 @@ router.get('/overview', async (req, res) => {
 router.get('/nobl/topline', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('topline', `nt:${start}:${end}`, version, async () => {
     const [summaryRes, channelsRes, geoRes, subsRes] = await Promise.all([
       pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -1638,13 +1653,15 @@ router.get('/nobl/topline', async (req, res) => {
       ),
       pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
     ]);
-    res.json({
+    return {
       summary: enrichSummaryRows(fmtRows(summaryRes.rows)),
       channels: enrichChannelRows(fmtRows(channelsRes.rows)),
       geo: enrichGeoRows(fmtRows(geoRes.rows)),
       subs: fmtRows(subsRes.rows),
       revenue_metrics: REVENUE_METRICS,
+    };
     });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /nobl/topline]', e.message);
     res.status(500).json({ error: e.message });
@@ -1655,6 +1672,8 @@ router.get('/nobl/topline', async (req, res) => {
 router.get('/flo/topline', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('topline', `ft:${start}:${end}`, version, async () => {
     const [summaryRes, channelsRes, geoRes, productsRes] = await Promise.all([
       pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -1690,13 +1709,15 @@ router.get('/flo/topline', async (req, res) => {
         [start, end]
       ),
     ]);
-    res.json({
+    return {
       summary: enrichSummaryRows(fmtRows(summaryRes.rows)),
       channels: enrichChannelRows(fmtRows(channelsRes.rows)),
       geo: enrichGeoRows(fmtRows(geoRes.rows)),
       products: fmtRows(productsRes.rows),
       revenue_metrics: REVENUE_METRICS,
+    };
     });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /flo/topline]', e.message);
     res.status(500).json({ error: e.message });
@@ -1710,6 +1731,8 @@ router.get('/channels', async (req, res) => {
   const sortBy = String(req.query.sortBy || '').trim();
   const sortDir = (String(req.query.dir || 'asc').toLowerCase() === 'desc') ? 'desc' : 'asc';
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('channels', `ch:${brand}:${start}:${end}:${sortBy}:${sortDir}`, version, async () => {
     let rows = [];
     if (brand === 'NOBL') {
       const r = await pgQuery(
@@ -1767,7 +1790,9 @@ router.get('/channels', async (req, res) => {
         return sortDir === 'desc' ? -cmp : cmp;
       });
     }
-    res.json({ rows });
+    return { rows };
+    });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /channels]', e.message);
     res.status(500).json({ error: e.message });
@@ -1778,6 +1803,8 @@ router.get('/channels', async (req, res) => {
 router.get('/nobl/subscriptions', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('subs', `ns:${start}:${end}`, version, async () => {
     const [dailyRes, summaryRes] = await Promise.all([
       pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -1835,7 +1862,7 @@ router.get('/nobl/subscriptions', async (req, res) => {
       ),
     ]);
     const s = summaryRes.rows[0] || {};
-    res.json({
+    return {
       daily: fmtRows(dailyRes.rows),
       summary: {
         total: parseInt(s.total || 0),
@@ -1846,7 +1873,9 @@ router.get('/nobl/subscriptions', async (req, res) => {
         converted: parseInt(s.converted || 0),
         avg_order_amount: parseFloat(s.avg_order_amount || 0),
       },
+    };
     });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /nobl/subscriptions]', e.message);
     res.status(500).json({ error: e.message });
@@ -2031,13 +2060,16 @@ router.get('/subscriptions', async (req, res) => {
   if (brands.length === 0) brands.push('NOBL');
 
   try {
-    if (brands.length === 1) {
-      const r = brands[0] === 'FLO' ? await fetchFloSubs(start, end) : await fetchNoblSubs(start, end);
-      return res.json(r);
-    }
-    const fetchers = brands.map(b => b === 'FLO' ? fetchFloSubs(start, end) : fetchNoblSubs(start, end));
-    const results = await Promise.all(fetchers);
-    return res.json(mergeBrandSubs(results));
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('subs', `subs:${brands.join(',')}:${start}:${end}`, version, async () => {
+      if (brands.length === 1) {
+        return brands[0] === 'FLO' ? await fetchFloSubs(start, end) : await fetchNoblSubs(start, end);
+      }
+      const fetchers = brands.map(b => b === 'FLO' ? fetchFloSubs(start, end) : fetchNoblSubs(start, end));
+      const results = await Promise.all(fetchers);
+      return mergeBrandSubs(results);
+    });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /subscriptions]', e.message);
     res.status(500).json({ error: e.message });
@@ -2059,6 +2091,31 @@ router.get('/nobl/data-version', async (req, res) => {
     });
   } catch (e) {
     console.error('[Analytics /nobl/data-version]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /data-bounds — earliest & latest dates that actually have data
+router.get('/data-bounds', async (req, res) => {
+  try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('bounds', 'data-bounds', version, async () => {
+      const r = await pgQuery(`
+        SELECT
+          LEAST(
+            (SELECT MIN(DATE(date AT TIME ZONE 'UTC')) FROM nobl_brand_tw_summary_daily),
+            (SELECT MIN(DATE(date AT TIME ZONE 'UTC')) FROM flo_brand_tw_summary_daily)
+          )::text AS earliest,
+          GREATEST(
+            (SELECT MAX(DATE(date AT TIME ZONE 'UTC')) FROM nobl_brand_tw_summary_daily),
+            (SELECT MAX(DATE(date AT TIME ZONE 'UTC')) FROM flo_brand_tw_summary_daily)
+          )::text AS latest
+      `);
+      return r.rows[0] || {};
+    });
+    res.json(body);
+  } catch (e) {
+    console.error('[Analytics /data-bounds]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2260,6 +2317,81 @@ router.get('/nobl/air-performance', async (req, res) => {
     res.json(body);
   } catch (e) {
     console.error('[Analytics /nobl/air-performance]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+const AIR_BASE_REGION_KEYS = ['US', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL'];
+
+// GET /nobl/air-performance-bundle — global + base region dailies in one round trip (client filters by region)
+router.get('/nobl/air-performance-bundle', async (req, res) => {
+  const { start, end } = getDefaultDates(req);
+  try {
+    const { version } = await getNoblAirDataVersion();
+    const cacheKey = `perf-bundle:${start}:${end}`;
+    const { body, hit } = await withResponseCache('nobl-air', cacheKey, version, async () => {
+      const [effectiveEnd, effectiveStart] = await Promise.all([
+        capNoblAirEndDate(end),
+        clampNoblAirStartDate(start),
+      ]);
+
+      const [globalDailyRes, ttpGlobal, activeSubsRes, ...regionDailyLists] = await Promise.all([
+        pgQuery(
+          `SELECT
+             TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+             total_orders, air_orders, attach_rate, ttp_rate, activation_rate,
+             mature_count, converted_count, cancelled_30d_count, cancel_rate_30d,
+             zero_air_orders, paid_air_orders, rebill_orders, same_day_cancels,
+             tag_gross, tag_discounts, tag_net_sales,
+             sub_gross, sub_discounts, sub_net_sales,
+             rebill_revenue, new_sub_revenue,
+             combined_gross, combined_net_sales,
+             tag_refunds, sub_refunds, combined_net_revenue,
+             new_49, new_79, new_89, new_99, new_109, new_119, new_129, new_139, new_149, new_159,
+             rebill_49, rebill_79, rebill_89, rebill_99, rebill_109, rebill_119, rebill_129, rebill_139, rebill_149, rebill_159
+           FROM nobl_air_daily
+           WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+           ORDER BY date ASC`,
+          [effectiveStart, effectiveEnd]
+        ),
+        loadNoblAirTtpCohort(effectiveStart, effectiveEnd, null),
+        pgQuery(`
+          SELECT
+            COALESCE(SUM(contract_amount), 0)::numeric(14,2) AS active_arr,
+            COUNT(*)::int AS active_count
+          FROM nobl_air_subscribers
+          WHERE LOWER(TRIM(status)) = 'active'
+        `),
+        ...AIR_BASE_REGION_KEYS.map((k) =>
+          loadNoblAirRegionalCachedDaily(effectiveStart, effectiveEnd, k)
+        ),
+      ]);
+
+      const activeSubsRow = activeSubsRes.rows[0] || {};
+      const regions = {};
+      AIR_BASE_REGION_KEYS.forEach((k, i) => {
+        regions[k] = { daily: regionDailyLists[i] };
+      });
+
+      return {
+        global: {
+          daily: fmtRows(globalDailyRes.rows),
+          ttp_cohort: ttpGlobal,
+        },
+        regions,
+        active_count: Number(activeSubsRow.active_count || 0),
+        active_arr: Number(activeSubsRow.active_arr || 0),
+        data_start: effectiveStart,
+        data_end: effectiveEnd,
+        requested_start: start,
+        requested_end: end,
+      };
+    });
+    res.setHeader('X-Data-Version', version);
+    res.setHeader('X-Cache', hit ? 'HIT' : 'MISS');
+    res.json(body);
+  } catch (e) {
+    console.error('[Analytics /nobl/air-performance-bundle]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -2639,6 +2771,8 @@ router.get('/meta/ads', async (req, res) => {
         CASE WHEN SUM(impressions) > 0 THEN SUM(spend) * 1000 / SUM(impressions) ELSE NULL END AS cpm`;
 
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('meta', `ma:${brand}:${level}:${start}:${end}:${page}:${pageSize}:${sortSqlCol}:${sortDir}:${searchPattern || ''}:${searchColumn || ''}`, version, async () => {
     const totalsRes = await pgQuery(`
       SELECT
         SUM(spend)::numeric(14,2) AS spend,
@@ -2722,7 +2856,7 @@ router.get('/meta/ads', async (req, res) => {
     totals.cpm = totals.impressions > 0 ? totals.spend * 1000 / totals.impressions : null;
 
     const rows = fmtRows(r.rows);
-    res.json({
+    return {
       rows,
       chart_rows: fmtRows(chartRes.rows),
       totals,
@@ -2732,7 +2866,9 @@ router.get('/meta/ads', async (req, res) => {
       brand,
       start,
       end,
+    };
     });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /meta/ads]', e.message);
     res.status(500).json({ error: e.message });
@@ -3401,6 +3537,8 @@ router.get('/nobl/air-subscribers', async (req, res) => {
 router.get('/flo/products', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('flo-products', `fp:${start}:${end}`, version, async () => {
     const r = await pgQuery(
       `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
               brand, product_line, spend, new_cust_orders, revenue,
@@ -3409,7 +3547,9 @@ router.get('/flo/products', async (req, res) => {
        WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date, product_line`,
       [start, end]
     );
-    res.json({ rows: fmtRows(r.rows) });
+    return { rows: fmtRows(r.rows) };
+    });
+    res.json(body);
   } catch (e) {
     console.error('[Analytics /flo/products]', e.message);
     res.status(500).json({ error: e.message });

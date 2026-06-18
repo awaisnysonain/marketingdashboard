@@ -39,46 +39,16 @@ const APPLICATION_TABS = [
 /* ── Confirm delete dialog ─────────────────────────────────────────── */
 function ConfirmDelete({ label, onConfirm, onCancel }) {
   return (
-    <div style={{
-      position: 'fixed', inset: 0, zIndex: 1000,
-      background: 'rgba(0,0,0,0.5)',
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-    }} onClick={onCancel}>
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          background: 'var(--bg2)', border: '1px solid var(--border2)',
-          borderRadius: 'var(--radius-lg)', padding: '22px 24px',
-          width: 320, boxShadow: 'var(--shadow)',
-        }}
-      >
-        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>
-          Remove dashboard
-        </div>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,16,10,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onCancel}>
+      <div onClick={e => e.stopPropagation()} className="card" style={{ padding: '22px 24px', width: 320, boxShadow: 'var(--shadow)' }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>Remove dashboard</div>
         <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6, marginBottom: 20 }}>
           Remove <strong>"{label}"</strong> from the sidebar? The saved config will be deleted.
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button
-            onClick={onCancel}
-            style={{
-              padding: '6px 14px', fontSize: 12, fontWeight: 500,
-              background: 'none', border: '1px solid var(--border2)',
-              borderRadius: 'var(--radius)', color: 'var(--text2)', cursor: 'pointer',
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            style={{
-              padding: '6px 14px', fontSize: 12, fontWeight: 600,
-              background: 'var(--danger)', border: '1px solid var(--danger)',
-              borderRadius: 'var(--radius)', color: '#fff', cursor: 'pointer',
-            }}
-          >
-            Remove
-          </button>
+          <button onClick={onCancel} className="btn btn--sm">Cancel</button>
+          <button onClick={onConfirm} className="btn btn--sm" style={{ background: 'var(--danger)', borderColor: 'var(--danger)', color: '#fff' }}>Remove</button>
         </div>
       </div>
     </div>
@@ -89,20 +59,11 @@ function ConfirmDelete({ label, onConfirm, onCancel }) {
 function DashboardMenu({ onRename, onDuplicate, onShare, onDelete, onClose }) {
   return (
     <>
-      {/* Click-outside catcher */}
-      <div
-        onClick={onClose}
-        style={{ position: 'fixed', inset: 0, zIndex: 999 }}
-      />
-      <div
-        onClick={e => e.stopPropagation()}
-        style={{
-          position: 'absolute', right: 6, top: '100%', marginTop: 2, zIndex: 1000,
-          background: 'var(--bg2)', border: '1px solid var(--border2)',
-          borderRadius: 'var(--radius)', boxShadow: 'var(--shadow)',
-          minWidth: 160, padding: '4px 0',
-        }}
-      >
+      <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
+      <div onClick={e => e.stopPropagation()} className="card" style={{
+        position: 'absolute', right: 6, top: '100%', marginTop: 2, zIndex: 1000,
+        minWidth: 160, padding: '4px 0', boxShadow: 'var(--shadow)',
+      }}>
         {[
           { label: 'Rename',    icon: '✎', action: onRename },
           { label: 'Duplicate', icon: '⎘', action: onDuplicate },
@@ -114,12 +75,10 @@ function DashboardMenu({ onRename, onDuplicate, onShare, onDelete, onClose }) {
             <button
               onClick={() => { onClose(); item.action?.(); }}
               style={{
-                width: '100%', textAlign: 'left',
-                padding: '7px 12px', fontSize: 12,
-                background: 'none', border: 'none',
+                width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 12,
+                background: 'none', border: 'none', cursor: 'pointer',
                 color: item.danger ? 'var(--danger)' : 'var(--text2)',
-                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-                fontFamily: 'var(--font-body)',
+                display: 'flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-body)',
               }}
               onMouseEnter={e => e.currentTarget.style.background = 'var(--bg3)'}
               onMouseLeave={e => e.currentTarget.style.background = 'none'}
@@ -138,29 +97,20 @@ function DashboardMenu({ onRename, onDuplicate, onShare, onDelete, onClose }) {
 function RenameModal({ initial, onSave, onCancel }) {
   const [val, setVal] = useState(initial || '');
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)',
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,16,10,0.45)',
         display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onCancel}>
-      <div onClick={e => e.stopPropagation()} style={{
-          background: 'var(--bg2)', border: '1px solid var(--border2)',
-          borderRadius: 'var(--radius-lg)', padding: '22px 24px', width: 360 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>Rename dashboard</div>
+      <div onClick={e => e.stopPropagation()} className="card" style={{ padding: '22px 24px', width: 360 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 12 }}>Rename dashboard</div>
         <input
           autoFocus value={val} onChange={e => setVal(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter') onSave(val.trim()); }}
-          style={{ width: '100%', padding: '8px 10px', fontSize: 13,
-                   background: 'var(--bg3)', border: '1px solid var(--border2)',
-                   borderRadius: 'var(--radius)', color: 'var(--text)',
+          style={{ width: '100%', padding: '9px 11px', fontSize: 13, background: 'var(--bg3)',
+                   border: '1px solid var(--border2)', borderRadius: 'var(--radius)', color: 'var(--text)',
                    marginBottom: 18, fontFamily: 'var(--font-body)' }}
         />
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <button onClick={onCancel} style={{ padding: '6px 14px', fontSize: 12,
-              background: 'none', border: '1px solid var(--border2)',
-              borderRadius: 'var(--radius)', color: 'var(--text2)', cursor: 'pointer' }}>Cancel</button>
-          <button onClick={() => onSave(val.trim())} disabled={!val.trim()} style={{
-              padding: '6px 14px', fontSize: 12, fontWeight: 600,
-              background: 'var(--accent)', border: '1px solid var(--accent)',
-              borderRadius: 'var(--radius)', color: '#fff', cursor: 'pointer',
-              opacity: val.trim() ? 1 : 0.5 }}>Save</button>
+          <button onClick={onCancel} className="btn btn--sm">Cancel</button>
+          <button onClick={() => onSave(val.trim())} disabled={!val.trim()} className="btn btn--sm btn--primary">Save</button>
         </div>
       </div>
     </div>
@@ -168,26 +118,20 @@ function RenameModal({ initial, onSave, onCancel }) {
 }
 
 function ShareModal({ label, onCancel }) {
-  // Placeholder UI — full sharing will land in a follow-up session.
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.5)',
+    <div style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(20,16,10,0.45)',
         display: 'flex', alignItems: 'center', justifyContent: 'center' }} onClick={onCancel}>
-      <div onClick={e => e.stopPropagation()} style={{
-          background: 'var(--bg2)', border: '1px solid var(--border2)',
-          borderRadius: 'var(--radius-lg)', padding: '22px 24px', width: 420 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Share "{label}"</div>
+      <div onClick={e => e.stopPropagation()} className="card" style={{ padding: '22px 24px', width: 420 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 6 }}>Share "{label}"</div>
         <div style={{ fontSize: 11.5, color: 'var(--text3)', lineHeight: 1.6, marginBottom: 16 }}>
           Sharing with other team members (Google Docs–style permissions + access requests)
           is coming in the next update. For now, dashboards are private to your account.
         </div>
-        <input placeholder="email@nysonian.com" disabled style={{ width: '100%',
-            padding: '8px 10px', fontSize: 13, background: 'var(--bg3)',
-            border: '1px solid var(--border2)', borderRadius: 'var(--radius)',
+        <input placeholder="email@nysonian.com" disabled style={{ width: '100%', padding: '9px 11px', fontSize: 13,
+            background: 'var(--bg3)', border: '1px solid var(--border2)', borderRadius: 'var(--radius)',
             color: 'var(--text3)', marginBottom: 16, fontFamily: 'var(--font-body)' }} />
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <button onClick={onCancel} style={{ padding: '6px 14px', fontSize: 12,
-              background: 'var(--bg3)', border: '1px solid var(--border2)',
-              borderRadius: 'var(--radius)', color: 'var(--text2)', cursor: 'pointer' }}>Close</button>
+          <button onClick={onCancel} className="btn btn--sm">Close</button>
         </div>
       </div>
     </div>
@@ -206,79 +150,30 @@ function NavItem({ id, label, icon: IconComp, title: hint, active, collapsed, on
   return (
     <>
       {confirmId && (
-        <ConfirmDelete
-          label={label}
+        <ConfirmDelete label={label}
           onConfirm={() => { setConfirmId(null); onDelete?.(id); }}
-          onCancel={() => setConfirmId(null)}
-        />
+          onCancel={() => setConfirmId(null)} />
       )}
       {renaming && (
-        <RenameModal
-          initial={label}
+        <RenameModal initial={label}
           onSave={(newLabel) => { setRenaming(false); if (newLabel && newLabel !== label) onRename?.(id, newLabel); }}
-          onCancel={() => setRenaming(false)}
-        />
+          onCancel={() => setRenaming(false)} />
       )}
-      {sharing && (
-        <ShareModal label={label} onCancel={() => setSharing(false)} />
-      )}
-      <div
-        style={{ position: 'relative' }}
-        onMouseEnter={() => setHov(true)}
-        onMouseLeave={() => setHov(false)}
-      >
+      {sharing && <ShareModal label={label} onCancel={() => setSharing(false)} />}
+
+      <div style={{ position: 'relative' }} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}>
         <button
           onClick={() => onClick(id)}
           title={collapsed ? label : (hint || label)}
-          style={{
-            width: '100%',
-            display: 'flex', alignItems: 'center',
-            gap: collapsed ? 0 : 8,
-            padding: collapsed ? '8px 0' : '7px 10px',
-            justifyContent: collapsed ? 'center' : 'flex-start',
-            background: isAct ? 'var(--accent-dim)' : hov ? 'var(--bg3)' : 'transparent',
-            border: 'none',
-            borderLeft: `2px solid ${isAct ? 'var(--accent)' : 'transparent'}`,
-            borderRadius: '0 var(--radius) var(--radius) 0',
-            color: isAct ? 'var(--accent)' : hov ? 'var(--text)' : 'var(--text2)',
-            fontSize: 12, fontWeight: isAct ? 600 : 400,
-            cursor: 'pointer',
-            transition: 'all .12s',
-            fontFamily: 'var(--font-body)',
-            textAlign: 'left',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            paddingLeft: collapsed ? 0 : (isAct ? 8 : 10),
-          }}
+          className={`nav-item${isAct ? ' nav-item--active' : ''}`}
         >
-          {!IconComp ? null : <IconComp size={14} style={{ flexShrink: 0 }} />}
-          {!collapsed && (
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>
-              {label}
-            </span>
-          )}
+          {IconComp && <span className="nav-item__icon"><IconComp size={15} /></span>}
+          {!collapsed && <span className="nav-item__label">{label}</span>}
         </button>
 
-        {/* Three-dots menu (dynamic tabs only) */}
         {isDynamic && !collapsed && (hov || menuOpen) && (
-          <button
-            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}
-            title="More options"
-            style={{
-              position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)',
-              background: menuOpen ? 'var(--bg4)' : 'var(--bg4)',
-              border: '1px solid var(--border2)',
-              borderRadius: 4, width: 20, height: 20,
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              cursor: 'pointer', color: 'var(--text2)',
-              fontSize: 14, lineHeight: 0.5,
-              transition: 'color .12s',
-            }}
-            onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
-            onMouseLeave={e => e.currentTarget.style.color = 'var(--text2)'}
-          >
-            ⋯
-          </button>
+          <button className="nav-item__menu" title="More options"
+            onClick={e => { e.stopPropagation(); setMenuOpen(v => !v); }}>⋯</button>
         )}
         {menuOpen && (
           <DashboardMenu
@@ -294,201 +189,93 @@ function NavItem({ id, label, icon: IconComp, title: hint, active, collapsed, on
   );
 }
 
-/* ── Section label ─────────────────────────────────────────────────── */
-function SectionLabel({ label, collapsed, action, first }) {
-  if (collapsed) return <div style={{ height: 1, background: 'var(--border)', margin: '10px 0' }} />;
+function NavSection({ label, tabs, collapsed, active, onChange }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      padding: first ? '10px 10px 4px' : '14px 10px 4px',
-      borderTop: first ? 'none' : '1px solid var(--border)',
-      marginTop: first ? 0 : 2,
-    }}>
-      <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text4)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-        {label}
-      </span>
-      {action}
+    <div className="sidebar__group">
+      {!collapsed && <div className="sidebar__group-label">{label}</div>}
+      {tabs.map(tab => (
+        <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
+      ))}
     </div>
   );
 }
 
-function NavSection({ label, tabs, collapsed, active, onChange, action, first }) {
-  return (
-    <>
-      <SectionLabel label={label} collapsed={collapsed} action={action} first={first} />
-      <div>
-        {tabs.map(tab => (
-          <NavItem key={tab.id} {...tab} active={active} collapsed={collapsed} onClick={onChange} />
-        ))}
-      </div>
-    </>
-  );
-}
-
 /* ── Main sidebar ──────────────────────────────────────────────────── */
-export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard, onDeleteDynamic, onRenameDynamic, onDuplicateDynamic, collapsed, onCollapse }) {
+export default function Sidebar({ active, onChange, dynamicTabs, onAddDashboard, onDeleteDynamic, onRenameDynamic, onDuplicateDynamic, collapsed, onCollapse, appUser }) {
   const dynDashboards = (dynamicTabs || []).filter(t => t.type === 'dashboard');
   const dynSheets     = (dynamicTabs || []).filter(t => t.type === 'sheet');
 
   return (
-    <aside style={{
-      width: collapsed ? 'var(--sidebar-collapsed)' : 'var(--sidebar-w)',
-      minWidth: collapsed ? 'var(--sidebar-collapsed)' : 'var(--sidebar-w)',
-      background: 'var(--bg2)',
-      borderRight: '1px solid var(--border)',
-      display: 'flex', flexDirection: 'column',
-      transition: 'width .18s ease, min-width .18s ease',
-      overflow: 'hidden',
-      flexShrink: 0,
-    }}>
-
-      {/* Brand */}
-      <div style={{
-        height: 'var(--topbar-h)',
-        display: 'flex', alignItems: 'center',
-        padding: collapsed ? '0' : '0 12px',
-        justifyContent: collapsed ? 'center' : 'flex-start',
-        borderBottom: '1px solid var(--border)',
-        flexShrink: 0, gap: 9,
-      }}>
-        <div style={{
-          width: 26, height: 26, borderRadius: 6, flexShrink: 0,
-          background: 'var(--accent)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          fontSize: 12, fontWeight: 700, color: '#fff',
-        }}>N</div>
+    <aside className={`sidebar${collapsed ? ' sidebar--collapsed' : ''}`}>
+      {/* Workspace header */}
+      <div className="sidebar__brand">
+        <div className="sidebar__logo">N</div>
         {!collapsed && (
-          <div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', lineHeight: 1.2 }}>Nysonian</div>
-            <div style={{ fontSize: 9.5, fontWeight: 500, color: 'var(--text4)', textTransform: 'uppercase', letterSpacing: '.1em', lineHeight: 1.3 }}>
-              Marketing Hub
-            </div>
+          <div style={{ minWidth: 0 }}>
+            <div className="sidebar__brand-name">Nysonian</div>
+            <div className="sidebar__brand-sub">Marketing Hub</div>
           </div>
         )}
       </div>
 
       {/* Navigation */}
-      <div style={{ flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: collapsed ? '8px 0' : '4px 0' }}
-        className="hide-scrollbar">
-
-        {collapsed && <div style={{ height: 8 }} />}
-
-        <NavSection label="Overview & Live" tabs={OVERVIEW_TABS} collapsed={collapsed} active={active} onChange={onChange} first />
-        <NavSection label="NOBL Travel" tabs={NOBL_TRAVEL_TABS} collapsed={collapsed} active={active} onChange={onChange} />
-        <NavSection label="Pilates FLO" tabs={PILATES_FLO_TABS} collapsed={collapsed} active={active} onChange={onChange} />
-        <NavSection label="Marketing" tabs={MARKETING_TABS} collapsed={collapsed} active={active} onChange={onChange} />
-        <NavSection label="NOBL Air" tabs={NOBL_AIR_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+      <div className="sidebar__nav hide-scrollbar">
+        <NavSection label="Overview & Live" tabs={OVERVIEW_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="NOBL Travel"     tabs={NOBL_TRAVEL_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="Pilates FLO"     tabs={PILATES_FLO_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="Marketing"       tabs={MARKETING_TABS} collapsed={collapsed} active={active} onChange={onChange} />
+        <NavSection label="NOBL Air"        tabs={NOBL_AIR_TABS} collapsed={collapsed} active={active} onChange={onChange} />
         <NavSection label="In-app purchases" tabs={APPLICATION_TABS} collapsed={collapsed} active={active} onChange={onChange} />
 
         {/* Custom dashboards & sheets */}
-        <SectionLabel
-          label="Custom"
-          collapsed={collapsed}
-          action={!collapsed && (
-            <button
-              onClick={onAddDashboard}
-              title="Build a new custom dashboard with AI"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 3,
-                padding: '2px 7px', fontSize: 11,
-                background: 'none', border: '1px solid var(--border2)',
-                borderRadius: 4, color: 'var(--text3)', cursor: 'pointer',
-                transition: 'all .12s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--text3)'; e.currentTarget.style.borderColor = 'var(--border2)'; }}
-            >
-              <Icons.Plus size={10} /> New
-            </button>
+        <div className="sidebar__group">
+          {!collapsed && (
+            <div className="sidebar__group-label" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span>Custom</span>
+              <button onClick={onAddDashboard} title="Build a new custom dashboard with AI"
+                style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '2px 7px', fontSize: 10.5,
+                  background: 'none', border: '1px solid var(--border2)', borderRadius: 'var(--radius-sm)',
+                  color: 'var(--text3)', cursor: 'pointer', letterSpacing: 0, textTransform: 'none', fontWeight: 600 }}>
+                <Icons.Plus size={10} /> New
+              </button>
+            </div>
           )}
-        />
-
-        <div>
           {dynDashboards.length === 0 && !collapsed && (
-            <button
-              onClick={onAddDashboard}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '7px 10px', width: '100%',
-                background: 'none', border: '1px dashed var(--border)',
-                borderRadius: 0, color: 'var(--text3)', cursor: 'pointer',
-                fontSize: 11, fontFamily: 'var(--font-body)',
-                transition: 'all .12s',
-              }}
-              onMouseEnter={e => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.borderColor = 'var(--accent-dim)'; }}
-              onMouseLeave={e => { e.currentTarget.style.color = 'var(--text3)'; e.currentTarget.style.borderColor = 'var(--border)'; }}
-            >
-              <Icons.Plus size={11} />
-              <span>Build a dashboard</span>
+            <button onClick={onAddDashboard} className="nav-item" style={{ border: '1px dashed var(--border2)', color: 'var(--text3)' }}>
+              <span className="nav-item__icon"><Icons.Plus size={14} /></span>
+              <span className="nav-item__label">Build a dashboard</span>
             </button>
           )}
           {dynDashboards.map(tab => (
-            <NavItem
-              key={tab.id} id={tab.id}
-              label={tab.label || tab.id}
-              icon={Icons.LayoutGrid}
-              title="Custom dashboard — built with AI Builder"
-              active={active} collapsed={collapsed}
-              onClick={onChange}
-              onDelete={onDeleteDynamic}
-              onRename={onRenameDynamic}
-              onDuplicate={onDuplicateDynamic}
-              isDynamic
-            />
+            <NavItem key={tab.id} id={tab.id} label={tab.label || tab.id} icon={Icons.LayoutGrid}
+              title="Custom dashboard — built with AI Builder" active={active} collapsed={collapsed}
+              onClick={onChange} onDelete={onDeleteDynamic} onRename={onRenameDynamic} onDuplicate={onDuplicateDynamic} isDynamic />
+          ))}
+          {dynSheets.map(tab => (
+            <NavItem key={tab.id} id={tab.id} label={tab.label || tab.id} icon={sheetIcon(tab.label || tab.id)}
+              title="Custom spreadsheet — built with AI Builder" active={active} collapsed={collapsed}
+              onClick={onChange} onDelete={onDeleteDynamic} onRename={onRenameDynamic} onDuplicate={onDuplicateDynamic} isDynamic />
           ))}
         </div>
-
-        {dynSheets.length > 0 && (
-          <>
-            {!collapsed && (
-              <div style={{ padding: '8px 10px 2px', borderTop: dynDashboards.length > 0 ? 'none' : '1px solid var(--border)', marginTop: dynDashboards.length > 0 ? 0 : 2 }}>
-                <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--text4)', textTransform: 'uppercase', letterSpacing: '.06em' }}>
-                  Sheets
-                </span>
-              </div>
-            )}
-            {collapsed && <div style={{ height: 1, background: 'var(--border)', margin: '10px 0' }} />}
-            <div>
-              {dynSheets.map(tab => (
-                <NavItem
-                  key={tab.id} id={tab.id}
-                  label={tab.label || tab.id}
-                  icon={sheetIcon(tab.label || tab.id)}
-                  title="Custom spreadsheet — built with AI Builder"
-                  active={active} collapsed={collapsed}
-                  onClick={onChange}
-                  onDelete={onDeleteDynamic}
-                  onRename={onRenameDynamic}
-                  onDuplicate={onDuplicateDynamic}
-                  isDynamic
-                />
-              ))}
-            </div>
-          </>
-        )}
       </div>
 
-      {/* Collapse toggle */}
-      <div style={{ borderTop: '1px solid var(--border)', padding: '6px 0', flexShrink: 0 }}>
-        <button
-          onClick={onCollapse}
-          title={collapsed ? 'Expand' : 'Collapse'}
-          style={{
-            width: '100%', padding: '7px',
-            display: 'flex', alignItems: 'center',
-            justifyContent: collapsed ? 'center' : 'flex-start',
-            gap: 7, background: 'none', border: 'none',
-            color: 'var(--text3)', cursor: 'pointer',
-            fontSize: 11, fontFamily: 'var(--font-body)',
-            transition: 'color .12s',
-          }}
-          onMouseEnter={e => e.currentTarget.style.color = 'var(--text)'}
-          onMouseLeave={e => e.currentTarget.style.color = 'var(--text3)'}
-        >
+      {/* Footer: user + collapse */}
+      <div className="sidebar__footer">
+        {appUser && (
+          <div className="sidebar__user">
+            <div className="sidebar__avatar">{(appUser.name || 'U').charAt(0).toUpperCase()}</div>
+            {!collapsed && (
+              <div style={{ minWidth: 0 }}>
+                <div className="sidebar__user-name">{appUser.name || 'User'}</div>
+                <div className="sidebar__user-role" style={{ color: appUser.role === 'admin' ? 'var(--accent)' : 'var(--text4)' }}>{appUser.role}</div>
+              </div>
+            )}
+          </div>
+        )}
+        <button className="sidebar__collapse" onClick={onCollapse} title={collapsed ? 'Expand' : 'Collapse'}>
           {collapsed
-            ? <Icons.ChevronRight size={13} />
-            : <><Icons.ChevronLeft size={13} /><span>Collapse</span></>
-          }
+            ? <Icons.ChevronRight size={14} />
+            : <><Icons.ChevronLeft size={14} /><span>Collapse</span></>}
         </button>
       </div>
     </aside>

@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 function fmtWhen(iso) {
   if (!iso) return '';
@@ -70,7 +71,7 @@ export default function CommentPopover({
 
   const canEdit = !existing || existing.can_edit !== false;
 
-  return (
+  return createPortal((
     <div
       ref={popRef}
       style={{
@@ -196,5 +197,5 @@ export default function CommentPopover({
         )}
       </div>
     </div>
-  );
+  ), document.body);
 }

@@ -3,6 +3,8 @@ const router   = express.Router();
 const { pgQueryBatch } = require('../db/postgres');
 const { calcMer }  = require('../config/brandConfig');
 const { METRICS: REVENUE_METRICS } = require('../config/revenueMetrics');
+const { withResponseCache } = require('../utils/responseCache');
+const { getDataVersion } = require('../utils/dataVersion');
 
 /*
  * ══════════════════════════════════════════════════════════════════
@@ -48,6 +50,8 @@ function fmtRows(rows) {
 router.get('/nobl', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('store', `nobl:${start}:${end}`, version, async () => {
     const [summaryRes, channelsRes, geoRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await pgQueryBatch([
       {
         sql: `
@@ -209,7 +213,9 @@ router.get('/nobl', async (req, res) => {
 
     const email = fmtRows(emailRes.rows);
 
-    res.json({ summary, channels, geo, subs_daily, subs_stats, email, revenue_metrics: REVENUE_METRICS });
+    return { summary, channels, geo, subs_daily, subs_stats, email, revenue_metrics: REVENUE_METRICS };
+    });
+    res.json(body);
   } catch (e) {
     console.error('[Store /nobl]', e.message);
     res.status(500).json({ error: e.message });
@@ -221,6 +227,8 @@ router.get('/nobl', async (req, res) => {
 router.get('/flo', async (req, res) => {
   const { start, end } = getDefaultDates(req);
   try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('store', `flo:${start}:${end}`, version, async () => {
     const [summaryRes, channelsRes, geoRes, productsRes, subsRebillRes, subsNewRes, subsStatsRes, emailRes] = await pgQueryBatch([
       {
         sql: `
@@ -395,7 +403,9 @@ router.get('/flo', async (req, res) => {
 
     const email = fmtRows(emailRes.rows);
 
-    res.json({ summary, channels, geo, products, subs_daily, subs_stats, email, revenue_metrics: REVENUE_METRICS });
+    return { summary, channels, geo, products, subs_daily, subs_stats, email, revenue_metrics: REVENUE_METRICS };
+    });
+    res.json(body);
   } catch (e) {
     console.error('[Store /flo]', e.message);
     res.status(500).json({ error: e.message });
