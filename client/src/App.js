@@ -19,6 +19,7 @@ import AiBuilderPage     from './pages/AiBuilderPage';
 import SyncPage          from './pages/SyncPage';
 import GenericDashPage   from './pages/GenericDashPage';
 import LivePage          from './pages/LivePage';
+import KpiPulsePage      from './pages/KpiPulsePage';
 import StoreNoblPage     from './pages/StoreNoblPage';
 import StoreFLOPage      from './pages/StoreFLOPage';
 import AppComingSoonPage from './pages/AppComingSoonPage';
@@ -59,6 +60,7 @@ const TAB_TO_PATH = {
   'Meta Ads':             '/meta-ads',
   'Subscriptions':        '/subscriptions',
   'Live Data':            '/live',
+  'KPI Pulse':            '/kpi-pulse',
   'NOBL Topline':         '/nobl-topline',
   'NOBL Channel Level Daily': '/nobl-channel-daily',
   'FLO Topline':          '/flo-topline',
@@ -75,6 +77,7 @@ const TAB_TO_PATH = {
 
 const TAB_DISPLAY_NAMES = {
   'Live Data':                "Today's snapshot",
+  'KPI Pulse':                'KPI Pulse',
   'Meta Ads':                 'Facebook ads',
   'Forecast Engine':          'Sales forecast',
   'NOBL Channel Level Daily': 'NOBL Channel Daily',
@@ -91,6 +94,7 @@ function pathToActiveTab(pathname, dynamicTabs) {
   if (pathname.startsWith('/meta-ads')) return 'Meta Ads';
   if (pathname.startsWith('/subscriptions')) return 'Subscriptions';
   if (pathname.startsWith('/live')) return 'Live Data';
+  if (pathname.startsWith('/kpi-pulse')) return 'KPI Pulse';
   if (pathname.startsWith('/nobl-topline')) return 'NOBL Topline';
   if (pathname.startsWith('/nobl-channel-daily')) return 'NOBL Channel Level Daily';
   if (pathname.startsWith('/flo-topline')) return 'FLO Topline';
@@ -207,6 +211,7 @@ function AppRoot() {
         <Route path="/meta-ads"             element={<PageHost Comp={MetaAdsPage} />} />
         <Route path="/subscriptions"        element={<PageHost Comp={SubsPage} />} />
         <Route path="/live"                 element={<PageHost Comp={LivePage} />} />
+        <Route path="/kpi-pulse"            element={<PageHost Comp={KpiPulsePage} />} />
         <Route path="/nobl-topline"           element={<PageHost Comp={NoblToplinePage} />} />
         <Route path="/nobl-channel-daily"     element={<PageHost Comp={NoblChannelDailyPage} />} />
         <Route path="/flo-topline"            element={<PageHost Comp={FloToplinePage} />} />
@@ -496,4 +501,3 @@ function Spinner() {
     </div>
   );
 }
-

@@ -6,6 +6,7 @@ import { Icons, sheetIcon } from './Icons';
 const OVERVIEW_TABS = [
   { id: 'Overview',  icon: Icons.LayoutDashboard, label: 'Overview',           title: 'All brands — high-level KPIs and trends' },
   { id: 'Live Data', icon: Icons.Zap,             label: "Today's snapshot",   title: 'Real-time sales snapshot for today' },
+  { id: 'KPI Pulse', icon: Icons.Activity,        label: 'KPI Pulse',          title: 'Daily, weekly, and quarterly leadership KPIs' },
 ];
 
 const NOBL_TRAVEL_TABS = [
