@@ -2120,6 +2120,108 @@ router.get('/data-bounds', async (req, res) => {
   }
 });
 
+// GET /kpi-pulse — leadership KPI matrix (daily / weekly / quarterly) from existing DB tables.
+// Returns ONLY metrics derivable from the database; the frontend blanks everything else.
+// Ratios are recomputed from summed base values per period (not averaged), so weekly /
+// quarterly rollups are correct, and buckets advance automatically as new daily data lands.
+router.get('/kpi-pulse', async (req, res) => {
+  try {
+    const version = await getDataVersion();
+    const { body } = await withResponseCache('kpi-pulse', 'kpi-pulse', version, async () => {
+      const year = new Date().getUTCFullYear();
+      const start = `${year}-01-01`;
+      const end = `${year}-12-31`;
+      const num = (v) => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+      const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const niceMD = (iso) => { const [, m, d] = iso.split('-'); return `${MONTHS[parseInt(m,10)-1]} ${parseInt(d,10)}`; };
+      const weekEndISO = (iso) => { const [y,m,d] = iso.split('-').map(Number); const dt = new Date(Date.UTC(y,m-1,d)); dt.setUTCDate(dt.getUTCDate() + ((7 - dt.getUTCDay()) % 7)); return dt.toISOString().slice(0,10); };
+
+      const [noblSum, floSum, noblGeo, floGeo, air] = await Promise.all([
+        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
+        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
+        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM nobl_brand_tw_geo_daily WHERE region IN ('US','CA') AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
+        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM flo_brand_tw_geo_daily WHERE region = 'US' AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
+        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, total_orders to_, air_orders ao, converted_count conv, mature_count mat, combined_net_revenue arev FROM nobl_air_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
+      ]);
+
+      const nMap = {}, fMap = {}, ngeo = {}, fgeo = {}, aMap = {};
+      for (const r of noblSum.rows) nMap[r.d] = { rev: num(r.rev), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
+      for (const r of floSum.rows)  fMap[r.d] = { rev: num(r.rev), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
+      for (const r of noblGeo.rows) { (ngeo[r.d] = ngeo[r.d] || {})[r.region] = { rev: num(r.rev), spend: num(r.spend) }; }
+      for (const r of floGeo.rows)  { (fgeo[r.d] = fgeo[r.d] || {})[r.region] = { rev: num(r.rev), spend: num(r.spend) }; }
+      for (const r of air.rows)     aMap[r.d] = { to: num(r.to_), ao: num(r.ao), conv: num(r.conv), mat: num(r.mat), arev: num(r.arev) };
+
+      // Cap at yesterday (report TZ) so today's partial, in-progress day is excluded —
+      // keeps daily/weekly/quarterly on complete data and advances automatically each day.
+      const todayET = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York' }).format(new Date());
+      const cutoff = (() => { const [y, m, d] = todayET.split('-').map(Number); const dt = new Date(Date.UTC(y, m - 1, d)); dt.setUTCDate(dt.getUTCDate() - 1); return dt.toISOString().slice(0, 10); })();
+      const allDates = Array.from(new Set([...Object.keys(nMap), ...Object.keys(fMap)])).filter(d => d <= cutoff).sort();
+      const latest = allDates[allDates.length - 1] || cutoff;
+      const div = (x, y) => (y > 0 ? x / y : null);
+
+      function metricsFor(dates) {
+        const a = { n:{rev:0,spend:0,orders:0,amazon:0,tsales:0}, f:{rev:0,spend:0,orders:0,amazon:0,tsales:0}, nUS:{rev:0,spend:0}, nCA:{rev:0,spend:0}, fUS:{rev:0,spend:0}, air:{to:0,ao:0,conv:0,mat:0,arev:0} };
+        let hasN = false, hasF = false;
+        for (const d of dates) {
+          const n = nMap[d]; if (n) { hasN = true; a.n.rev+=n.rev; a.n.spend+=n.spend; a.n.orders+=n.orders; a.n.amazon+=n.amazon; a.n.tsales+=n.tsales; }
+          const f = fMap[d]; if (f) { hasF = true; a.f.rev+=f.rev; a.f.spend+=f.spend; a.f.orders+=f.orders; a.f.amazon+=f.amazon; a.f.tsales+=f.tsales; }
+          const ng = ngeo[d]; if (ng) { if (ng.US){a.nUS.rev+=ng.US.rev;a.nUS.spend+=ng.US.spend;} if (ng.CA){a.nCA.rev+=ng.CA.rev;a.nCA.spend+=ng.CA.spend;} }
+          const fg = fgeo[d]; if (fg && fg.US){a.fUS.rev+=fg.US.rev;a.fUS.spend+=fg.US.spend;}
+          const ai = aMap[d]; if (ai){a.air.to+=ai.to;a.air.ao+=ai.ao;a.air.conv+=ai.conv;a.air.mat+=ai.mat;a.air.arev+=ai.arev;}
+        }
+        const attach = div(a.air.ao, a.air.to), ttp = div(a.air.conv, a.air.mat);
+        return {
+          NOBL: {
+            mer: div(a.n.rev, a.n.spend), sales: hasN ? a.n.rev : null, aov: div(a.n.rev, a.n.orders),
+            amazon_pct: div(a.n.amazon, a.n.tsales), us_mer: div(a.nUS.rev, a.nUS.spend), ca_mer: div(a.nCA.rev, a.nCA.spend),
+            air_rev_pct: div(a.air.arev, a.n.rev), attach, ttp, activation: (attach != null && ttp != null) ? attach * ttp : null,
+          },
+          FLO: { mer: div(a.f.rev, a.f.spend), sales: hasF ? a.f.rev : null, aov: div(a.f.rev, a.f.orders), us_mer: div(a.fUS.rev, a.fUS.spend) },
+        };
+      }
+
+      const KN = ['mer','sales','aov','amazon_pct','us_mer','ca_mer','air_rev_pct','attach','ttp','activation'];
+      const KF = ['mer','sales','aov','us_mer'];
+      function buildCadence(defs) {
+        const series = { NOBL: {}, FLO: {} };
+        KN.forEach(k => series.NOBL[k] = []);
+        KF.forEach(k => series.FLO[k] = []);
+        for (const p of defs) {
+          const m = metricsFor(p.dates);
+          KN.forEach(k => series.NOBL[k].push(m.NOBL[k]));
+          KF.forEach(k => series.FLO[k].push(m.FLO[k]));
+        }
+        return { periods: defs.map(p => ({ key: p.key, label: p.label, sub: p.sub })), series };
+      }
+
+      // Daily — last 7 days with data (latest first)
+      const dailyDefs = allDates.filter(d => d <= latest).slice(-7).reverse()
+        .map(d => ({ key: d, label: niceMD(d), sub: 'Day', dates: [d] }));
+
+      // Weekly — last 7 completed week-ends (Sunday), latest first
+      const weekMap = {};
+      for (const d of allDates) (weekMap[weekEndISO(d)] = weekMap[weekEndISO(d)] || []).push(d);
+      const weeklyDefs = Object.keys(weekMap).filter(we => we <= latest).sort().slice(-7).reverse()
+        .map(we => ({ key: we, label: `W/E ${niceMD(we)}`, sub: 'Week end', dates: weekMap[we] }));
+
+      // Quarterly — calendar quarters with data, latest first
+      const qMap = {};
+      for (const d of allDates) { const [y, m] = d.split('-').map(Number); const q = `${y}-Q${Math.floor((m-1)/3)+1}`; (qMap[q] = qMap[q] || []).push(d); }
+      const quarterlyDefs = Object.keys(qMap).sort().slice(-4).reverse()
+        .map(q => { const [y, qq] = q.split('-Q'); return { key: q, label: `Q${qq} ${y}`, sub: 'Quarter', dates: qMap[q] }; });
+
+      return {
+        asOf: latest,
+        cadences: { daily: buildCadence(dailyDefs), weekly: buildCadence(weeklyDefs), quarterly: buildCadence(quarterlyDefs) },
+      };
+    });
+    res.json(body);
+  } catch (e) {
+    console.error('[Analytics /kpi-pulse]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /nobl/air-performance
 router.get('/nobl/air-performance', async (req, res) => {
   const { start, end } = getDefaultDates(req);

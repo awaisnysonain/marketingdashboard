@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Cell,
@@ -6,7 +6,7 @@ import {
 import ChartPanel from '../components/ChartPanel';
 import FilterMultiSelect from '../components/FilterMultiSelect';
 import PageIntro from '../components/PageIntro';
-import { fmtNum } from '../utils/api';
+import { fmtNum, getKpiPulse } from '../utils/api';
 import { NOBL_ACCENT, FLO_ACCENT, TOOLTIP_STYLE } from '../utils/chartHelpers';
 import { multiFilterLabel, normalizeMultiFilter } from '../constants/dashboardFilters';
 
@@ -18,11 +18,57 @@ const STATUS_META = {
   gray:   { label: 'No target',  color: 'var(--text3)', bg: 'var(--bg3)', border: 'var(--border)' },
 };
 
-const PERIODS = {
-  daily: ['Jun 18', 'Jun 17', 'Jun 16', 'Jun 15', 'Jun 14', 'Jun 13', 'Jun 12'],
-  weekly: ['W/E Jun 14', 'W/E Jun 07', 'W/E May 31', 'W/E May 24', 'W/E May 17', 'W/E May 10', 'W/E May 03'],
-  quarterly: ['Q1 2026', 'Q2 2026'],
+/* ── Database-backed metrics ──────────────────────────────────────────
+   Maps a KPI catalog metric name → the key returned by /api/analytics/kpi-pulse.
+   Metrics NOT in this map have no database source and are shown BLANK.        */
+const DB_KEY = {
+  'NOBL Blended MER': 'mer',
+  'Gross Sales − Discounts': 'sales',
+  'AOV': 'aov',
+  'Amazon Rev % of Gross Sales': 'amazon_pct',
+  'US MER': 'us_mer',
+  'Canada MER': 'ca_mer',
+  'NOBL Air Rev % of Sales': 'air_rev_pct',
+  'Attach Rate': 'attach',
+  'Activation Rate': 'activation',
+  'Trial-to-Paid': 'ttp',
 };
+const PCT_KEYS = new Set(['amazon_pct', 'air_rev_pct', 'attach', 'activation', 'ttp']);
+const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer']);
+const MONEY_KEYS = new Set(['sales', 'aov']);
+// These DB metrics only exist for NOBL (Air, Amazon, Canada geo, AOV, blended MER catalog row).
+const NOBL_ONLY_KEYS = new Set(['mer', 'aov', 'amazon_pct', 'ca_mer', 'air_rev_pct', 'attach', 'activation', 'ttp']);
+
+function dbKeyFor(brand, metric) {
+  const k = DB_KEY[metric];
+  if (!k) return null;
+  if (brand !== 'NOBL' && NOBL_ONLY_KEYS.has(k)) return null;
+  return k;
+}
+
+function fmtMetricValue(key, v) {
+  if (v == null || !Number.isFinite(Number(v))) return null;
+  const n = Number(v);
+  if (RATIO_KEYS.has(key)) return `${n.toFixed(2)}x`;
+  if (PCT_KEYS.has(key)) return `${(n * 100).toFixed(2)}%`;
+  if (MONEY_KEYS.has(key)) return `$${Math.round(n).toLocaleString()}`;
+  return String(v);
+}
+
+function parseTarget(t) {
+  if (t == null) return null;
+  const cleaned = String(t).replace(/[≥≤→~xX$,%\s]/g, '');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : null;
+}
+
+function varianceFor(key, rawLatest, target) {
+  const tgt = parseTarget(target);
+  if (tgt == null || tgt === 0 || rawLatest == null) return '';
+  const scaled = PCT_KEYS.has(key) ? rawLatest * 100 : rawLatest;
+  const pct = ((scaled - tgt) / Math.abs(tgt)) * 100;
+  return `${pct.toFixed(1)}%`;
+}
 
 const KPI_BRAND_OPTIONS = [
   { value: 'ALL', label: 'All brands' },
@@ -215,9 +261,8 @@ function statusFor(row) {
   return 'red';
 }
 
-function seriesFor(row) {
-  const periods = PERIODS[row.cadence] || [];
-  return periods.map((period, i) => ({ period, value: parseNum(row.values?.[i]) ?? 0, raw: row.values?.[i] || '—' })).reverse();
+function seriesFor(row, periods) {
+  return (periods || []).map((p, i) => ({ period: p.label, value: parseNum(row.values?.[i]) ?? 0, raw: row.values?.[i] || '—' })).reverse();
 }
 
 function fmtTrendValue(v, row) {
@@ -241,17 +286,13 @@ function StatusPill({ status }) {
 const PERIOD_COL_WIDTH = 118;
 const KPI_MATRIX_COL_WIDTH = 190;
 
-function periodMeta(cadence, period, index) {
-  if (index === 0) return { label: period, sub: 'Latest' };
-  if (cadence === 'daily') return { label: period, sub: `${index}d back` };
-  if (cadence === 'weekly') return { label: period.replace('W/E ', ''), sub: 'Week end' };
-  return { label: period, sub: 'Quarter' };
+function periodMeta(period, index) {
+  return { label: period.label, sub: index === 0 ? 'Latest' : period.sub };
 }
 
-function RawKpiTable({ rows, cadence, onSelect }) {
+function RawKpiTable({ rows, cadence, periods = [], onSelect }) {
   const [matrixSearch, setMatrixSearch] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('ALL');
-  const periods = PERIODS[cadence] || [];
   const searchTerm = matrixSearch.trim().toLowerCase();
   const ownerOptions = useMemo(() => {
     const owners = Array.from(new Set(rows.map(r => r.owner).filter(Boolean))).sort((a, b) => a.localeCompare(b));
@@ -434,9 +475,9 @@ function RawKpiTable({ rows, cadence, onSelect }) {
                 </td>
               </tr>
             ) : periods.map((period, periodIndex) => {
-              const meta = periodMeta(cadence, period, periodIndex);
+              const meta = periodMeta(period, periodIndex);
               return (
-                <tr key={period}>
+                <tr key={period.key}>
                   <td style={{
                   position: 'sticky',
                   left: 0,
@@ -459,7 +500,7 @@ function RawKpiTable({ rows, cadence, onSelect }) {
                     const st = STATUS_META[row.status] || STATUS_META.gray;
                     return (
                       <td
-                        key={`${period}-${row.brand}-${row.metric}`}
+                        key={`${period.key}-${row.brand}-${row.metric}`}
                         onClick={() => onSelect?.(row)}
                         style={{
                           padding: '9px 8px',
@@ -689,17 +730,47 @@ export default function KpiPulsePage() {
   const [brands, setBrands] = useState(['ALL']);
   const [statuses, setStatuses] = useState(['ALL']);
   const [selectedMetric, setSelectedMetric] = useState(null);
+  const [pulse, setPulse] = useState(null);
+
+  useEffect(() => {
+    let alive = true;
+    getKpiPulse().then((d) => { if (alive) setPulse(d); }).catch(() => { if (alive) setPulse(null); });
+    return () => { alive = false; };
+  }, []);
+
+  const cadenceData = pulse?.cadences?.[cadence] || null;
+  const periods = useMemo(() => cadenceData?.periods || [], [cadenceData]);
 
   const normalizedBrands = useMemo(() => normalizeKpiBrands(brands), [brands]);
   const normalizedStatuses = useMemo(() => normalizeKpiStatuses(statuses), [statuses]);
   const brandFilterSet = useMemo(() => new Set(normalizedBrands), [normalizedBrands]);
   const statusFilterSet = useMemo(() => new Set(normalizedStatuses.map(s => s.toLowerCase())), [normalizedStatuses]);
 
-  const rows = useMemo(() => KPI_ROWS
-    .filter(r => r.cadence === cadence)
-    .map(r => ({ ...r, status: statusFor(r) }))
-    .filter(r => normalizedBrands.includes('ALL') || brandFilterSet.has(r.brand))
-    .filter(r => normalizedStatuses.includes('ALL') || statusFilterSet.has(r.status)), [cadence, normalizedBrands, normalizedStatuses, brandFilterSet, statusFilterSet]);
+  const rows = useMemo(() => {
+    const series = cadenceData?.series;
+    const len = periods.length;
+    const built = KPI_ROWS.filter(r => r.cadence === cadence).map(r => {
+      const key = dbKeyFor(r.brand, r.metric);
+      const raw = key ? series?.[r.brand]?.[key] : null;
+      let values; let latest; let variance; let dbBacked = false;
+      if (Array.isArray(raw)) {
+        dbBacked = true;
+        values = raw.map(v => fmtMetricValue(key, v) ?? '—');
+        const firstNonNull = raw.find(v => v != null);
+        latest = firstNonNull != null ? fmtMetricValue(key, firstNonNull) : '—';
+        variance = firstNonNull != null ? varianceFor(key, firstNonNull, r.target) : '';
+      } else {
+        values = Array.from({ length: len }, () => '—');
+        latest = '—';
+        variance = '';
+      }
+      const status = dbBacked && variance ? statusFor({ variance }) : 'gray';
+      return { ...r, values, latest, variance, status, dbBacked };
+    });
+    return built
+      .filter(r => normalizedBrands.includes('ALL') || brandFilterSet.has(r.brand))
+      .filter(r => normalizedStatuses.includes('ALL') || statusFilterSet.has(r.status));
+  }, [cadence, cadenceData, periods, normalizedBrands, normalizedStatuses, brandFilterSet, statusFilterSet]);
 
   const selected = selectedMetric && rows.find(r => r.metric === selectedMetric.metric && r.brand === selectedMetric.brand)
     ? rows.find(r => r.metric === selectedMetric.metric && r.brand === selectedMetric.brand)
@@ -717,7 +788,7 @@ export default function KpiPulsePage() {
     ...rows.filter(r => ['blue', 'green'].includes(r.status)),
     ...rows.filter(r => r.status === 'gray'),
   ].slice(0, 10);
-  const chartRows = selected ? seriesFor(selected) : [];
+  const chartRows = selected ? seriesFor(selected, periods) : [];
   const deptRows = Object.entries(rows.reduce((acc, r) => {
     acc[r.department] = acc[r.department] || { department: r.department, total: 0, red: 0, yellow: 0, green: 0, blue: 0, gray: 0 };
     acc[r.department].total += 1;
@@ -730,8 +801,9 @@ export default function KpiPulsePage() {
       <PageIntro>
         <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ color: 'var(--text3)', fontSize: 12, lineHeight: 1.45 }}>
-            Shows all major NOBL and FLO operating KPIs from the sheet structure — paid media, geo, Air/App, CRO, creative,
-            retention, social, ops, CS, and web engineering. Dummy values only — no database or backend integration.
+            Leadership KPI matrix across NOBL and FLO. Metrics available in the database — revenue, blended &amp; geo MER,
+            AOV, Amazon share, and NOBL Air attach / activation / trial-to-paid — are computed live for daily, weekly, and
+            quarterly periods (and advance automatically each day). Metrics with no database source are shown blank.
           </div>
         </div>
       </PageIntro>
@@ -798,7 +870,7 @@ export default function KpiPulsePage() {
         <PriorityList rows={priorityRows} selected={selected} onSelect={setSelectedMetric} />
       </ChartPanel>
 
-      <RawKpiTable rows={rows} cadence={cadence} onSelect={setSelectedMetric} />
+      <RawKpiTable rows={rows} cadence={cadence} periods={periods} onSelect={setSelectedMetric} />
     </div>
   );
 }

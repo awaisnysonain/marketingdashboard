@@ -209,6 +209,16 @@ export const getDataBounds = () =>
     () => fetch(`${B}/api/analytics/data-bounds`).then((r) => r.json()),
   ).then((x) => x.data);
 
+/** Leadership KPI matrix (daily/weekly/quarterly) computed from existing DB tables. */
+export const getKpiPulse = () =>
+  cachedAnalyticsFetch('kpi-pulse',
+    () => fetch(`${B}/api/analytics/kpi-pulse`).then(async (r) => {
+      const d = await r.json();
+      if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
+      return d;
+    }),
+  ).then((x) => x.data);
+
 export const getNoblAirSubscribers = (start, end) =>
   cachedAnalyticsFetch(
     `subs:${start}:${end}`,
