@@ -10,6 +10,8 @@ import ChartPanel from '../components/ChartPanel';
 import VerticalDataTable from '../components/VerticalDataTable';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { buildForecastCellStatus } from '../utils/forecastCellStatus';
 import { getChannels, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../utils/api';
 import { TIP } from '../copy/plainLanguage';
 import { sortByRevenueDesc } from '../utils/dateRange';
@@ -32,6 +34,16 @@ const METRICS = [
   { key: 'new_cust_orders', label: 'New Cust Orders', type: 'num' },
 ];
 
+const FORECAST_METRIC_MAP = {
+  'Spend (1d)': 'spend',
+  'Revenue (1d)': 'revenue',
+  spend_1d: 'spend',
+  revenue_1d: 'revenue',
+  'Ad spend': 'spend',
+  Sales: 'revenue',
+  Revenue: 'revenue',
+};
+
 function Skeleton() {
   return (
     <div style={{ padding: '60px 0', textAlign: 'center' }}>
@@ -52,23 +64,36 @@ function ErrorBox({ msg, onRetry }) {
 
 export default function NoblChannelDailyPage() {
   const [rawRows, setRawRows] = useState([]);
+  const [regionScoped, setRegionScoped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { dateRange, filterByChannels } = useDashboardFilters();
+  const { dateRange, filterByChannels, regionsParam, isAllRegions } = useDashboardFilters();
   const range = dateRange;
   const [activeChannel, setActiveChannel] = useState(null);
 
+  const fc = useDailyForecast('NOBL', dateRange.start, dateRange.end);
+  const cellStatus = useCallback(
+    buildForecastCellStatus(fc, { metrics: FORECAST_METRIC_MAP }),
+    [fc],
+  );
+
   const load = useCallback(() => {
     setLoading(true); setError(null);
-    getChannels(range.start, range.end, 'NOBL')
-      .then(d => { setRawRows(d.rows || []); setLoading(false); })
+    getChannels(range.start, range.end, 'NOBL', isAllRegions ? '' : regionsParam)
+      .then(d => { setRawRows(d.rows || []); setRegionScoped(!!d.region_scoped); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [range]);
+  }, [range, regionsParam, isAllRegions]);
   useEffect(() => { load(); }, [load]);
 
+  // Reset the active selection whenever scope changes so a stale channel/region
+  // name doesn't linger after switching regions.
+  useEffect(() => { setActiveChannel(null); }, [regionsParam, isAllRegions]);
+
   const rows = useMemo(
-    () => filterByChannels(rawRows, 'channel'),
-    [rawRows, filterByChannels],
+    // When a region is selected the rows are region series (not channels), so the
+    // channel filter must not be applied or everything would be filtered out.
+    () => (regionScoped ? rawRows : filterByChannels(rawRows, 'channel')),
+    [rawRows, filterByChannels, regionScoped],
   );
 
   const { channelNames, dates, byDateCh, chKpi, spendChartData, revChartData, channelTotals } = useMemo(() => {
@@ -115,8 +140,17 @@ export default function NoblChannelDailyPage() {
     <div className="page-stack">
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
+          {regionScoped && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 10, background: 'var(--warn-dim)', border: '1px solid rgba(176,125,24,.28)', color: 'var(--text2)', fontSize: 12, lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>🌍</span>
+              <span>
+                Showing <strong style={{ color: 'var(--text)' }}>region-level</strong> daily totals (spend, revenue, MER) from regional data —
+                channel-by-platform breakdown is not tracked per region. Switch Region to <strong>All regions</strong> for the full channel split.
+              </span>
+            </div>
+          )}
           <div className="section">
-            <div className="section__title">CHANNEL</div>
+            <div className="section__title">{regionScoped ? 'REGION' : 'CHANNEL'}</div>
             <div className="seg" style={{ flexWrap: 'wrap' }}>
               {channelNames.map(ch => (
                 <button
@@ -213,6 +247,7 @@ export default function NoblChannelDailyPage() {
               getRow={(d) => enrichChannelRow(byDateCh[`${d}|${activeChannel}`], activeChannel)}
               metrics={METRICS}
               tableScope={commentTargetKey('channel', activeChannel)}
+              cellStatus={cellStatus}
             />
           </ChartPanel>
         </>

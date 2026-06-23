@@ -1376,12 +1376,14 @@ const ALL_DAILY_TASKS = [
   'klaviyo',
   'tw_refresh',          // brand-level summary (TW Summary API)
   'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
-  'meta_ads',            // Meta Marketing API — NOBL ad spend (TW fallback at read)
+  'meta_ads',            // Meta Marketing API — per-brand ad spend (NOBL + FLO; TW fallback at read)
   'tw_ads',              // campaign/adset/ad performance from TW
   'tw_air_attribution',  // NOBL Air order-level attribution
   'shopify_orders',      // per-order detail + product line items (NOBL + FLO)
   'appstle_contracts',   // subscription contracts (NOBL + FLO)
   'nobl_air_aggregate',  // recompute nobl_air_daily
+  'forecast_sheet',      // import NOBL plan calendar into forecast_plan_daily
+  'performance_dashboard', // import NOBL + FLO performance workbook into brand_performance_daily
   'product_daily',       // recompute shopify_product_daily
 ];
 
@@ -2077,6 +2079,27 @@ const server = app.listen(PORT, async () => {
   }
   await cleanupStaleConnections();
   await initPostgresTables();
+  try {
+    const { ensureForecastSchema, importForecastDaily } = require('./etl/forecastImport');
+    const { ensurePerformanceSchema, importPerformanceDashboard } = require('./etl/performanceDashboardImport');
+    const { pgQuery } = require('./db/postgres');
+    await ensureForecastSchema();
+    const cnt = await pgQuery('SELECT COUNT(*)::int AS n FROM forecast_daily', []);
+    if ((cnt.rows[0]?.n || 0) === 0) {
+      console.log('[ForecastImport] Table empty — importing forecast targets…');
+      const r = await importForecastDaily();
+      console.log(`[ForecastImport] Imported ${r.rows} rows (${r.min_date} → ${r.max_date})`);
+    }
+    await ensurePerformanceSchema();
+    const pCnt = await pgQuery('SELECT COUNT(*)::int AS n FROM brand_performance_daily', []);
+    if ((pCnt.rows[0]?.n || 0) === 0) {
+      console.log('[PerformanceImport] Table empty — importing performance dashboard…');
+      const r = await importPerformanceDashboard();
+      console.log(`[PerformanceImport] Imported ${r.rows} rows (${r.min_date} → ${r.max_date})`);
+    }
+  } catch (e) {
+    console.warn('[ForecastImport] Boot import skipped:', e.message);
+  }
   pgRun(`
     UPDATE etl_run_log
     SET status='error', error_message='auto-cleanup: stuck on boot', finished_at=NOW()

@@ -207,7 +207,7 @@ export default function ForecastEnginePage() {
                 </ComposedChart>
               </ResponsiveContainer>
             </ChartPanel>
-            <ChartPanel title="Current month focus" subtitle="Actual-to-date plus projection from database values, not Google Sheet formulas.">
+            <ChartPanel title="Current month focus" subtitle="Actual-to-date plus computed projection from the forecast engine (plan calendar + Triple Whale actuals).">
               <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
                 <KpiCard label="NOBL current P50" value={money(currentNobl?.projected_revenue)} sub={currentNobl?.month} accent="nobl" />
                 <KpiCard label="NOBL current status" value={String(currentNobl?.status || '—').toUpperCase()} sub={pct(currentNobl?.variance_pct)} accent={currentNobl?.status === 'red' ? 'danger' : currentNobl?.status === 'amber' ? 'warn' : 'success'} />

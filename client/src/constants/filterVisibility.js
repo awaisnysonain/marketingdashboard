@@ -23,9 +23,9 @@ const RULES = [
   // Live has its own "latest / pick a date" control, so the global date range is hidden there.
   [(p) => p.startsWith('/live'),                         { brand: true,  region: true,  channel: true,  date: false }],
   [(p) => p.startsWith('/nobl-topline'),                 { brand: false, region: true,  channel: true,  date: true }],
-  [(p) => p.startsWith('/nobl-channel-daily'),           { brand: false, region: false, channel: true,  date: true }],
+  [(p) => p.startsWith('/nobl-channel-daily'),           { brand: false, region: true,  channel: true,  date: true }],
   [(p) => p.startsWith('/flo-topline'),                  { brand: false, region: true,  channel: true,  date: true }],
-  [(p) => p.startsWith('/flo-channel-daily'),            { brand: false, region: false, channel: true,  date: true }],
+  [(p) => p.startsWith('/flo-channel-daily'),            { brand: false, region: true,  channel: true,  date: true }],
   [(p) => p.startsWith('/nobl-air-performance'),         { brand: false, region: true,  channel: false, date: true }],
   [(p) => p.startsWith('/store/nobl'),                   { brand: false, region: true,  channel: true,  date: true }],
   [(p) => p.startsWith('/store/flo'),                    { brand: false, region: true,  channel: true,  date: true }],

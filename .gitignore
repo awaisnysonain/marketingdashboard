@@ -14,6 +14,13 @@ coverage/
 .env.*
 !.env.example
 
+# In-app purchase / signing credentials — NEVER commit
+server/credentials/
+*.p8
+*-service_account*.json
+google_service_account*.json
+flo-app-*.json
+
 # Runtime data and databases
 data/
 *.db

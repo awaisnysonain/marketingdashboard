@@ -7,6 +7,9 @@ const { metaAdsDailySourceSql } = require('../etl/metaAdsSync');
 const { getNoblAirDataVersion } = require('../utils/noblAirDataVersion');
 const { getDataVersion } = require('../utils/dataVersion');
 const { withResponseCache } = require('../utils/responseCache');
+const { NOBL_PLAN_2026, NOBL_MER_TARGETS_2026 } = require('../config/forecastSheetConfig');
+const { computeNoblStoreDailyForecast } = require('../forecast/noblForecastEngine');
+const { buildAirAssumptions, buildNoblAirDailyForecast: buildAirDailyFromEngine } = require('../forecast/noblAirForecastEngine');
 
 const metaAirWarmInFlight = new Set();
 
@@ -576,28 +579,8 @@ const FORECAST_BRANDS = {
     label: 'NOBL Travel',
     summaryTable: 'nobl_brand_tw_summary_daily',
     geoTable: 'nobl_brand_tw_geo_daily',
-    plan: {
-      '2026-03': 19117775,
-      '2026-04': 15311615,
-      '2026-05': 14589630,
-      '2026-06': 42000000,
-      '2026-07': 60000000,
-      '2026-08': 58000000,
-      '2026-09': 45200000,
-      '2026-10': 32300000,
-      '2026-11': 142400000,
-      '2026-12': 113900000,
-    },
-    merTargets: {
-      '2026-05': 3.30,
-      '2026-06': 3.25,
-      '2026-07': 3.20,
-      '2026-08': 3.30,
-      '2026-09': 3.20,
-      '2026-10': 3.10,
-      '2026-11': 2.85,
-      '2026-12': 3.00,
-    },
+    plan: { ...NOBL_PLAN_2026 },
+    merTargets: { ...NOBL_MER_TARGETS_2026 },
     regionMerRatios: { USA: 1, US: 1, Canada: 0.729, CA: 0.729, Australia: 0.691, AUS: 0.691, UK: 0.729, EU: 0.0031 },
   },
   FLO: {
@@ -696,6 +679,15 @@ function forecastStatus(variancePct) {
   const abs = Math.abs(variancePct);
   if (abs <= 0.05) return 'green';
   if (abs <= 0.15) return 'amber';
+  return 'red';
+}
+
+// Directional status for actual-vs-forecast: beating/hitting forecast is green,
+// missing is amber/red depending on how far below.
+function directionalForecastStatus(variancePct) {
+  if (variancePct == null) return 'model';
+  if (variancePct >= -0.05) return 'green';
+  if (variancePct >= -0.15) return 'amber';
   return 'red';
 }
 
@@ -880,18 +872,9 @@ async function loadForecastBrand(brandKey, asOfInput) {
 
 async function loadNoblAirRevenueForecast(start, end, daily, ttpCohort) {
   const forecastAsOf = end;
-  const forecastMonths = [
-    ['2026-03', 'Mar', null],
-    ['2026-04', 'Apr', null],
-    ['2026-05', 'May', null],
-    ['2026-06', 'Jun', 42000000],
-    ['2026-07', 'Jul', 60000000],
-    ['2026-08', 'Aug', 58000000],
-    ['2026-09', 'Sep', 45200000],
-    ['2026-10', 'Oct', 32300000],
-    ['2026-11', 'Nov', 142400000],
-    ['2026-12', 'Dec', 113900000],
-  ];
+  const forecastMonths = Object.entries(NOBL_PLAN_2026)
+    .filter(([k]) => k >= '2026-03')
+    .map(([k, plan]) => [k, monthLabel(k).split(' ')[0], plan]);
   const firstMonth = forecastMonths[0][0];
   const lastMonth = forecastMonths[forecastMonths.length - 1][0];
   const currentMonth = monthKey(forecastAsOf);
@@ -1257,10 +1240,68 @@ async function loadNoblStoreActualDailyMap(start, end) {
   }]));
 }
 
-function buildNoblStoreDailyForecast(storeForecast, actualByDate) {
+/** Plan calendar from forecast_plan_daily (imported plan — not computed forecast). */
+async function loadForecastPlanMap() {
+  const res = await pgQuery(`
+    SELECT brand, date::text AS date, plan_revenue, plan_spend, plan_meta_spend, plan_mer,
+           plan_usa, plan_canada, plan_australia, plan_uk, plan_eu, promo, drop_lift, source,
+           updated_at::text AS updated_at
+    FROM forecast_plan_daily
+    ORDER BY brand, date ASC
+  `, []).catch(() => ({ rows: [] }));
+  const byBrand = { NOBL: {}, FLO: {} };
+  for (const r of fmtRows(res.rows)) {
+    if (!byBrand[r.brand]) byBrand[r.brand] = {};
+    byBrand[r.brand][r.date] = r;
+  }
+  const metaRes = await pgQuery(`
+    SELECT brand, COUNT(*)::int AS row_count,
+           MIN(date)::text AS min_date,
+           MAX(date)::text AS max_date,
+           MAX(updated_at)::text AS updated_at
+    FROM forecast_plan_daily
+    GROUP BY brand
+    ORDER BY brand
+  `, []).catch(() => ({ rows: [] }));
+  const brandMeta = fmtRows(metaRes.rows);
+  const totalRows = brandMeta.reduce((s, m) => s + (m.row_count || 0), 0);
+  return {
+    byDate: byBrand.NOBL,
+    byBrand,
+    meta: totalRows > 0 ? {
+      row_count: totalRows,
+      brands: brandMeta,
+      min_date: brandMeta.reduce((m, b) => (!m || b.min_date < m ? b.min_date : m), null),
+      max_date: brandMeta.reduce((m, b) => (!m || b.max_date > m ? b.max_date : m), null),
+      updated_at: brandMeta.reduce((m, b) => (!m || b.updated_at > m ? b.updated_at : m), null),
+      source: 'forecast_plan_daily',
+    } : null,
+  };
+}
+
+/** @deprecated alias */
+async function loadForecastDailyMap() {
+  return loadForecastPlanMap();
+}
+
+function sheetTargetToStatus(targetStatus, variancePct) {
+  const t = String(targetStatus || '').toLowerCase();
+  if (t === 'target met') return 'green';
+  if (t === 'below target') return 'red';
+  if (t === 'future') return 'model';
+  return directionalForecastStatus(variancePct);
+}
+
+function buildNoblStoreDailyForecast(storeForecast, actualByDate, brandKey = 'NOBL', planByDate = {}) {
   const asOf = storeForecast.as_of;
+  if (brandKey === 'NOBL') {
+    const computed = computeNoblStoreDailyForecast(actualByDate, asOf, planByDate);
+    return computed.daily;
+  }
+
   const currentMonth = monthKey(asOf);
   const monthlyByKey = Object.fromEntries((storeForecast.monthly || []).map(r => [r.month_key, r]));
+  const brandMerTargets = (FORECAST_BRANDS[brandKey] || {}).merTargets || {};
   const rows = [];
 
   FORECAST_MONTHS_2026.forEach(key => {
@@ -1269,20 +1310,23 @@ function buildNoblStoreDailyForecast(storeForecast, actualByDate) {
     const futureDates = dates.filter(d => d > asOf);
     const futureWeight = futureDates.reduce((s, d) => s + forecastDayFactors(d).weight, 0) || futureDates.length || 1;
     const actualRevenue = dates.filter(d => d <= asOf).reduce((s, d) => s + toNum(actualByDate[d]?.revenue), 0);
-    const actualSpend = dates.filter(d => d <= asOf).reduce((s, d) => s + toNum(actualByDate[d]?.spend), 0);
     const projectedMonthRevenue = toNum(month.projected_revenue || month.plan_revenue || actualRevenue);
     const remainingRevenue = key === currentMonth
       ? Math.max(0, projectedMonthRevenue - actualRevenue)
       : (key > currentMonth ? projectedMonthRevenue : 0);
-    const targetMer = toNum(month.mer_target || FORECAST_BRANDS.NOBL.merTargets[key] || 3);
+    const targetMer = toNum(month.mer_target || brandMerTargets[key] || 3);
+    const monthWeightSum = dates.reduce((s, d) => s + forecastDayFactors(d).weight, 0) || dates.length;
+    const planMonthRev = toNum(month.plan_revenue || month.projected_revenue || projectedMonthRevenue);
 
     dates.forEach(date => {
       const actual = date <= asOf ? actualByDate[date] : null;
       const factors = forecastDayFactors(date);
       const isFuture = date > asOf;
+      const planRow = planByDate[date];
+      const dayPlan = planRow ? toNum(planRow.plan_revenue) : (planMonthRev > 0 ? planMonthRev * (factors.weight / monthWeightSum) : 0);
       const allocatedRevenue = isFuture ? remainingRevenue * (factors.weight / futureWeight) : 0;
-      const projectedRevenue = actual ? toNum(actual.revenue) : allocatedRevenue;
-      const projectedSpend = actual ? toNum(actual.spend) : (targetMer > 0 ? projectedRevenue / targetMer : 0);
+      const forecastRevenue = isFuture ? allocatedRevenue : dayPlan;
+      const projectedSpend = actual ? toNum(actual.spend) : (targetMer > 0 ? forecastRevenue / targetMer : 0);
       rows.push({
         date,
         month: monthLabel(key),
@@ -1292,9 +1336,11 @@ function buildNoblStoreDailyForecast(storeForecast, actualByDate) {
         actual_spend: actual ? toNum(actual.spend) : null,
         actual_orders: actual ? Math.round(toNum(actual.orders)) : null,
         actual_mer: actual && toNum(actual.spend) > 0 ? toNum(actual.revenue) / toNum(actual.spend) : null,
-        forecast_revenue: projectedRevenue,
+        plan_revenue: dayPlan,
+        projected_revenue: forecastRevenue,
+        forecast_revenue: forecastRevenue,
         forecast_spend: projectedSpend,
-        forecast_mer: projectedSpend > 0 ? projectedRevenue / projectedSpend : null,
+        forecast_mer: projectedSpend > 0 ? forecastRevenue / projectedSpend : null,
         plan_revenue_month: month.plan_revenue || null,
         projected_revenue_month: month.projected_revenue || null,
         mer_target: targetMer,
@@ -1304,9 +1350,11 @@ function buildNoblStoreDailyForecast(storeForecast, actualByDate) {
         sale_tier: factors.sale_tier,
         drop_type: factors.drop_type,
         weight: factors.weight,
+        target_status: null,
+        forecast_source: 'engine',
         reason: actual
           ? 'Database actual from Triple Whale daily summary.'
-          : (date <= asOf ? 'Completed day is missing from the database; refresh/backfill ETL.' : 'Database-backed forecast allocated from monthly P50 by day-of-week, sale, seasonality, and drop weights.'),
+          : (date <= asOf ? 'Completed day is missing from the database; refresh/backfill ETL.' : 'Model forecast allocated from monthly plan.'),
       });
     });
   });
@@ -1328,57 +1376,14 @@ async function loadNoblAirActualDailyMap(start, end) {
 }
 
 function buildNoblAirDailyForecast(storeDailyRows, airActualByDate, airForecast) {
-  const a = airForecast.assumptions || {};
-  const avgRevenuePerOrder = toNum(a.avg_revenue_per_store_order);
-  const attachRate = toNum(a.overall_attach_rate);
-  const activationRate = toNum(a.forecast_activation_rate);
-  const tagPerAirOrder = toNum(a.tag_net_sales_per_air_order);
-  const tierPrice = toNum(a.avg_tier_price_converted_subs);
-
-  return storeDailyRows.map(store => {
-    const actual = airActualByDate[store.date];
-    const hasActual = store.row_type !== 'Projected' && !!actual && (toNum(actual.total_orders) > 0 || toNum(actual.air_orders) > 0 || toNum(actual.combined_net_revenue) !== 0);
-    const rowType = hasActual ? 'Actual' : (store.row_type === 'Projected' ? 'Projected' : 'Missing Actual');
-    const forecastStoreRevenue = toNum(store.forecast_revenue);
-    const forecastEligibleOrders = avgRevenuePerOrder > 0 ? forecastStoreRevenue / avgRevenuePerOrder : 0;
-    const forecastAirOrders = forecastEligibleOrders * attachRate;
-    const forecastActivations = forecastEligibleOrders * activationRate;
-    const forecastTagRevenue = forecastAirOrders * tagPerAirOrder;
-    const forecastSubRevenue = forecastActivations * tierPrice;
-    const forecastAirRevenue = forecastTagRevenue + forecastSubRevenue;
-
-    return {
-      date: store.date,
-      month: store.month,
-      month_key: store.month_key,
-      row_type: rowType,
-      actual_store_revenue: store.actual_revenue,
-      actual_eligible_orders: hasActual ? Math.round(toNum(actual.total_orders)) : null,
-      actual_air_orders: hasActual ? Math.round(toNum(actual.air_orders)) : null,
-      actual_attach_rate: hasActual ? toNum(actual.attach_rate) : null,
-      actual_ttp_rate: hasActual ? toNum(actual.ttp_rate) : null,
-      actual_activation_rate: hasActual ? toNum(actual.activation_rate) : null,
-      actual_tag_rev_net: hasActual ? toNum(actual.tag_net_sales) : null,
-      actual_sub_rev_net: hasActual ? toNum(actual.sub_net_sales) : null,
-      actual_rebill_rev_net: hasActual ? toNum(actual.rebill_revenue) : null,
-      actual_air_rev_net: hasActual ? toNum(actual.combined_net_revenue) : null,
-      mature_count: hasActual ? Math.round(toNum(actual.mature_count)) : null,
-      converted_count: hasActual ? Math.round(toNum(actual.converted_count)) : null,
-      forecast_store_revenue: forecastStoreRevenue,
-      forecast_eligible_orders: Math.round(forecastEligibleOrders),
-      forecast_air_orders: Math.round(forecastAirOrders),
-      forecast_activations: Math.round(forecastActivations),
-      forecast_attach_rate: attachRate,
-      forecast_activation_rate: activationRate,
-      forecast_tag_rev_net: Number(forecastTagRevenue.toFixed(2)),
-      forecast_sub_rev_net: Number(forecastSubRevenue.toFixed(2)),
-      forecast_total_air_rev_net: Number(forecastAirRevenue.toFixed(2)),
-      target_status: rowType === 'Projected'
-        ? 'Future'
-        : (!hasActual ? 'Missing Actual' : (toNum(actual.combined_net_revenue) >= forecastAirRevenue ? 'Target Met' : 'Below Target')),
-      forecast_note: 'Database-backed NOBL Air forecast: NOBL store forecast × eligible AOV, attach, and activation assumptions from nobl_air_daily.',
-    };
+  const assumptions = buildAirAssumptions(airActualByDate, {
+    AOV_ELIGIBLE: toNum(airForecast?.assumptions?.avg_revenue_per_store_order) || undefined,
+    ATTACH_RATE: toNum(airForecast?.assumptions?.overall_attach_rate) || undefined,
+    ACTIVATION_RATE: toNum(airForecast?.assumptions?.forecast_activation_rate) || undefined,
+    TAG_REV_PER_AIR: toNum(airForecast?.assumptions?.tag_net_sales_per_air_order) || undefined,
+    SUB_REV_PER_ACTIVATION: toNum(airForecast?.assumptions?.avg_tier_price_converted_subs) || undefined,
   });
+  return buildAirDailyFromEngine(storeDailyRows, airActualByDate, assumptions);
 }
 
 // GET /dashboard-forecast — DB-backed replacement for sheet forecast tabs.
@@ -1387,19 +1392,21 @@ router.get('/dashboard-forecast', async (req, res) => {
     const requestedAsOf = req.query.asOf ? String(req.query.asOf).slice(0, 10) : null;
     const version = await getDataVersion();
     const { body } = await withResponseCache('forecast', `df:${requestedAsOf || 'latest'}`, version, async () => {
+    const { byDate: planByDate, meta: forecastMeta } = await loadForecastPlanMap();
     const nobl = await loadForecastBrand('NOBL', requestedAsOf);
     const airAsOf = await capNoblAirEndDate(nobl.as_of);
     const ttpCohort = await loadNoblAirTtpAsOfEnd(airAsOf, null);
     const air = await loadNoblAirRevenueForecast('2026-03-01', airAsOf, [], ttpCohort);
     const storeActuals = await loadNoblStoreActualDailyMap('2026-01-01', '2026-12-31');
-    const storeDaily = buildNoblStoreDailyForecast(nobl, storeActuals);
+    const storeDaily = buildNoblStoreDailyForecast(nobl, storeActuals, 'NOBL', planByDate);
     const airActuals = await loadNoblAirActualDailyMap('2026-03-01', '2026-12-31');
     const airDaily = buildNoblAirDailyForecast(storeDaily.filter(r => r.date >= '2026-03-01'), airActuals, air);
 
     return {
       as_of: nobl.as_of,
       air_as_of: airAsOf,
-      data_source: 'Database first: nobl_brand_tw_summary_daily + nobl_air_daily. Google Sheets are not used for dashboard values.',
+      forecast_meta: forecastMeta,
+      data_source: 'Computed NOBL store + Air forecast engine. Plan calendar from forecast_plan_daily; actuals from nobl_brand_tw_summary_daily + nobl_air_daily.',
       nobl: {
         monthly: nobl.monthly,
         daily: storeDaily,
@@ -1416,14 +1423,237 @@ router.get('/dashboard-forecast', async (req, res) => {
       },
       methodology: {
         purpose: 'One dashboard page for the four forecast tabs: NOBL monthly, NOBL daily, NOBL Air monthly, and NOBL Air daily.',
-        checks: ['actuals come from database tables first', 'future rows use weighted forecast model', 'missing completed days are shown as Missing Actual instead of silently using sheet values'],
-        database_tables: ['nobl_brand_tw_summary_daily', 'nobl_air_daily'],
+        checks: [
+          'actuals come from database tables first',
+          'daily store + air projected values are computed by the forecast engine (not imported sheet output)',
+          forecastMeta ? 'plan calendar loaded from forecast_plan_daily' : 'plan calendar uses weighted monthly distribution until plan import runs',
+          'red/green compares actual vs computed daily plan/forecast target',
+        ],
+        database_tables: ['nobl_brand_tw_summary_daily', 'nobl_air_daily', 'forecast_plan_daily'],
       },
     };
     });
     res.json(body);
   } catch (e) {
     console.error('[Analytics /dashboard-forecast]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Generic per-brand actual daily map keyed on the brand's summary table.
+async function loadBrandActualDailyMap(brandKey, start, end) {
+  const cfg = FORECAST_BRANDS[brandKey];
+  if (!cfg) return {};
+  const res = await pgQuery(`
+    SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') AS date,
+           COALESCE(order_revenue, total_revenue, 0)::numeric(14,2) AS revenue,
+           COALESCE(total_spend, 0)::numeric(14,2) AS spend,
+           COALESCE(total_orders, 0)::int AS orders
+    FROM ${cfg.summaryTable}
+    WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+    ORDER BY date ASC
+  `, [start, end]).catch(() => ({ rows: [] }));
+  return Object.fromEntries(fmtRows(res.rows).map(r => [r.date, {
+    date: r.date,
+    revenue: toNum(r.revenue),
+    spend: toNum(r.spend),
+    orders: Math.round(toNum(r.orders)),
+  }]));
+}
+
+// GET /forecast-daily — per-brand daily forecast vs actual for a date range.
+// Powers the Forecast vs Actuals daily view and the red/green daily indicators
+// surfaced across the daily pages.
+router.get('/forecast-daily', async (req, res) => {
+  try {
+    const requested = String(req.query.brand || 'ALL').toUpperCase();
+    const brandKeys = requested === 'ALL'
+      ? Object.keys(FORECAST_BRANDS)
+      : requested.split(',').map(s => s.trim()).filter(k => FORECAST_BRANDS[k]);
+    const start = req.query.start ? String(req.query.start).slice(0, 10) : '2026-01-01';
+    const end = req.query.end ? String(req.query.end).slice(0, 10) : '2026-12-31';
+    const requestedAsOf = req.query.asOf ? String(req.query.asOf).slice(0, 10) : null;
+    const version = await getDataVersion();
+    const cacheKey = `fd:${requested}:${start}:${end}:${requestedAsOf || 'latest'}`;
+    const { body } = await withResponseCache('forecast', cacheKey, version, async () => {
+      const { byDate: planByDate, byBrand, meta: forecastMeta } = await loadForecastPlanMap();
+      const airActualsByDate = (brandKeys.includes('NOBL') || requested === 'ALL')
+        ? await loadNoblAirActualDailyMap('2026-01-01', '2026-12-31')
+        : {};
+      const brands = [];
+      for (const brandKey of brandKeys) {
+        const brand = await loadForecastBrand(brandKey, requestedAsOf);
+        const actuals = await loadBrandActualDailyMap(brandKey, '2026-01-01', '2026-12-31');
+        const planForBrand = byBrand[brandKey] || (brandKey === 'NOBL' ? planByDate : {});
+        const allRows = buildNoblStoreDailyForecast(brand, actuals, brandKey, planForBrand);
+        const airByDate = brandKey === 'NOBL'
+          ? Object.fromEntries(
+            buildNoblAirDailyForecast(allRows, airActualsByDate, {}).map(r => [r.date, r])
+          )
+          : {};
+        const rows = allRows
+          .filter(r => r.date >= start && r.date <= end)
+          .map(r => {
+            const actualRev = r.actual_revenue;
+            const forecastRev = toNum(r.forecast_revenue);
+            const planRev = toNum(r.plan_revenue);
+            const variance = actualRev != null && forecastRev > 0 ? (actualRev - forecastRev) / forecastRev : null;
+            const airActual = brandKey === 'NOBL' ? airActualsByDate[r.date] : null;
+            const airRow = airByDate[r.date];
+            return {
+              date: r.date,
+              row_type: r.row_type,
+              plan_revenue: planRev,
+              forecast_revenue: forecastRev,
+              projected_revenue: toNum(r.projected_revenue),
+              forecast_air_revenue: airRow ? toNum(airRow.forecast_air_revenue) : null,
+              actual_air_revenue: airActual ? toNum(airActual.combined_net_revenue) : null,
+              forecast_spend: toNum(r.forecast_spend),
+              forecast_mer: r.forecast_mer,
+              actual_revenue: actualRev,
+              actual_spend: r.actual_spend,
+              actual_mer: r.actual_mer,
+              mer_target: r.mer_target,
+              variance_pct: variance,
+              status: directionalForecastStatus(variance),
+              target_status: r.target_status || null,
+              forecast_source: r.forecast_source || 'engine',
+              reason: r.reason || null,
+              sale_name: r.sale_name,
+              drop_type: r.drop_type,
+            };
+          });
+        brands.push({ brand: brandKey, label: brand.label, as_of: brand.as_of, daily: rows });
+      }
+      // Combined "ALL" daily series summed across brands by date.
+      const combinedByDate = {};
+      for (const b of brands) {
+        for (const r of b.daily) {
+          const c = combinedByDate[r.date] || {
+            date: r.date, forecast_revenue: 0, forecast_spend: 0,
+            actual_revenue: 0, actual_spend: 0, _hasActual: false,
+            nobl_forecast: 0, nobl_actual: 0, flo_forecast: 0, flo_actual: 0,
+            _noblHasActual: false, _floHasActual: false,
+          };
+          c.forecast_revenue += toNum(r.forecast_revenue);
+          c.forecast_spend += toNum(r.forecast_spend);
+          if (r.actual_revenue != null) { c.actual_revenue += toNum(r.actual_revenue); c._hasActual = true; }
+          if (r.actual_spend != null) c.actual_spend += toNum(r.actual_spend);
+          if (b.brand === 'NOBL') {
+            c.nobl_forecast += toNum(r.forecast_revenue);
+            if (r.actual_revenue != null) { c.nobl_actual += toNum(r.actual_revenue); c._noblHasActual = true; }
+            c.nobl_forecast_air = r.forecast_air_revenue;
+            c.nobl_actual_air = r.actual_air_revenue;
+          }
+          if (b.brand === 'FLO') {
+            c.flo_forecast += toNum(r.forecast_revenue);
+            if (r.actual_revenue != null) { c.flo_actual += toNum(r.actual_revenue); c._floHasActual = true; }
+          }
+          combinedByDate[r.date] = c;
+        }
+      }
+      const combined = Object.values(combinedByDate)
+        .sort((a, b) => a.date.localeCompare(b.date))
+        .map(c => {
+          const actualRev = c._hasActual ? c.actual_revenue : null;
+          const variance = actualRev != null && c.forecast_revenue > 0 ? (actualRev - c.forecast_revenue) / c.forecast_revenue : null;
+          return {
+            date: c.date,
+            forecast_revenue: c.forecast_revenue,
+            forecast_spend: c.forecast_spend,
+            forecast_mer: c.forecast_spend > 0 ? c.forecast_revenue / c.forecast_spend : null,
+            actual_revenue: actualRev,
+            actual_spend: c._hasActual ? c.actual_spend : null,
+            actual_mer: c._hasActual && c.actual_spend > 0 ? c.actual_revenue / c.actual_spend : null,
+            variance_pct: variance,
+            status: sheetTargetToStatus(null, variance),
+            nobl_forecast: c.nobl_forecast,
+            nobl_actual: c._noblHasActual ? c.nobl_actual : null,
+            flo_forecast: c.flo_forecast,
+            flo_actual: c._floHasActual ? c.flo_actual : null,
+            nobl_forecast_air: c.nobl_forecast_air ?? null,
+            nobl_actual_air: c.nobl_actual_air ?? null,
+          };
+        });
+      const asOf = brands.reduce((m, b) => (b.as_of > m ? b.as_of : m), brands[0]?.as_of || end);
+      return { as_of: asOf, start, end, brands, combined, forecast_meta: forecastMeta };
+    });
+    res.json(body);
+  } catch (e) {
+    console.error('[Analytics /forecast-daily]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /performance-dashboard — NOBL + FLO CPMR, revenue A vs F, weekly & rolling metrics.
+router.get('/performance-dashboard', async (req, res) => {
+  try {
+    const brand = String(req.query.brand || 'ALL').toUpperCase();
+    const start = req.query.start ? String(req.query.start).slice(0, 10) : '2026-01-01';
+    const end = req.query.end ? String(req.query.end).slice(0, 10) : '2026-12-31';
+    const version = await getDataVersion();
+    const cacheKey = `perf:${brand}:${start}:${end}`;
+    const { body } = await withResponseCache('performance', cacheKey, version, async () => {
+      const whereBrand = brand === 'ALL' ? '' : `AND brand = $3`;
+      const params = brand === 'ALL' ? [start, end] : [start, end, brand];
+      const resRows = await pgQuery(`
+        SELECT brand, date::text AS date, gross_sales_tw, meta_cpmr,
+               revenue_forecast, revenue_actual, week_start::text AS week_start,
+               weekly_gross_sales, avg_meta_cpmr, rolling_7d_reach, rolling_7d_cpmr,
+               meta_cpmr_2025, meta_cpmr_2026, tiktok_cpmr_2025, tiktok_cpmr_2026,
+               cvr_weekly, updated_at::text AS updated_at
+        FROM brand_performance_daily
+        WHERE date BETWEEN $1::date AND $2::date ${whereBrand}
+        ORDER BY brand, date ASC
+      `, params).catch(() => ({ rows: [] }));
+      const rows = fmtRows(resRows.rows).map(r => ({
+        ...r,
+        variance_pct: r.revenue_forecast > 0 && r.revenue_actual != null
+          ? (toNum(r.revenue_actual) - toNum(r.revenue_forecast)) / toNum(r.revenue_forecast)
+          : null,
+        status: sheetTargetToStatus(null, r.revenue_forecast > 0 && r.revenue_actual != null
+          ? (toNum(r.revenue_actual) - toNum(r.revenue_forecast)) / toNum(r.revenue_forecast)
+          : null),
+      }));
+      const metaRes = await pgQuery(`
+        SELECT COUNT(*)::int AS row_count, MIN(date)::text AS min_date,
+               MAX(date)::text AS max_date, MAX(updated_at)::text AS updated_at
+        FROM brand_performance_daily
+      `, []).catch(() => ({ rows: [{}] }));
+      const meta = fmtRows(metaRes.rows)[0] || {};
+      const byBrand = {};
+      for (const r of rows) {
+        if (!byBrand[r.brand]) byBrand[r.brand] = [];
+        byBrand[r.brand].push(r);
+      }
+      const weekly = [];
+      const seenWeeks = new Set();
+      for (const r of rows) {
+        if (!r.week_start || seenWeeks.has(`${r.brand}:${r.week_start}`)) continue;
+        seenWeeks.add(`${r.brand}:${r.week_start}`);
+        weekly.push({
+          brand: r.brand,
+          week_start: r.week_start,
+          weekly_gross_sales: toNum(r.weekly_gross_sales),
+          avg_meta_cpmr: toNum(r.avg_meta_cpmr),
+        });
+      }
+      return {
+        start, end, brand, daily: rows, by_brand: byBrand, weekly,
+        meta: meta.row_count > 0 ? meta : null,
+        charts: [
+          { id: 'revenue_af', title: 'Daily Revenue — Actual vs Forecast', brands: ['NOBL', 'FLO'] },
+          { id: 'meta_cpmr_yoy', title: 'Meta CPMR 2025 vs 2026', brands: ['NOBL', 'FLO'] },
+          { id: 'weekly_gross', title: 'Weekly Gross Sales & Avg Meta CPMR', brands: ['NOBL'] },
+          { id: 'rolling_7d', title: '7-Day Rolling Reach & CPMR', brands: ['NOBL'] },
+          { id: 'tiktok_cpmr_yoy', title: 'TikTok CPMR 2025 vs 2026', brands: ['NOBL', 'FLO'] },
+        ],
+        data_source: 'brand_performance_daily (imported via ETL)',
+      };
+    });
+    res.json(body);
+  } catch (e) {
+    console.error('[Analytics /performance-dashboard]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -1730,9 +1960,49 @@ router.get('/channels', async (req, res) => {
   const brand = (req.query.brand || '').toUpperCase();
   const sortBy = String(req.query.sortBy || '').trim();
   const sortDir = (String(req.query.dir || 'asc').toLowerCase() === 'desc') ? 'desc' : 'asc';
+  // Region scoping: channel grain is not tracked per region, so when a specific
+  // region (or set of regions) is selected we serve accurate region-level daily
+  // totals from the geo table, surfaced as one series per region.
+  const regionRaw = String(req.query.region || req.query.regions || '').toUpperCase();
+  const regionList = regionRaw.split(',').map(s => s.trim()).filter(Boolean).filter(r => r !== 'ALL');
+  const regionScoped = regionList.length > 0 && (brand === 'NOBL' || brand === 'FLO');
+  const GEO_TABLE = { NOBL: 'nobl_brand_tw_geo_daily', FLO: 'flo_brand_tw_geo_daily' };
   try {
     const version = await getDataVersion();
-    const { body } = await withResponseCache('channels', `ch:${brand}:${start}:${end}:${sortBy}:${sortDir}`, version, async () => {
+    const { body } = await withResponseCache('channels', `ch:${brand}:${start}:${end}:${regionRaw}:${sortBy}:${sortDir}`, version, async () => {
+    if (regionScoped) {
+      const r = await pgQuery(
+        `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date, UPPER(region) AS region,
+                revenue_actual, spend_actual
+         FROM ${GEO_TABLE[brand]}
+         WHERE UPPER(region) = ANY($3::text[])
+           AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
+         ORDER BY date, region`,
+        [start, end, regionList],
+      );
+      const regionRows = r.rows.map((row) => {
+        const spend = Number(row.spend_actual) || 0;
+        const revenue = Number(row.revenue_actual) || 0;
+        return {
+          date: row.date,
+          brand,
+          channel: row.region,
+          spend_1d: spend,
+          revenue_1d: revenue,
+          purchases_1d: null,
+          roas_1d: spend > 0 ? revenue / spend : null,
+          spend_7d: null,
+          new_cust_orders: null,
+          cac: null,
+        };
+      });
+      return {
+        rows: regionRows,
+        region_scoped: true,
+        regions: regionList,
+        channel_level_available: false,
+      };
+    }
     let rows = [];
     if (brand === 'NOBL') {
       const r = await pgQuery(

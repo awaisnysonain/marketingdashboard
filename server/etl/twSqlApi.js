@@ -57,6 +57,12 @@ function brandCreds(brand) {
         shopId: process.env.NOBL_EU_TW_SHOP_ID || process.env.NOBL_TW_SHOP_ID,
         apiKey: process.env.NOBL_EU_TW_API_KEY,
       };
+    case 'NOBL_UK':
+      // Separate UK Shopify shop (wdwzan-tc.myshopify.com) with its own TW workspace.
+      return {
+        shopId: process.env.NOBL_UK_TW_SHOP_ID,
+        apiKey: process.env.NOBL_UK_TW_API_KEY,
+      };
     case 'NOBL':
     default:
       return {

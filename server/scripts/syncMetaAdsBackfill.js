@@ -4,10 +4,13 @@
  * Usage:
  *   node server/scripts/syncMetaAdsBackfill.js
  *   node server/scripts/syncMetaAdsBackfill.js 2025-01-01 2026-05-26
+ *   node server/scripts/syncMetaAdsBackfill.js 2025-01-01 2026-05-26 FLO
+ *   node server/scripts/syncMetaAdsBackfill.js 2025-01-01 2026-05-26 ALL
  */
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 
 const { syncMetaAds } = require('../etl/metaAdsSync');
+const { metaConfiguredBrands } = require('../config/metaConfig');
 const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
 const { invalidateNoblAirDataVersionCache } = require('../utils/noblAirDataVersion');
 const { clearResponseCache } = require('../utils/responseCache');
@@ -42,33 +45,45 @@ async function main() {
     return toISO(d);
   })();
   const end = process.argv[3] || today;
+  const brandArg = String(process.argv[4] || 'NOBL').toUpperCase();
+  const brands = brandArg === 'ALL'
+    ? (metaConfiguredBrands().length ? metaConfiguredBrands() : ['NOBL'])
+    : [brandArg];
 
-  console.log(`Meta ads backfill: ${start} → ${end}`);
+  console.log(`Meta ads backfill: ${start} → ${end} | brands: ${brands.join(',')}`);
   const chunks = syncChunks(start, end);
   let total = 0;
   const errors = [];
 
-  for (const chunk of chunks) {
-    console.log(`  chunk ${chunk.start} .. ${chunk.end}`);
-    const r = await syncMetaAds('NOBL', chunk.start, chunk.end);
-    total += r.rows || 0;
-    if (r.errors?.length) errors.push(...r.errors);
-    if (r.skipped) {
-      console.error('Skipped:', r.errors?.[0] || 'no credentials');
-      process.exit(1);
+  for (const brand of brands) {
+    let brandTotal = 0;
+    for (const chunk of chunks) {
+      console.log(`  ${brand} ${chunk.start} .. ${chunk.end}`);
+      const r = await syncMetaAds(brand, chunk.start, chunk.end);
+      brandTotal += r.rows || 0;
+      total += r.rows || 0;
+      if (r.errors?.length) errors.push(...r.errors);
+      if (r.skipped) {
+        console.error(`Skipped ${brand}:`, r.errors?.[0] || 'no credentials');
+        break;
+      }
     }
+    console.log(`  ${brand} upserted: ${brandTotal} row(s)`);
   }
 
-  console.log(`Meta upserted: ${total} row(s)`);
+  console.log(`Meta upserted total: ${total} row(s)`);
   if (errors.length) {
     console.warn('Errors:', errors.slice(0, 10).join('; '));
   }
 
-  console.log('Refreshing nobl_air_meta_ad_daily cache…');
-  const agg = await refreshNoblAirMetaAdDaily(start, end);
-  console.log(`Cache rows: ${agg.rows}`);
-  invalidateNoblAirDataVersionCache();
-  clearResponseCache('nobl-air');
+  // The Air Meta cache is NOBL-specific; only refresh it when NOBL was synced.
+  if (brands.includes('NOBL')) {
+    console.log('Refreshing nobl_air_meta_ad_daily cache…');
+    const agg = await refreshNoblAirMetaAdDaily(start, end);
+    console.log(`Cache rows: ${agg.rows}`);
+    invalidateNoblAirDataVersionCache();
+    clearResponseCache('nobl-air');
+  }
   console.log('Done.');
 }
 

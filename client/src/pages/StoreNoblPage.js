@@ -15,6 +15,10 @@ import { aggCellKey, dailyCellKey, dailyCellLabel, entityDateCellKey, entityDate
 import { L, TIP } from '../copy/plainLanguage';
 import { useDashboardFilters } from '../context/DashboardFilterContext';
 import { fmtAxisRatio, fmtAxisCurrency } from '../utils/chartHelpers';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { buildForecastCellStatus } from '../utils/forecastCellStatus';
+
+const NOBL_METRIC_MAP = { 'order_revenue': 'revenue', 'total_revenue': 'revenue', 'revenue': 'revenue', 'total_spend': 'spend', 'spend': 'spend', 'Revenue': 'revenue', 'Spend': 'spend' };
 function fmtLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -49,6 +53,8 @@ const TABS = [
 export default function StoreNoblPage({ showToast }) {
   const { dateRange, filterByChannels, filterByRegions, isAllRegions } = useDashboardFilters();
   const range = dateRange;
+  const fc = useDailyForecast('NOBL', dateRange.start, dateRange.end);
+  const cellStatus = useCallback(buildForecastCellStatus(fc, { metrics: NOBL_METRIC_MAP }), [fc]);
   const [data, setData]     = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError]   = useState(null);
@@ -175,7 +181,7 @@ export default function StoreNoblPage({ showToast }) {
             ))}
           </div>
 
-          {tab === 'overview'      && <OverviewTab      summary={summary}  totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} />}
+          {tab === 'overview'      && <OverviewTab      summary={summary}  totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} cellStatus={cellStatus} />}
           {tab === 'channels'      && <ChannelsTab      channels={channels} chAgg={chAgg} />}
           {tab === 'regions'       && <RegionsTab       geo={geo}     geoAgg={geoAgg} />}
           {tab === 'subscriptions' && <SubscriptionsTab subDaily={subDaily} subStats={subStats} subTotals={subTotals} />}
@@ -201,7 +207,7 @@ const OV_METRICS = [
   { key: 'aov', label: 'AOV', type: '$' },
 ];
 
-function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
+function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct, cellStatus }) {
   const summaryByDate = {};
   const dates = [];
   for (const r of summary) {
@@ -273,7 +279,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
 
       {/* Daily summary table */}
       <ChartPanel title="Daily Summary — All Days">
-        <VerticalDataTable dates={dates} getRow={(d) => summaryByDate[d]} metrics={OV_METRICS} tableScope="overview" />
+        <VerticalDataTable dates={dates} getRow={(d) => summaryByDate[d]} metrics={OV_METRICS} tableScope="overview" cellStatus={cellStatus} dateField="date" />
       </ChartPanel>
     </div>
   );

@@ -3,6 +3,7 @@
  * Used as primary spend source; tw_ads_daily is fallback when Meta sync is missing or fails.
  */
 const { pgQuery, pgRun } = require('../db/postgres');
+const { getMetaAccount } = require('../config/metaConfig');
 
 const PURCHASE_ACTION_TYPES = [
   'omni_purchase',
@@ -24,12 +25,6 @@ function firstActionValue(actions, types) {
     if (match) return toNum(match.value);
   }
   return 0;
-}
-
-function normalizeActId(accountId) {
-  const id = String(accountId || '').trim();
-  if (!id) return '';
-  return id.startsWith('act_') ? id : `act_${id}`;
 }
 
 function parseInsightDate(row) {
@@ -86,7 +81,7 @@ async function fetchMetaInsightsPage(url, timeoutMs = 120_000, attempt = 0) {
   return json;
 }
 
-async function fetchMetaInsightsRange(actId, token, startDate, endDate) {
+async function fetchMetaInsightsRange(actId, token, startDate, endDate, apiVersion = 'v20.0') {
   const fields = [
     'campaign_id', 'campaign_name', 'adset_id', 'adset_name', 'ad_id', 'ad_name',
     'spend', 'impressions', 'clicks', 'inline_link_clicks', 'actions', 'action_values',
@@ -102,7 +97,7 @@ async function fetchMetaInsightsRange(actId, token, startDate, endDate) {
     limit: '500',
   });
 
-  let nextUrl = `https://graph.facebook.com/v20.0/${actId}/insights?${params}`;
+  let nextUrl = `https://graph.facebook.com/${apiVersion}/${actId}/insights?${params}`;
   const rawRows = [];
   let pages = 0;
   const maxPages = 80;
@@ -217,18 +212,18 @@ async function upsertMetaAdRows(normalized) {
   return { written, errors };
 }
 
-async function fetchAndUpsertMetaRange(brand, actId, token, startDate, endDate) {
+async function fetchAndUpsertMetaRange(brand, actId, token, startDate, endDate, apiVersion = 'v20.0') {
   let rawRows = [];
   try {
-    rawRows = await fetchMetaInsightsRange(actId, token, startDate, endDate);
+    rawRows = await fetchMetaInsightsRange(actId, token, startDate, endDate, apiVersion);
   } catch (e) {
     if (startDate !== endDate && /reduce the amount|timeout|timed out|try again/i.test(e.message)) {
       const span = daysBetween(startDate, endDate);
       const midOffset = Math.floor(span / 2);
       const midDate = addDays(startDate, midOffset);
       console.warn(`[metaAdsSync] split ${startDate}..${endDate} at ${midDate}: ${e.message}`);
-      const left = await fetchAndUpsertMetaRange(brand, actId, token, startDate, midDate);
-      const right = await fetchAndUpsertMetaRange(brand, actId, token, addDays(midDate, 1), endDate);
+      const left = await fetchAndUpsertMetaRange(brand, actId, token, startDate, midDate, apiVersion);
+      const right = await fetchAndUpsertMetaRange(brand, actId, token, addDays(midDate, 1), endDate, apiVersion);
       return {
         rows: left.rows + right.rows,
         errors: [...left.errors, ...right.errors],
@@ -256,29 +251,26 @@ async function fetchAndUpsertMetaRange(brand, actId, token, startDate, endDate) 
 
 /**
  * Pull ad-level insights from Meta and upsert into meta_ads_daily.
- * @param {'NOBL'|'FLO'} brand — only NOBL is supported today (single Meta ad account).
+ * Works for any brand that has Meta credentials configured (NOBL, FLO, …).
+ * @param {'NOBL'|'FLO'} brand
  */
 async function syncMetaAds(brand, startDate, endDate) {
-  const errors = [];
-  if (brand !== 'NOBL') {
-    return { rows: 0, errors, skipped: true };
-  }
-
-  const token = process.env.META_ADS_READ_TOKEN;
-  const accountId = process.env.META_AD_ACCOUNT_ID;
-  if (!token || !accountId) {
+  const account = getMetaAccount(brand);
+  if (!account) {
+    const B = String(brand || '').toUpperCase();
     return {
       rows: 0,
-      errors: ['Missing META_AD_ACCOUNT_ID or META_ADS_READ_TOKEN — using Triple Whale only'],
+      errors: [`No Meta account configured for ${B} — set ${B}_META_AD_ACCOUNT_ID and ${B}_META_ACCESS_TOKEN (using Triple Whale only)`],
       skipped: true,
     };
   }
 
   await ensureMetaAdsDailyTable();
 
-  const actId = normalizeActId(accountId);
-  const result = await fetchAndUpsertMetaRange(brand, actId, token, startDate, endDate);
-  return { rows: result.rows, errors: [...errors, ...result.errors] };
+  const result = await fetchAndUpsertMetaRange(
+    account.brand, account.accountId, account.token, startDate, endDate, account.apiVersion,
+  );
+  return { rows: result.rows, errors: result.errors };
 }
 
 /** SQL fragment: daily ad spend — Meta first, Triple Whale fallback. */
@@ -319,12 +311,17 @@ function adsSpendDailySubquery(dateParams = '$1::date AND $2::date', brand = "'N
       AND COALESCE(m.adset_id, '') = COALESCE(t.adset_id, '')`;
 }
 
-/** All Meta ad rows for dashboard queries: NOBL = Meta-first merge, other brands = TW only. */
+/**
+ * All Meta ad rows for dashboard queries — Meta-first merge for EVERY brand.
+ * Any brand that has rows in meta_ads_daily uses them (more accurate, less lag);
+ * brands/rows without a Meta match fall back to Triple Whale (tw_ads_daily).
+ * Consumers still filter by `brand` so NOBL-only queries are unaffected.
+ */
 function metaAdsDailySourceSql(dateBetween = '$1::date AND $2::date') {
   return `
     (
       SELECT
-        'NOBL'::text AS brand,
+        COALESCE(m.brand, t.brand) AS brand,
         COALESCE(m.date, t.date) AS date,
         'META'::text AS platform,
         COALESCE(m.campaign_id, t.campaign_id, '') AS campaign_id,
@@ -342,28 +339,23 @@ function metaAdsDailySourceSql(dateBetween = '$1::date AND $2::date') {
         COALESCE(m.add_to_cart, t.add_to_cart, 0)::bigint AS add_to_cart,
         COALESCE(m.initiate_checkout, t.initiate_checkout, 0)::bigint AS initiate_checkout
       FROM (
-        SELECT date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name,
+        SELECT brand, date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name,
           spend, revenue, purchases, impressions, clicks, link_clicks, add_to_cart, initiate_checkout
         FROM meta_ads_daily
-        WHERE brand = 'NOBL' AND platform = 'META' AND date BETWEEN ${dateBetween}
+        WHERE platform = 'META' AND date BETWEEN ${dateBetween}
           AND COALESCE(ad_id, '') <> ''
       ) m
       FULL OUTER JOIN (
-        SELECT date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name,
+        SELECT brand, date, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name,
           spend, revenue, purchases, impressions, clicks, link_clicks, add_to_cart, initiate_checkout
         FROM tw_ads_daily
-        WHERE brand = 'NOBL' AND platform = 'META' AND date BETWEEN ${dateBetween}
+        WHERE platform = 'META' AND date BETWEEN ${dateBetween}
           AND COALESCE(ad_id, '') <> ''
-      ) t ON m.date = t.date
+      ) t ON m.brand = t.brand
+        AND m.date = t.date
         AND COALESCE(m.ad_id, '') = COALESCE(t.ad_id, '')
         AND COALESCE(m.campaign_id, '') = COALESCE(t.campaign_id, '')
         AND COALESCE(m.adset_id, '') = COALESCE(t.adset_id, '')
-      UNION ALL
-      SELECT brand, date, platform, campaign_id, campaign_name, adset_id, adset_name, ad_id, ad_name,
-        spend, revenue, purchases, impressions, clicks, link_clicks, add_to_cart, initiate_checkout
-      FROM tw_ads_daily
-      WHERE brand <> 'NOBL' AND platform = 'META' AND date BETWEEN ${dateBetween}
-        AND COALESCE(ad_id, '') <> ''
     )`;
 }
 

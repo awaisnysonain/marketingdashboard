@@ -8,6 +8,7 @@ const { syncAppstleContracts, syncFloAppstleContracts } = require('./appstleCont
 const { aggregateNoblAir, aggregateProductDaily } = require('./noblAirAggregate');
 const { refreshNoblAirMetaAdDaily } = require('./noblAirMetaAdDaily');
 const { syncMetaAds } = require('./metaAdsSync');
+const { getMetaAccount } = require('../config/metaConfig');
 const { invalidateNoblAirDataVersionCache } = require('../utils/noblAirDataVersion');
 const { clearResponseCache } = require('../utils/responseCache');
 // Use the new SQL-based TW ETL (matches Brad's queries — Triple Attribution + Amazon + EU)
@@ -312,22 +313,28 @@ async function runSync(options = {}) {
     }
   }
 
-  // ── Meta Ads API — NOBL spend (primary; TW remains fallback at read time) ─
+  // ── Meta Ads API — per-brand spend (primary; TW remains fallback at read time) ─
   if (tasks.includes('meta_ads')) {
-    const chunks = weeklyChunks(startDate, endDate);
-    for (const chunk of chunks) {
-      const logId = await logStart(runId, 'NOBL', 'meta_ads', chunk.start, chunk.end);
-      try {
-        const r = await syncMetaAds('NOBL', chunk.start, chunk.end);
-        const status = r.skipped ? 'skipped' : 'success';
-        await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
-        results.push({ task: 'meta_ads', brand: 'NOBL', chunk, rows: r.rows, skipped: r.skipped });
-        if (r.errors.length) errors.push(...r.errors);
-      } catch (e) {
-        const msg = `meta_ads NOBL ${chunk.start}-${chunk.end}: ${e.message}`;
-        console.error('[SyncEngine]', msg);
-        errors.push(msg);
-        await logFinish(logId, 'error', 0, e.message);
+    const metaBrands = brands.filter((b) => getMetaAccount(b));
+    if (!metaBrands.length) {
+      console.warn('[SyncEngine] meta_ads: no Meta accounts configured for', brands.join(','), '— skipping (Triple Whale fallback used at read)');
+    }
+    for (const brand of metaBrands) {
+      const chunks = weeklyChunks(startDate, endDate);
+      for (const chunk of chunks) {
+        const logId = await logStart(runId, brand, 'meta_ads', chunk.start, chunk.end);
+        try {
+          const r = await syncMetaAds(brand, chunk.start, chunk.end);
+          const status = r.skipped ? 'skipped' : 'success';
+          await logFinish(logId, status, r.rows, r.errors.join('; ') || null);
+          results.push({ task: 'meta_ads', brand, chunk, rows: r.rows, skipped: r.skipped });
+          if (r.errors.length) errors.push(...r.errors);
+        } catch (e) {
+          const msg = `meta_ads ${brand} ${chunk.start}-${chunk.end}: ${e.message}`;
+          console.error('[SyncEngine]', msg);
+          errors.push(msg);
+          await logFinish(logId, 'error', 0, e.message);
+        }
       }
     }
   }
@@ -616,6 +623,41 @@ async function runSync(options = {}) {
       clearResponseCache('nobl-air');
     } catch (e) {
       const msg = `nobl_air_aggregate: ${e.message}`;
+      console.error('[SyncEngine]', msg);
+      errors.push(msg);
+      await logFinish(logId, 'error', 0, e.message);
+    }
+  }
+
+  // ── Forecast import (NOBL store + air daily targets → forecast_daily) ─
+  if (tasks.includes('forecast_sheet')) {
+    const logId = await logStart(runId, 'NOBL', 'forecast_sheet', startDate, endDate);
+    try {
+      const { importForecastDaily } = require('./forecastImport');
+      const r = await importForecastDaily();
+      await logFinish(logId, 'success', r.rows);
+      results.push({ task: 'forecast_sheet', brand: 'NOBL', rows: r.rows, range: `${r.min_date}..${r.max_date}` });
+      clearResponseCache('forecast');
+    } catch (e) {
+      const msg = `forecast_sheet: ${e.message}`;
+      console.error('[SyncEngine]', msg);
+      errors.push(msg);
+      await logFinish(logId, 'error', 0, e.message);
+    }
+  }
+
+  // ── Performance dashboard import (NOBL + FLO CPMR, A vs F revenue) ───
+  if (tasks.includes('performance_dashboard')) {
+    const logId = await logStart(runId, 'ALL', 'performance_dashboard', startDate, endDate);
+    try {
+      const { importPerformanceDashboard } = require('./performanceDashboardImport');
+      const r = await importPerformanceDashboard();
+      await logFinish(logId, 'success', r.rows);
+      results.push({ task: 'performance_dashboard', rows: r.rows, flo_forecast: r.flo_forecast_rows, range: `${r.min_date}..${r.max_date}` });
+      clearResponseCache('performance');
+      clearResponseCache('forecast');
+    } catch (e) {
+      const msg = `performance_dashboard: ${e.message}`;
       console.error('[SyncEngine]', msg);
       errors.push(msg);
       await logFinish(logId, 'error', 0, e.message);

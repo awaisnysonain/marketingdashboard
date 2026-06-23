@@ -800,11 +800,17 @@ export default function KpiPulsePage() {
     <div className="page-stack" style={{ gap: 10, minHeight: 0 }}>
       <PageIntro>
         <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
-          <div style={{ color: 'var(--text3)', fontSize: 12, lineHeight: 1.45 }}>
+          <div style={{ color: 'var(--text3)', fontSize: 12, lineHeight: 1.45, flex: '1 1 420px' }}>
             Leadership KPI matrix across NOBL and FLO. Metrics available in the database — revenue, blended &amp; geo MER,
             AOV, Amazon share, and NOBL Air attach / activation / trial-to-paid — are computed live for daily, weekly, and
             quarterly periods (and advance automatically each day). Metrics with no database source are shown blank.
           </div>
+          {pulse?.asOf && (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 20, padding: '3px 10px', whiteSpace: 'nowrap' }}>
+              <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--success)', flexShrink: 0 }} />
+              Data through {pulse.asOf}
+            </span>
+          )}
         </div>
       </PageIntro>
 

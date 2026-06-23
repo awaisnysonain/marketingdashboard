@@ -19,6 +19,9 @@ import TableFilterBar from './TableFilterBar';
 import CommentAnchor from './CommentAnchor';
 import CommentHoverTooltip from './CommentHoverTooltip';
 import SheetSelectionBar from './SheetSelectionBar';
+import ForecastHoverTooltip from './ForecastHoverTooltip';
+import { ForecastVariancePill } from './ForecastIndicator';
+import { FORECAST_STATUS_STYLE } from '../hooks/useDailyForecast';
 import { useComments } from './CommentProvider';
 import { SEARCH_ALL_COLUMNS } from '../constants/tableSearch';
 import { filterTableRows } from '../utils/tableFilterSort';
@@ -33,6 +36,26 @@ function fmtVal(v, header) {
 function isNumeric(v) {
   return v != null && v !== '' && !isNaN(parseFloat(v));
 }
+
+/** Classify a daily row as past/today/tomorrow/future for rolling forecast highlighting. */
+function rowDayRole(dateStr) {
+  if (!dateStr || typeof dateStr !== 'string' || dateStr.length < 10) return 'past';
+  const today = new Date();
+  const t = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const tom = new Date(today.getTime() + 86400000);
+  const m = `${tom.getFullYear()}-${String(tom.getMonth() + 1).padStart(2, '0')}-${String(tom.getDate()).padStart(2, '0')}`;
+  const d = dateStr.slice(0, 10);
+  if (d === t) return 'today';
+  if (d === m) return 'tomorrow';
+  if (d > t) return 'future';
+  return 'past';
+}
+
+const ROW_DAY_BG = {
+  today:    'rgba(53,28,117,0.08)',  // matches Apps Script "today projected" purple
+  tomorrow: 'rgba(53,28,117,0.05)',
+  future:   'rgba(31,78,120,0.04)',
+};
 
 function defaultColWidth(header) {
   const h = String(header).toLowerCase();
@@ -66,6 +89,8 @@ export default function SheetTable({
   getCellCommentKey = null,   // (row, header, ri, ci) => string | null
   getCellCommentLabel = null, // (row, header) => string
   commentsEnabled = null,     // default: true when getCellCommentKey + CommentProvider
+  cellStatus = null,          // (date, header, value, row) => { status, variancePct, forecast, ... } | null
+  dateField = '_date',        // row field that yields the date for forecast lookup
 }) {
   // ── search & sort
   const [search, setSearch] = useState('');
@@ -79,6 +104,7 @@ export default function SheetTable({
   const [colWidths, setColWidths] = useState({});
   const [hoverCell, setHoverCell] = useState(null);
   const [commentHover, setCommentHover] = useState(null);
+  const [forecastHover, setForecastHover] = useState(null);
   const resizeRef = useRef(null);
   const tableRef = useRef(null);
   const comments = useComments();
@@ -348,13 +374,16 @@ export default function SheetTable({
             )}
             {sorted.map((row, ri) => {
               const rowAllSel = headers.every((_, ci) => selection.isSelected(ri, ci));
+              const rowDate = String(row?.[dateField] ?? row?._date ?? row?.Date ?? row?.date ?? '').slice(0, 10);
+              const dayRole = cellStatus ? rowDayRole(rowDate) : 'past';
+              const dayTint = ROW_DAY_BG[dayRole] || null;
               const evenBg = ri % 2 === 1 ? 'var(--bg3)' : 'var(--bg2)';
 
               return (
                 <tr
                   key={keyField ? row[keyField] : ri}
                   onClick={onRowClick ? () => onRowClick(row) : undefined}
-                  style={{ cursor: onRowClick ? 'pointer' : 'default' }}
+                  style={{ cursor: onRowClick ? 'pointer' : 'default', background: dayTint || undefined }}
                 >
                   {/* row number */}
                   <td
@@ -388,8 +417,20 @@ export default function SheetTable({
                     const cellComment = commentKey ? comments?.getForTarget('cell', commentKey) : null;
                     const hasComment = !!cellComment;
 
+                    const fcStatus = cellStatus ? cellStatus(rowDate, h, val, row) : null;
+                    const fcStyle = fcStatus ? FORECAST_STATUS_STYLE[fcStatus.status] : null;
+                    const fcColor = fcStyle && fcStatus.status !== 'model' ? fcStyle.color : null;
+                    const showFcDot = fcColor != null;
+                    const showFcPill = fcStatus && fcStatus.variancePct != null && Number.isFinite(fcStatus.variancePct);
+
                     const cellInner = (
-                      <span style={{ userSelect: 'text', WebkitUserSelect: 'text' }}>{fmtVal(val, h)}</span>
+                      <span style={{ userSelect: 'text', WebkitUserSelect: 'text', display: 'inline-flex', alignItems: 'center', gap: 6, justifyContent: num ? 'flex-end' : 'flex-start', width: '100%' }}>
+                        {showFcDot && (
+                          <span style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 999, background: fcColor, flex: '0 0 auto' }} />
+                        )}
+                        <span>{fmtVal(val, h)}</span>
+                        {showFcPill && <ForecastVariancePill pct={fcStatus.variancePct} statusOverride={fcStatus.status} />}
+                      </span>
                     );
 
                     return (
@@ -401,6 +442,10 @@ export default function SheetTable({
                           if (cellComment) {
                             hideCellHover();
                             setCommentHover({ comment: cellComment, rect: e.currentTarget.getBoundingClientRect() });
+                          } else if (fcStatus && (fcStatus.forecast != null || fcStatus.variancePct != null)) {
+                            hideCellHover();
+                            hideCommentHover();
+                            setForecastHover({ data: { date: rowDate, ...fcStatus }, rect: e.currentTarget.getBoundingClientRect() });
                           } else {
                             hideCommentHover();
                             showCellHover(e, row, h, ri);
@@ -410,7 +455,7 @@ export default function SheetTable({
                           if (commentHover) return;
                           moveCellHover(e);
                         }}
-                        onMouseLeave={() => { hideCellHover(); hideCommentHover(); }}
+                        onMouseLeave={() => { hideCellHover(); hideCommentHover(); setForecastHover(null); }}
                         style={{
                           padding: cellPad,
                           paddingRight: hasComment ? 18 : undefined,
@@ -457,6 +502,12 @@ export default function SheetTable({
         comment={commentHover?.comment}
         anchorRect={commentHover?.rect}
         visible={!!commentHover}
+      />
+
+      <ForecastHoverTooltip
+        data={forecastHover?.data}
+        anchorRect={forecastHover?.rect}
+        visible={!!forecastHover}
       />
 
       {hoverCell && (

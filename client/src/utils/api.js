@@ -184,9 +184,9 @@ export const getFloTopline = (start, end) =>
       return data;
     }),
   ).then(x => x.data);
-export const getChannels = (start, end, brand='') =>
-  cachedAnalyticsFetch(`channels:${start}:${end}:${brand}`,
-    () => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}`).then(async r => {
+export const getChannels = (start, end, brand='', region='') =>
+  cachedAnalyticsFetch(`channels:${start}:${end}:${brand}:${region}`,
+    () => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}${region ? `&region=${encodeURIComponent(region)}` : ''}`).then(async r => {
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
       return data;
@@ -330,6 +330,14 @@ export const getForecastEngine = (brand = 'ALL', asOf = '') =>
     ),
   ).then(x => x.data);
 
+export const getForecastDaily = (brand = 'ALL', start = '', end = '') =>
+  cachedAnalyticsFetch(`forecast-daily:${brand}:${start}:${end}`,
+    () => fetchJson(
+      `${B}/api/analytics/forecast-daily?brand=${encodeURIComponent(brand)}${start ? `&start=${encodeURIComponent(start)}` : ''}${end ? `&end=${encodeURIComponent(end)}` : ''}`,
+      '/api/analytics/forecast-daily'
+    ),
+  ).then(x => x.data);
+
 export const getDashboardForecast = (asOf = '') =>
   cachedAnalyticsFetch(`dashboard-forecast:${asOf}`,
     () => fetchJson(
@@ -337,6 +345,7 @@ export const getDashboardForecast = (asOf = '') =>
       '/api/analytics/dashboard-forecast'
     ),
   ).then(x => x.data);
+
 export const getFloProducts = (start, end) =>
   cachedAnalyticsFetch(`flo-products:${start}:${end}`,
     () => fetch(`${B}/api/analytics/flo/products?start=${start}&end=${end}`).then(async r => {

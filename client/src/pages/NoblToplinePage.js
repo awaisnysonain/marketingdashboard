@@ -11,6 +11,10 @@ import VerticalDataTable from '../components/VerticalDataTable';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
 import { getNoblTopline, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../utils/api';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { ForecastVsBadge } from '../components/ForecastIndicator';
+import ForecastChartTooltip from '../components/ForecastChartTooltip';
+import { buildOrderRevenueCellStatus } from '../utils/forecastCellStatus';
 import { TIP } from '../copy/plainLanguage';
 import { sortByRevenueDesc } from '../utils/dateRange';
 import {
@@ -205,6 +209,27 @@ export default function NoblToplinePage() {
   useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
   useEffect(() => { if (regionNames.length && !activeRegion) setActiveRegion(regionNames[0]); }, [regionNames, activeRegion]);
 
+  // Daily forecast (brand-level) → red/green vs each day's order revenue.
+  const fc = useDailyForecast('NOBL', range.start, range.end);
+  const revChartData = useMemo(
+    () => chartData.map((p) => ({ ...p, forecast: fc.forecastForDate(p.date) })),
+    [chartData, fc],
+  );
+  const summaryCellStatus = useCallback(
+    buildOrderRevenueCellStatus(fc),
+    [fc],
+  );
+  const fcPeriod = useMemo(() => {
+    let a = 0; let f = 0; let has = false;
+    for (const d of dates) {
+      const row = summaryByDate[d];
+      const actual = row ? Number(row.order_revenue ?? row.total_revenue) : null;
+      const forecast = fc.forecastForDate(d);
+      if (actual != null && Number.isFinite(actual) && forecast != null) { a += actual; f += forecast; has = true; }
+    }
+    return has ? { actual: a, forecast: f } : null;
+  }, [dates, summaryByDate, fc]);
+
   const VIEWS = [
     { id: 'summary', label: 'Summary' },
     { id: 'channels', label: 'Channels' },
@@ -244,9 +269,9 @@ export default function NoblToplinePage() {
           {activeView === 'summary' && (
             <>
               <div style={CHART_GRID}>
-                <ChartCard title="Order Revenue" subtitle="Daily trend">
+                <ChartCard title="Order Revenue" subtitle="Daily trend vs forecast">
                   <ResponsiveContainer width="100%" height={240}>
-                    <AreaChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                    <ComposedChart data={revChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <defs>
                         <linearGradient id="noblGradRev" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={NOBL_ACCENT} stopOpacity={0.3} />
@@ -256,10 +281,11 @@ export default function NoblToplinePage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
                       <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
-                      <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                      <Tooltip content={<ForecastChartTooltip fc={fc} labelFormatter={fmtDateLabel} formatter={(v) => fmt$(v)} />} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={NOBL_ACCENT} fill="url(#noblGradRev)" strokeWidth={2} dot={false} />
-                    </AreaChart>
+                      <Line type="monotone" dataKey="forecast" name="Forecast" stroke="var(--warn)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </ChartCard>
                 <ChartCard title="Spend vs Revenue" subtitle="MER context">
@@ -277,8 +303,11 @@ export default function NoblToplinePage() {
                 </ChartCard>
               </div>
               <div className="section">
-                <div className="section__title">DAILY SUMMARY · {dates.length} DAYS</div>
-                <VerticalDataTable dates={dates} getRow={d => enrichSummaryRow(summaryByDate[d])} metrics={SUMMARY_METRICS} tableScope="summary" />
+                <div className="section__title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                  <span>DAILY SUMMARY · {dates.length} DAYS</span>
+                  {fcPeriod && <ForecastVsBadge actual={fcPeriod.actual} forecast={fcPeriod.forecast} />}
+                </div>
+                <VerticalDataTable dates={dates} getRow={d => enrichSummaryRow(summaryByDate[d])} metrics={SUMMARY_METRICS} tableScope="summary" cellStatus={summaryCellStatus} />
               </div>
             </>
           )}

@@ -255,3 +255,92 @@ CREATE TABLE IF NOT EXISTS etl_watermarks (
   last_run_at     TIMESTAMPTZ,
   notes           TEXT
 );
+
+-- ─── Plan calendar (May+ Drops daily plan) — ETL import; forecast computed at runtime ─
+CREATE TABLE IF NOT EXISTS forecast_plan_daily (
+  brand           TEXT NOT NULL DEFAULT 'NOBL',
+  date            DATE NOT NULL,
+  plan_revenue    NUMERIC(14,2),
+  plan_spend      NUMERIC(14,2),
+  plan_meta_spend NUMERIC(14,2),
+  plan_mer        NUMERIC(6,3),
+  plan_usa        NUMERIC(14,2),
+  plan_canada     NUMERIC(14,2),
+  plan_australia  NUMERIC(14,2),
+  plan_uk         NUMERIC(14,2),
+  plan_eu         NUMERIC(14,2),
+  promo           TEXT,
+  drop_lift       NUMERIC(14,2),
+  source          TEXT DEFAULT 'import',
+  updated_at      TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (brand, date)
+);
+CREATE INDEX IF NOT EXISTS idx_forecast_plan_daily_brand_date ON forecast_plan_daily (brand, date DESC);
+
+-- ─── Legacy forecast_daily (FLO revenue F import; NOBL uses computed engine) ─
+CREATE TABLE IF NOT EXISTS forecast_daily (
+  brand                       TEXT NOT NULL DEFAULT 'NOBL',
+  date                        DATE NOT NULL,
+  row_type                    TEXT,
+  forecast_revenue            NUMERIC(14,2),
+  forecast_spend              NUMERIC(14,2),
+  forecast_eligible_orders    INT,
+  forecast_air_orders         INT,
+  forecast_activations        INT,
+  forecast_attach_rate        NUMERIC(8,4),
+  forecast_activation_rate    NUMERIC(8,4),
+  forecast_tag_rev            NUMERIC(14,2),
+  forecast_sub_rev            NUMERIC(14,2),
+  forecast_air_revenue        NUMERIC(14,2),
+  mer_target                  NUMERIC(6,3),
+  target_status               TEXT,
+  forecast_note               TEXT,
+  source                      TEXT DEFAULT 'import',
+  updated_at                  TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (brand, date)
+);
+CREATE INDEX IF NOT EXISTS idx_forecast_daily_brand_date ON forecast_daily (brand, date DESC);
+
+-- ─── Brand performance dashboard (CPMR, A vs F revenue) — ETL import ────
+CREATE TABLE IF NOT EXISTS brand_performance_daily (
+  brand                 TEXT NOT NULL,
+  date                  DATE NOT NULL,
+  gross_sales_tw        NUMERIC(14,2),
+  meta_cpmr             NUMERIC(10,2),
+  revenue_forecast      NUMERIC(14,2),
+  revenue_actual        NUMERIC(14,2),
+  week_start            DATE,
+  weekly_gross_sales    NUMERIC(14,2),
+  avg_meta_cpmr         NUMERIC(10,2),
+  rolling_7d_reach      BIGINT,
+  rolling_7d_cpmr       NUMERIC(10,2),
+  meta_cpmr_2025        NUMERIC(10,2),
+  meta_cpmr_2026        NUMERIC(10,2),
+  tiktok_cpmr_2025      NUMERIC(10,2),
+  tiktok_cpmr_2026      NUMERIC(10,2),
+  cvr_weekly            NUMERIC(8,4),
+  source                TEXT DEFAULT 'import',
+  updated_at            TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (brand, date)
+);
+CREATE INDEX IF NOT EXISTS idx_brand_perf_daily_date ON brand_performance_daily (date DESC);
+
+-- ─── Legacy NOBL forecast sheet table (migrated to forecast_daily) ───────
+CREATE TABLE IF NOT EXISTS nobl_sheet_forecast_daily (
+  date                        DATE PRIMARY KEY,
+  row_type                    TEXT,
+  source                      TEXT,
+  forecast_store_revenue      NUMERIC(14,2),
+  forecast_eligible_orders    INT,
+  forecast_air_orders         INT,
+  forecast_activations        INT,
+  forecast_attach_rate        NUMERIC(8,4),
+  forecast_activation_rate    NUMERIC(8,4),
+  forecast_tag_rev            NUMERIC(14,2),
+  forecast_sub_rev            NUMERIC(14,2),
+  forecast_air_revenue        NUMERIC(14,2),
+  target_status               TEXT,
+  forecast_note               TEXT,
+  synced_at                   TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_nobl_sheet_forecast_daily_type ON nobl_sheet_forecast_daily (row_type);

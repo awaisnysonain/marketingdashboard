@@ -25,6 +25,7 @@ const REGION_BUCKETS = [
   { key: 'US', codes: ['US'], includeBlank: false },
   { key: 'CA', codes: ['CA'], includeBlank: false },
   { key: 'AUS', codes: ['AU'], includeBlank: false },
+  { key: 'UK', codes: ['GB', 'UK'], includeBlank: false },
   { key: 'DUBAI', codes: ['AE'], includeBlank: false },
   { key: 'HK', codes: ['HK'], includeBlank: false },
   { key: 'INTL', codes: [], includeBlank: true },

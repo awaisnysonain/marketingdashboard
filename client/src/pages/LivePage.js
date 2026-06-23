@@ -9,7 +9,7 @@ import PageIntro from '../components/PageIntro';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
 import { L, TIP } from '../copy/plainLanguage';
-import { fmt$, fmtNum, fmtRatio, fmtPct } from '../utils/api';
+import { fmt$, fmtNum, fmtRatio, fmtPct, getSyncStatus } from '../utils/api';
 import { useDashboardFilters } from '../context/DashboardFilterContext';
 import {
   fmtAxisCurrency, fmtAxisRatio, fmtChartCurrency, fmtChartRatio,
@@ -80,6 +80,30 @@ function fmtTime(iso) {
   if (!iso) return null;
   try {
     return new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  } catch {
+    return null;
+  }
+}
+
+/** Absolute Eastern-time clock label, e.g. "5:00 PM ET" — matches how the team reads "5pm EST". */
+function fmtEtClock(iso) {
+  if (!iso) return null;
+  try {
+    return `${new Date(iso).toLocaleTimeString('en-US', {
+      timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true,
+    })} ET`;
+  } catch {
+    return null;
+  }
+}
+
+function fmtEtDateTime(iso) {
+  if (!iso) return null;
+  try {
+    return new Date(iso).toLocaleString('en-US', {
+      timeZone: 'America/New_York', month: 'short', day: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true,
+    });
   } catch {
     return null;
   }
@@ -411,6 +435,7 @@ export default function LivePage() {
 
   const [live, setLive] = useState(null);
   const [trend, setTrend] = useState(null);
+  const [lastImport, setLastImport] = useState(null);
   const [loadL, setLoadL] = useState(false);
   const [loadT, setLoadT] = useState(false);
   const [errL, setErrL] = useState(null);
@@ -494,6 +519,21 @@ export default function LivePage() {
   useEffect(() => { loadLive(); }, [loadLive]);
   useEffect(() => { loadTrend(); }, [loadTrend]);
 
+  // Track when data was last imported (latest successful ETL finish), refreshed hourly.
+  useEffect(() => {
+    let alive = true;
+    const pull = () => getSyncStatus()
+      .then((d) => {
+        if (!alive) return;
+        const rec = (d?.recent || []).find(r => r?.finished_at) || d?.recent?.[0];
+        setLastImport(rec?.finished_at || null);
+      })
+      .catch(() => {});
+    pull();
+    const id = setInterval(pull, HOURLY_REFRESH_MS);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
   const hourlyRef = useRef(null);
   useEffect(() => {
     hourlyRef.current = setInterval(() => {
@@ -547,11 +587,19 @@ export default function LivePage() {
                   max={availDates?.latest_summary}
                 />
               )}
-              {refreshedAt && !loadL && (
+              {lastImport ? (
+                <span
+                  style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 20, padding: '3px 10px' }}
+                  title={`Data last imported ${fmtEtDateTime(lastImport)} (Eastern). Auto-refreshes hourly.`}
+                >
+                  <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--success)', flexShrink: 0 }} />
+                  Last update {fmtEtClock(lastImport)}
+                </span>
+              ) : refreshedAt && !loadL ? (
                 <span style={{ fontSize: 11, color: 'var(--text3)' }} title="Auto-refreshes every hour">
                   Updated {refreshedAt} · hourly
                 </span>
-              )}
+              ) : null}
               <button
                 type="button"
                 className="btn btn--sm"

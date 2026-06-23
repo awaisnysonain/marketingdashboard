@@ -11,6 +11,8 @@ import VerticalDataTable from '../components/VerticalDataTable';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
 import { getChannels, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../utils/api';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { buildForecastCellStatus } from '../utils/forecastCellStatus';
 import { TIP } from '../copy/plainLanguage';
 import { sortByRevenueDesc } from '../utils/dateRange';
 import { enrichChannelRow } from '../utils/toplineData';
@@ -22,6 +24,16 @@ function fmtDateLabel(s) {
 }
 
 const PAGE_KEY = 'flo-channel-daily';
+
+const FORECAST_METRIC_MAP = {
+  'Spend (1d)': 'spend',
+  'Revenue (1d)': 'revenue',
+  spend_1d: 'spend',
+  revenue_1d: 'revenue',
+  'Ad spend': 'spend',
+  Sales: 'revenue',
+  Revenue: 'revenue',
+};
 
 const METRICS = [
   { key: 'spend_1d',        label: 'Spend',           type: '$' },
@@ -52,23 +64,28 @@ function ErrorBox({ msg, onRetry }) {
 
 export default function FloChannelDailyPage() {
   const [rawRows, setRawRows] = useState([]);
+  const [regionScoped, setRegionScoped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { dateRange, filterByChannels } = useDashboardFilters();
+  const { dateRange, filterByChannels, regionsParam, isAllRegions } = useDashboardFilters();
   const range = dateRange;
   const [activeChannel, setActiveChannel] = useState(null);
+  const fc = useDailyForecast('FLO', dateRange.start, dateRange.end);
+  const cellStatus = useCallback(buildForecastCellStatus(fc, { metrics: FORECAST_METRIC_MAP }), [fc]);
 
   const load = useCallback(() => {
     setLoading(true); setError(null);
-    getChannels(range.start, range.end, 'FLO')
-      .then(d => { setRawRows(d.rows || []); setLoading(false); })
+    getChannels(range.start, range.end, 'FLO', isAllRegions ? '' : regionsParam)
+      .then(d => { setRawRows(d.rows || []); setRegionScoped(!!d.region_scoped); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [range]);
+  }, [range, regionsParam, isAllRegions]);
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => { setActiveChannel(null); }, [regionsParam, isAllRegions]);
+
   const rows = useMemo(
-    () => filterByChannels(rawRows, 'channel'),
-    [rawRows, filterByChannels],
+    () => (regionScoped ? rawRows : filterByChannels(rawRows, 'channel')),
+    [rawRows, filterByChannels, regionScoped],
   );
 
   const { channelNames, dates, byDateCh, chKpi, spendChartData, revChartData, channelTotals } = useMemo(() => {
@@ -115,8 +132,17 @@ export default function FloChannelDailyPage() {
     <div className="page-stack">
       {loading ? <Skeleton /> : error ? <ErrorBox msg={error} onRetry={load} /> : (
         <>
+          {regionScoped && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 10, background: 'var(--warn-dim)', border: '1px solid rgba(176,125,24,.28)', color: 'var(--text2)', fontSize: 12, lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>🌍</span>
+              <span>
+                Showing <strong style={{ color: 'var(--text)' }}>region-level</strong> daily totals (spend, revenue, MER) from regional data —
+                channel-by-platform breakdown is not tracked per region. Switch Region to <strong>All regions</strong> for the full channel split.
+              </span>
+            </div>
+          )}
           <div className="section">
-            <div className="section__title">CHANNEL</div>
+            <div className="section__title">{regionScoped ? 'REGION' : 'CHANNEL'}</div>
             <div className="seg" style={{ flexWrap: 'wrap' }}>
               {channelNames.map(ch => (
                 <button
@@ -208,6 +234,7 @@ export default function FloChannelDailyPage() {
               getRow={(d) => enrichChannelRow(byDateCh[`${d}|${activeChannel}`], activeChannel)}
               metrics={METRICS}
               tableScope={commentTargetKey('channel', activeChannel)}
+              cellStatus={cellStatus}
             />
           </ChartPanel>
         </>

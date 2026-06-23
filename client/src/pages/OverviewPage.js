@@ -1,12 +1,16 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  AreaChart, Area, BarChart, Bar, Line, XAxis, YAxis, CartesianGrid,
   Tooltip, Legend, ResponsiveContainer,
 } from 'recharts';
 import {
   getOverview, getSyncStatus, triggerSync, getSubscriptions, getNoblAirPerformanceBundle,
   fmt$, fmtRatio, fmtNum, fmtFullNum, fmtPct,
 } from '../utils/api';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { buildForecastCellStatus } from '../utils/forecastCellStatus';
+import { ForecastVsBadge, ForecastVariancePill } from '../components/ForecastIndicator';
+import ForecastChartTooltip from '../components/ForecastChartTooltip';
 import { resolveAirPerfFromBundle } from '../utils/noblAirRegional';
 import { addDaysISO } from '../utils/dateRange';
 import KpiCard from '../components/KpiCard';
@@ -113,14 +117,23 @@ function Delta({ pct, invert }) {
   );
 }
 
-function Tile({ label, value, pct, invert }) {
+function Tile({ label, value, pct, invert, fcPct }) {
+  const hasFc = fcPct != null && Number.isFinite(fcPct) && Math.abs(fcPct) >= 0.005;
   return (
     <div className="ov-tile">
       <div>
         <div className="kpi__label">{label}</div>
         <div className="ov-tile__val">{value}</div>
       </div>
-      <Delta pct={pct} invert={invert} />
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4 }}>
+        <Delta pct={pct} invert={invert} />
+        {hasFc && (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: 'var(--text3)' }}>
+            <ForecastVariancePill pct={fcPct} />
+            <span>vs forecast</span>
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -153,13 +166,18 @@ function ShareRow({ name, pctw, val, color }) {
   );
 }
 
-function ScRow({ label, nobl, flo, comb, showNobl, showFlo }) {
+function ScRow({ label, nobl, flo, comb, showNobl, showFlo, forecast, variancePct }) {
+  // Hide near-zero variances (the engine echoes actual as forecast for unplanned
+  // metrics like spend, producing a misleading uniform 0% pill on every row).
+  const showPill = variancePct != null && Number.isFinite(variancePct) && Math.abs(variancePct) >= 0.005;
   return (
     <tr>
       <td>{label}</td>
       {showNobl && <td>{nobl}</td>}
       {showFlo && <td>{flo}</td>}
       <td>{comb}</td>
+      <td style={{ color: 'var(--text3)' }}>{forecast != null && showPill ? forecast : '—'}</td>
+      <td>{showPill ? <ForecastVariancePill pct={variancePct} /> : <span style={{ color: 'var(--text4)' }}>—</span>}</td>
     </tr>
   );
 }
@@ -231,12 +249,17 @@ export default function OverviewPage({ showToast }) {
 
   useEffect(() => {
     function updateLabel(syncD) {
-      const rec = syncD?.recent?.[0];
+      const rec = (syncD?.recent || []).find(r => r?.finished_at) || syncD?.recent?.[0];
       if (!rec?.finished_at) { setLastSyncLabel(null); return; }
       const diffMin = Math.floor((Date.now() - new Date(rec.finished_at).getTime()) / 60000);
-      if (diffMin < 1) setLastSyncLabel('just now');
-      else if (diffMin < 60) setLastSyncLabel(`${diffMin}m ago`);
-      else setLastSyncLabel(`${Math.floor(diffMin / 60)}h ago`);
+      const rel = diffMin < 1 ? 'just now' : diffMin < 60 ? `${diffMin}m ago` : `${Math.floor(diffMin / 60)}h ago`;
+      let clock = '';
+      try {
+        clock = new Date(rec.finished_at).toLocaleTimeString('en-US', {
+          timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true,
+        }) + ' ET';
+      } catch { /* ignore */ }
+      setLastSyncLabel(clock ? `${clock} · ${rel}` : rel);
     }
     updateLabel(syncData);
     const id = setInterval(() => getSyncStatus().then(d => { setSyncData(d); updateLabel(d); }).catch(()=>{}), 60000);
@@ -283,6 +306,44 @@ export default function OverviewPage({ showToast }) {
   const airTotals = airData?.totals || {};
   const tableRows = chartRows.map(toTableRow);
 
+  // Daily forecast scoped to the selected brand(s) → combined red/green vs plan.
+  const fcBrand = (isAllBrands || brands.length > 1)
+    ? 'ALL'
+    : (brands[0] === 'NOBL' ? 'NOBL' : (brands[0] === 'FLO' || brands[0] === 'FLO_EU' ? 'FLO' : 'ALL'));
+  const fc = useDailyForecast(fcBrand, dateRange.start, dateRange.end);
+  const salesChartData = useMemo(
+    () => chartRows.map((r) => ({ ...r, forecast: fc.forecastForDate(r.date) })),
+    [chartRows, fc],
+  );
+  // Period-level forecast totals for revenue and spend (sum the daily forecasts
+  // for the days that have actuals, so the comparison is apples-to-apples).
+  const fcPeriod = useMemo(() => {
+    let aRev = 0, fRev = 0, aSp = 0, fSp = 0, has = false;
+    for (const r of chartRows) {
+      const actual = Number(r.total_revenue);
+      const forecast = fc.forecastForDate(r.date);
+      const fcRow = fc.rowForDate(r.date);
+      if (Number.isFinite(actual) && actual !== 0 && forecast != null) {
+        aRev += actual; fRev += forecast; has = true;
+        const sp = Number(r.total_spend);
+        const fsp = fcRow?.forecast_spend != null ? Number(fcRow.forecast_spend) : null;
+        if (Number.isFinite(sp) && fsp != null) { aSp += sp; fSp += fsp; }
+      }
+    }
+    if (!has) return null;
+    const revPct = fRev > 0 ? (aRev - fRev) / fRev : null;
+    const spPct  = fSp  > 0 ? (aSp  - fSp ) / fSp  : null;
+    const aMer = aSp > 0 ? aRev / aSp : null;
+    const fMer = fSp > 0 ? fRev / fSp : null;
+    const merPct = fMer != null && fMer > 0 && aMer != null ? (aMer - fMer) / fMer : null;
+    return { actual: aRev, forecast: fRev, revPct, actualSpend: aSp, forecastSpend: fSp, spPct, actualMer: aMer, forecastMer: fMer, merPct };
+  }, [chartRows, fc]);
+
+  const cellStatus = useCallback(
+    buildForecastCellStatus(fc, { metrics: { 'Total Order Revenue': 'revenue', 'Total ad spend': 'spend' } }),
+    [fc],
+  );
+
   const noblRev = totals.nobl_revenue || 0;
   const floRev = totals.flo_revenue || 0;
   const totRev = (noblRev + floRev) || 1;
@@ -300,7 +361,7 @@ export default function OverviewPage({ showToast }) {
           {lastSyncLabel && (
             <span style={{ display:'inline-flex', alignItems:'center', gap:5, fontSize:11, color:'var(--text3)', background:'var(--bg3)', border:'1px solid var(--border)', borderRadius:20, padding:'3px 10px' }}>
               <span style={{ width:5, height:5, borderRadius:'50%', background:'var(--success)', flexShrink:0 }} />
-              Last synced: {lastSyncLabel}
+              Last update {lastSyncLabel}
             </span>
           )}
           <button onClick={handleSync} disabled={syncing} className="btn btn--primary btn--sm">
@@ -317,15 +378,16 @@ export default function OverviewPage({ showToast }) {
             <div className="ov-hero">
               <div className="ov-hero__primary card">
                 <div className="kpi__label">Total sales · as of {fmtDateLabel(dateRange.end)}</div>
-                <div className="ov-hero__valrow">
+                <div className="ov-hero__valrow" style={{ flexWrap: 'wrap', gap: 8 }}>
                   <span className="ov-hero__value">{fmt$(totals.total_revenue || 0)}</span>
                   <Delta pct={deltas.revenue} />
+                  {fcPeriod && <ForecastVsBadge actual={fcPeriod.actual} forecast={fcPeriod.forecast} />}
                 </div>
                 <Spark data={chartRows} />
               </div>
               <div className="ov-hero__tiles">
-                <Tile label={L.blendedMer} value={fmtRatio(totals.blended_mer || 0)} pct={deltas.mer} />
-                <Tile label="Total ad spend" value={fmt$(totals.total_spend || 0)} pct={deltas.spend} invert />
+                <Tile label={L.blendedMer} value={fmtRatio(totals.blended_mer || 0)} pct={deltas.mer} fcPct={fcPeriod?.merPct} />
+                <Tile label="Total ad spend" value={fmt$(totals.total_spend || 0)} pct={deltas.spend} invert fcPct={fcPeriod?.spPct} />
                 <Tile label="Total orders" value={fmtNum((totals.nobl_orders || 0) + (totals.flo_orders || 0))} pct={deltas.orders} />
               </div>
             </div>
@@ -353,12 +415,17 @@ export default function OverviewPage({ showToast }) {
                     {showNobl && <th style={{ color: 'var(--nobl)' }}>NOBL</th>}
                     {showFlo && <th style={{ color: 'var(--flo)' }}>FLO</th>}
                     <th>Combined</th>
+                    <th>Forecast</th>
+                    <th>vs Forecast</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <ScRow label="Sales" showNobl={showNobl} showFlo={showFlo} nobl={fmt$(noblRev)} flo={fmt$(floRev)} comb={fmt$(totals.total_revenue || 0)} />
-                  <ScRow label="Ad spend" showNobl={showNobl} showFlo={showFlo} nobl={fmt$(totals.nobl_spend || 0)} flo={fmt$(totals.flo_spend || 0)} comb={fmt$(totals.total_spend || 0)} />
-                  <ScRow label={L.blendedMer} showNobl={showNobl} showFlo={showFlo} nobl={fmtRatio(totals.nobl_mer || 0)} flo={fmtRatio(totals.flo_mer || 0)} comb={fmtRatio(totals.blended_mer || 0)} />
+                  <ScRow label="Sales" showNobl={showNobl} showFlo={showFlo} nobl={fmt$(noblRev)} flo={fmt$(floRev)} comb={fmt$(totals.total_revenue || 0)}
+                    forecast={fcPeriod?.forecast != null ? fmt$(fcPeriod.forecast) : null} variancePct={fcPeriod?.revPct} />
+                  <ScRow label="Ad spend" showNobl={showNobl} showFlo={showFlo} nobl={fmt$(totals.nobl_spend || 0)} flo={fmt$(totals.flo_spend || 0)} comb={fmt$(totals.total_spend || 0)}
+                    forecast={fcPeriod?.forecastSpend != null ? fmt$(fcPeriod.forecastSpend) : null} variancePct={fcPeriod?.spPct} />
+                  <ScRow label={L.blendedMer} showNobl={showNobl} showFlo={showFlo} nobl={fmtRatio(totals.nobl_mer || 0)} flo={fmtRatio(totals.flo_mer || 0)} comb={fmtRatio(totals.blended_mer || 0)}
+                    forecast={fcPeriod?.forecastMer != null ? fmtRatio(fcPeriod.forecastMer) : null} variancePct={fcPeriod?.merPct} />
                   <ScRow label="Orders" showNobl={showNobl} showFlo={showFlo} nobl={fmtNum(totals.nobl_orders || 0)} flo={fmtNum(totals.flo_orders || 0)} comb={fmtNum((totals.nobl_orders || 0) + (totals.flo_orders || 0))} />
                   <ScRow label="New customers" showNobl={showNobl} showFlo={showFlo} nobl={fmtNum(totals.nobl_nc_orders || 0)} flo={fmtNum(totals.flo_nc_orders || 0)} comb={fmtNum((totals.nobl_nc_orders || 0) + (totals.flo_nc_orders || 0))} />
                 </tbody>
@@ -389,7 +456,7 @@ export default function OverviewPage({ showToast }) {
             <div className="chart-grid-2">
             <ChartPanel title="Sales over time" subtitle="Daily order revenue by brand">
               <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={chartRows} margin={{ top:4, right:16, left:0, bottom:4 }}>
+                <AreaChart data={salesChartData} margin={{ top:4, right:16, left:0, bottom:4 }}>
                   <defs>
                     <linearGradient id="gradNobl" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor={NOBL_ACCENT} stopOpacity={0.25}/>
@@ -403,10 +470,11 @@ export default function OverviewPage({ showToast }) {
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
                   <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize:11 }} stroke="var(--border2)" />
                   <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize:11 }} width={72} stroke="var(--border2)" />
-                  <Tooltip formatter={(v,n) => [fmt$(v),n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                  <Tooltip content={<ForecastChartTooltip fc={fc} labelFormatter={fmtDateLabel} formatter={(v) => fmt$(v)} />} />
                   <Legend wrapperStyle={{ fontSize:12 }} />
                   {showNobl && <Area type="monotone" dataKey="nobl_revenue" name="NOBL sales" stroke={NOBL_ACCENT} fill="url(#gradNobl)" strokeWidth={2} dot={false} />}
                   {showFlo && <Area type="monotone" dataKey="flo_revenue" name="FLO sales" stroke={FLO_ACCENT} fill="url(#gradFlo)" strokeWidth={2} dot={false} />}
+                  {!(showNobl && showFlo) && <Line type="monotone" dataKey="forecast" name="Forecast" stroke="var(--warn)" strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />}
                 </AreaChart>
               </ResponsiveContainer>
             </ChartPanel>
@@ -439,6 +507,7 @@ export default function OverviewPage({ showToast }) {
                 defaultSortDir="desc"
                 searchable={true}
                 stickyFirstCol={false}
+                cellStatus={cellStatus}
                 getCellCommentKey={(row, h) => dailyCellKey('daily', row, h)}
                 getCellCommentLabel={(row, h) => dailyCellLabel(h, row)}
               />

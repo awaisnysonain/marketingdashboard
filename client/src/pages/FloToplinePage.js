@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
-  AreaChart, Area, BarChart, Bar, Line, ComposedChart,
+  Area, BarChart, Bar, Line, ComposedChart,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell,
 } from 'recharts';
 import PageIntro from '../components/PageIntro';
@@ -11,6 +11,10 @@ import VerticalDataTable from '../components/VerticalDataTable';
 import { CommentProvider } from '../components/CommentProvider';
 import { commentTargetKey } from '../utils/commentKeys';
 import { getFloTopline, fmt$, fmtFull$, fmtNum, fmtFullNum, fmtRatio } from '../utils/api';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { ForecastVsBadge } from '../components/ForecastIndicator';
+import ForecastChartTooltip from '../components/ForecastChartTooltip';
+import { buildOrderRevenueCellStatus } from '../utils/forecastCellStatus';
 import { TIP } from '../copy/plainLanguage';
 import { sortByRevenueDesc } from '../utils/dateRange';
 import {
@@ -220,6 +224,24 @@ export default function FloToplinePage() {
   useEffect(() => { if (regionNames.length && !activeRegion) setActiveRegion(regionNames[0]); }, [regionNames, activeRegion]);
   useEffect(() => { if (productNames.length && !activeProduct) setActiveProduct(productNames[0]); }, [productNames, activeProduct]);
 
+  // Daily forecast (brand-level) → red/green vs each day's order revenue.
+  const fc = useDailyForecast('FLO', range.start, range.end);
+  const revChartData = useMemo(
+    () => chartData.map((p) => ({ ...p, forecast: fc.forecastForDate(p.date) })),
+    [chartData, fc],
+  );
+  const summaryCellStatus = useCallback(buildOrderRevenueCellStatus(fc), [fc]);
+  const fcPeriod = useMemo(() => {
+    let a = 0; let f = 0; let has = false;
+    for (const d of dates) {
+      const row = summaryByDate[d];
+      const actual = row ? Number(row.order_revenue ?? row.total_revenue) : null;
+      const forecast = fc.forecastForDate(d);
+      if (actual != null && Number.isFinite(actual) && forecast != null) { a += actual; f += forecast; has = true; }
+    }
+    return has ? { actual: a, forecast: f } : null;
+  }, [dates, summaryByDate, fc]);
+
   const VIEWS = [
     { id: 'summary', label: 'Summary' },
     { id: 'channels', label: 'Channels' },
@@ -261,9 +283,9 @@ export default function FloToplinePage() {
           {activeView === 'summary' && (
             <>
               <div style={CHART_GRID}>
-                <ChartCard title="Order Revenue" subtitle="Daily trend">
+                <ChartCard title="Order Revenue" subtitle="Daily trend vs forecast">
                   <ResponsiveContainer width="100%" height={240}>
-                    <AreaChart data={chartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
+                    <ComposedChart data={revChartData} margin={{ top: 4, right: 16, left: 0, bottom: 4 }}>
                       <defs>
                         <linearGradient id="floGradRev" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor={FLO_ACCENT} stopOpacity={0.3} />
@@ -273,10 +295,11 @@ export default function FloToplinePage() {
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                       <XAxis dataKey="date" tickFormatter={fmtDateLabel} tick={{ fontSize: 11 }} stroke="var(--border2)" />
                       <YAxis tickFormatter={fmtAxisCurrency} tick={{ fontSize: 11 }} width={Y_AXIS_WIDTH_CURRENCY} stroke="var(--border2)" />
-                      <Tooltip formatter={(v, n) => [fmt$(v), n]} labelFormatter={fmtDateLabel} contentStyle={TOOLTIP_STYLE} />
+                      <Tooltip content={<ForecastChartTooltip fc={fc} labelFormatter={fmtDateLabel} formatter={(v) => fmt$(v)} />} />
                       <Legend wrapperStyle={{ fontSize: 12 }} />
                       <Area type="monotone" dataKey="order_revenue" name="Order Revenue" stroke={FLO_ACCENT} fill="url(#floGradRev)" strokeWidth={2} dot={false} />
-                    </AreaChart>
+                      <Line type="monotone" dataKey="forecast" name="Forecast" stroke={FLO_WARN} strokeWidth={2} strokeDasharray="5 4" dot={false} connectNulls />
+                    </ComposedChart>
                   </ResponsiveContainer>
                 </ChartCard>
                 <ChartCard title="Spend vs Revenue" subtitle="MER context">
@@ -294,7 +317,12 @@ export default function FloToplinePage() {
                 </ChartCard>
               </div>
               <Card title="Daily Summary" subtitle={`${dates.length} days`}>
-                <VerticalDataTable dates={dates} getRow={d => enrichSummaryRow(summaryByDate[d])} metrics={SUMMARY_METRICS} tableScope="summary" />
+                {fcPeriod && (
+                  <div style={{ marginBottom: 10 }}>
+                    <ForecastVsBadge actual={fcPeriod.actual} forecast={fcPeriod.forecast} />
+                  </div>
+                )}
+                <VerticalDataTable dates={dates} getRow={d => enrichSummaryRow(summaryByDate[d])} metrics={SUMMARY_METRICS} tableScope="summary" cellStatus={summaryCellStatus} />
               </Card>
             </>
           )}

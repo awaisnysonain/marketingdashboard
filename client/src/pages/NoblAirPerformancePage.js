@@ -34,6 +34,15 @@ import PageIntro from '../components/PageIntro';
 import ChartPanel from '../components/ChartPanel';
 import { L, TIP } from '../copy/plainLanguage';
 import { useDashboardFilters } from '../context/DashboardFilterContext';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { buildForecastCellStatus } from '../utils/forecastCellStatus';
+
+const FORECAST_METRIC_MAP = {
+  combined_net_revenue: 'air_revenue',
+  air_revenue: 'air_revenue',
+  tag_net_sales: 'air_revenue',
+  sub_net_sales: 'air_revenue',
+};
 
 /* ────────────── helpers ────────────── */
 function toISO(d) {
@@ -204,6 +213,12 @@ export default function NoblAirPerformancePage() {
   const { dateRange, regions, regionsParam, isAllRegions } = useDashboardFilters();
   const range = dateRange;
   const regionScoped = !isAllRegions;
+
+  const fc = useDailyForecast('NOBL', dateRange.start, dateRange.end);
+  const cellStatus = useMemo(
+    () => buildForecastCellStatus(fc, { metrics: FORECAST_METRIC_MAP }),
+    [fc],
+  );
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -764,6 +779,7 @@ export default function NoblAirPerformancePage() {
               resetDeps={[range.start, range.end, regionsParam]}
               defaultSortField={L.date}
               defaultSortDir="desc"
+              cellStatus={cellStatus}
             />
           </Card>
           </>

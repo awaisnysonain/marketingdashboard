@@ -1,6 +1,8 @@
 import React, { useCallback, useMemo, useRef, useState } from 'react';
 import CommentAnchor from './CommentAnchor';
 import CommentHoverTooltip from './CommentHoverTooltip';
+import ForecastHoverTooltip from './ForecastHoverTooltip';
+import { ForecastVariancePill } from './ForecastIndicator';
 import SheetSelectionBar from './SheetSelectionBar';
 import { commentTargetKey } from '../utils/commentKeys';
 import { useComments } from './CommentProvider';
@@ -24,10 +26,13 @@ function rawVal(v, type, metricKey, label) {
 /**
  * Vertical metrics-by-date table with Overview-style cell selection and comments.
  */
-export default function VerticalDataTable({ dates, getRow, metrics, tableScope = 'summary', commentsEnabled = true }) {
+const FORECAST_DOT_COLOR = { green: 'var(--success)', amber: 'var(--warn)', red: 'var(--danger)' };
+
+export default function VerticalDataTable({ dates, getRow, metrics, tableScope = 'summary', commentsEnabled = true, cellStatus }) {
   const comments = useComments();
   const tableRef = useRef(null);
   const [commentHover, setCommentHover] = useState(null);
+  const [forecastHover, setForecastHover] = useState(null);
 
   const reversedDates = useMemo(() => [...dates].reverse(), [dates]);
 
@@ -146,9 +151,21 @@ export default function VerticalDataTable({ dates, getRow, metrics, tableScope =
                     const cellComment = commentsEnabled ? comments?.getForTarget('cell', meta.key) : null;
                     const hasComment = !!cellComment;
 
+                    const fcStatus = cellStatus ? cellStatus(d, m.key, row?.[m.key], row) : null;
+                    const fcColor = fcStatus && FORECAST_DOT_COLOR[fcStatus.status || fcStatus];
+                    const showVariance = fcStatus && fcStatus.variancePct != null && Number.isFinite(fcStatus.variancePct);
+
                     const cellContent = (
-                      <span style={{ fontVariantNumeric: 'tabular-nums', display: 'block', width: '100%', textAlign: 'right', userSelect: 'text' }}>
-                        {display}
+                      <span style={{ fontVariantNumeric: 'tabular-nums', display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, width: '100%', userSelect: 'text' }}>
+                        {fcColor && (
+                          <span
+                            style={{ display: 'inline-block', width: 7, height: 7, borderRadius: 999, background: fcColor, flex: '0 0 auto' }}
+                          />
+                        )}
+                        <span>{display}</span>
+                        {showVariance && (
+                          <ForecastVariancePill pct={fcStatus.variancePct} statusOverride={fcStatus.status} />
+                        )}
                       </span>
                     );
 
@@ -161,8 +178,14 @@ export default function VerticalDataTable({ dates, getRow, metrics, tableScope =
                           if (cellComment) {
                             setCommentHover({ comment: cellComment, rect: e.currentTarget.getBoundingClientRect() });
                           }
+                          if (fcStatus && (fcStatus.forecast != null || fcStatus.variancePct != null)) {
+                            setForecastHover({
+                              data: { date: d, ...fcStatus },
+                              rect: e.currentTarget.getBoundingClientRect(),
+                            });
+                          }
                         }}
-                        onMouseLeave={() => setCommentHover(null)}
+                        onMouseLeave={() => { setCommentHover(null); setForecastHover(null); }}
                         style={{
                           padding: `8px ${hasComment ? 20 : 12}px 8px 12px`,
                           textAlign: 'right', borderBottom: '1px solid var(--border)',
@@ -194,6 +217,12 @@ export default function VerticalDataTable({ dates, getRow, metrics, tableScope =
         comment={commentHover?.comment}
         anchorRect={commentHover?.rect}
         visible={!!commentHover}
+      />
+
+      <ForecastHoverTooltip
+        data={forecastHover?.data}
+        anchorRect={forecastHover?.rect}
+        visible={!!forecastHover}
       />
 
       <div style={{ fontSize: 10, color: 'var(--text4)', marginTop: 8 }}>

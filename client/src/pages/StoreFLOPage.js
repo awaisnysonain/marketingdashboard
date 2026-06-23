@@ -15,6 +15,18 @@ import { commentTargetKey } from '../utils/commentKeys';
 import { aggCellKey, dailyCellKey, dailyCellLabel, entityDateCellKey, entityDateCellLabel } from '../utils/sheetComments';
 import { L, TIP } from '../copy/plainLanguage';
 import { fmtAxisRatio, fmtAxisCurrency } from '../utils/chartHelpers';
+import useDailyForecast from '../hooks/useDailyForecast';
+import { buildForecastCellStatus } from '../utils/forecastCellStatus';
+
+const FORECAST_METRIC_MAP = {
+  'order_revenue': 'revenue',
+  'total_revenue': 'revenue',
+  'revenue': 'revenue',
+  'total_spend': 'spend',
+  'spend': 'spend',
+  'Revenue': 'revenue',
+  'Spend': 'spend',
+};
 function fmtLabel(s) {
   if (!s) return '';
   const [, mo, dy] = String(s).slice(0, 10).split('-');
@@ -63,6 +75,9 @@ export default function StoreFLOPage({ showToast }) {
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
   const [tab, setTab]         = useState('overview');
+
+  const fc = useDailyForecast('FLO', dateRange.start, dateRange.end);
+  const cellStatus = useCallback(buildForecastCellStatus(fc, { metrics: FORECAST_METRIC_MAP }), [fc]);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -195,12 +210,12 @@ export default function StoreFLOPage({ showToast }) {
             ))}
           </div>
 
-          {tab === 'overview'      && <OverviewTab      summary={summary} totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} />}
-          {tab === 'channels'      && <ChannelsTab      channels={channels} chAgg={chAgg} />}
-          {tab === 'regions'       && <RegionsTab       geo={geo} geoAgg={geoAgg} />}
-          {tab === 'products'      && <ProductsTab      products={products} prodAgg={prodAgg} />}
-          {tab === 'subscriptions' && <SubscriptionsTab subDaily={subDaily} subStats={subStats} subTotals={subTotals} />}
-          {tab === 'email'         && <EmailTab         email={email} emailTotals={emailTotals} />}
+          {tab === 'overview'      && <OverviewTab      summary={summary} totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} cellStatus={cellStatus} />}
+          {tab === 'channels'      && <ChannelsTab      channels={channels} chAgg={chAgg} cellStatus={cellStatus} />}
+          {tab === 'regions'       && <RegionsTab       geo={geo} geoAgg={geoAgg} cellStatus={cellStatus} />}
+          {tab === 'products'      && <ProductsTab      products={products} prodAgg={prodAgg} cellStatus={cellStatus} />}
+          {tab === 'subscriptions' && <SubscriptionsTab subDaily={subDaily} subStats={subStats} subTotals={subTotals} cellStatus={cellStatus} />}
+          {tab === 'email'         && <EmailTab         email={email} emailTotals={emailTotals} cellStatus={cellStatus} />}
         </>
       )}
     </div>
@@ -222,7 +237,7 @@ const OV_METRICS = [
   { key: 'aov', label: 'AOV', type: '$' },
 ];
 
-function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
+function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct, cellStatus }) {
   const summaryByDate = {};
   const dates = [];
   for (const r of summary) {
@@ -288,7 +303,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
       </div>
 
       <ChartPanel title="Daily Summary — All Days">
-        <VerticalDataTable dates={dates} getRow={(d) => summaryByDate[d]} metrics={OV_METRICS} tableScope="overview" />
+        <VerticalDataTable dates={dates} getRow={(d) => summaryByDate[d]} metrics={OV_METRICS} tableScope="overview" cellStatus={cellStatus} dateField="date" />
       </ChartPanel>
     </div>
   );
@@ -300,7 +315,7 @@ function OverviewTab({ summary, totals, totalMer, totalAov, nvpPct }) {
 const CH_AGG_HEADERS   = ['Channel','Spend','Revenue','ROAS','NC Orders','CAC'];
 const CH_DAILY_HEADERS = ['Date','Channel','Spend','Revenue','ROAS','Purchases','NC Orders','CAC'];
 
-function ChannelsTab({ channels, chAgg }) {
+function ChannelsTab({ channels, chAgg, cellStatus }) {
   const aggRows = chAgg.map(r => ({
     Channel:     r.channel,
     Spend:       r.spend,
@@ -388,6 +403,8 @@ function ChannelsTab({ channels, chAgg }) {
           defaultSortDir="desc"
           getCellCommentKey={(row, h) => entityDateCellKey('ch-daily', row, h, 'Channel')}
           getCellCommentLabel={(row, h) => entityDateCellLabel('channel', h, row, 'Channel')}
+          cellStatus={cellStatus}
+          dateField="Date"
         />
       </ChartPanel>
     </div>
@@ -400,7 +417,7 @@ function ChannelsTab({ channels, chAgg }) {
 const GEO_AGG_HEADERS   = ['Region','Revenue','Spend','MER','Rev Share %'];
 const GEO_DAILY_HEADERS = ['Date','Region','Revenue','Spend','MER'];
 
-function RegionsTab({ geo, geoAgg }) {
+function RegionsTab({ geo, geoAgg, cellStatus }) {
   const totalRev = geoAgg.reduce((s,r) => s + r.revenue, 0);
   const aggRows = geoAgg.map(r => ({
     Region:        r.region,
@@ -482,6 +499,8 @@ function RegionsTab({ geo, geoAgg }) {
           defaultSortDir="desc"
           getCellCommentKey={(row, h) => entityDateCellKey('geo-daily', row, h, 'Region')}
           getCellCommentLabel={(row, h) => entityDateCellLabel('region', h, row, 'Region')}
+          cellStatus={cellStatus}
+          dateField="Date"
         />
       </ChartPanel>
     </div>
@@ -494,7 +513,7 @@ function RegionsTab({ geo, geoAgg }) {
 const PROD_AGG_HEADERS   = ['Product Line','Revenue','Spend','MER','Units Sold','CAC'];
 const PROD_DAILY_HEADERS = ['Date','Product Line','Revenue','Spend','MER','Units Sold','Meta','Google','TikTok','Snap','Pinterest','Bing','AppLovin'];
 
-function ProductsTab({ products, prodAgg }) {
+function ProductsTab({ products, prodAgg, cellStatus }) {
   const productAgg = prodAgg.filter(p => CORE_PRODUCT_LINES.includes(p.line));
   const unallocatedAgg = prodAgg.filter(p => !CORE_PRODUCT_LINES.includes(p.line));
   const totalRev = productAgg.reduce((s,r) => s + r.revenue, 0);
@@ -654,6 +673,8 @@ function ProductsTab({ products, prodAgg }) {
           defaultSortDir="desc"
           getCellCommentKey={(row, h) => entityDateCellKey('prod-daily', row, h, 'Product')}
           getCellCommentLabel={(row, h) => entityDateCellLabel('product', h, row, 'Product')}
+          cellStatus={cellStatus}
+          dateField="Date"
         />
       </ChartPanel>
     </div>
@@ -665,7 +686,7 @@ function ProductsTab({ products, prodAgg }) {
 ════════════════════════════════════════════════════════════════════ */
 const SUB_HEADERS = ['Date','New Subs','New Sub Rev','Rebill Rev','Total Sub Rev'];
 
-function SubscriptionsTab({ subDaily, subStats, subTotals }) {
+function SubscriptionsTab({ subDaily, subStats, subTotals, cellStatus }) {
   const rows = subDaily.map(r => ({
     Date:           r.date,
     'New Subs':     r.new_sub_count ?? 0,
@@ -756,6 +777,8 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
           defaultSortDir="desc"
           getCellCommentKey={(row, h) => dailyCellKey('subs', row, h, 'Date')}
           getCellCommentLabel={(row, h) => dailyCellLabel(h, row, 'Date')}
+          cellStatus={cellStatus}
+          dateField="Date"
         />
       </ChartPanel>
     </div>
@@ -767,7 +790,7 @@ function SubscriptionsTab({ subDaily, subStats, subTotals }) {
 ════════════════════════════════════════════════════════════════════ */
 const EMAIL_HEADERS = ['Date','Sent','Opened','Clicked','Open Rate','Click Rate','Revenue'];
 
-function EmailTab({ email, emailTotals }) {
+function EmailTab({ email, emailTotals, cellStatus }) {
   const rows = email.map(r => ({
     Date:         r.date,
     Sent:         r.emails_sent,
@@ -831,6 +854,8 @@ function EmailTab({ email, emailTotals }) {
           defaultSortDir="desc"
           getCellCommentKey={(row, h) => dailyCellKey('email', row, h, 'Date')}
           getCellCommentLabel={(row, h) => dailyCellLabel(h, row, 'Date')}
+          cellStatus={cellStatus}
+          dateField="Date"
         />
       </ChartPanel>
     </div>

@@ -70,6 +70,9 @@ function mapCountryToSpendRegion(countryRaw) {
   if (c === 'CA' || c === 'CAN') return 'CA';
   if (c === 'AU' || c === 'AUS') return 'AUS';
   if (c === 'AE' || c === 'UAE') return 'DUBAI';
+  if (c === 'HK') return 'HK';
+  // UK is a first-class region for NOBL — check before EU so GB doesn't fall into EU.
+  if (c === 'GB' || c === 'UK') return 'UK';
   if (EU_COUNTRY_CODES.has(c)) return 'EU';
   return 'OTHER';
 }

@@ -26,6 +26,7 @@ import AppComingSoonPage from './pages/AppComingSoonPage';
 import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
 import MetaAdsPage       from './pages/MetaAdsPage';
 import ForecastEnginePage from './pages/ForecastEnginePage';
+import ForecastVsActualsPage from './pages/ForecastVsActualsPage';
 import FloToplinePage       from './pages/FloToplinePage';
 import NoblToplinePage      from './pages/NoblToplinePage';
 import NoblChannelDailyPage from './pages/NoblChannelDailyPage';
@@ -66,6 +67,7 @@ const TAB_TO_PATH = {
   'FLO Topline':          '/flo-topline',
   'FLO Channel Level Daily':  '/flo-channel-daily',
   'Forecast Engine':      '/forecast-engine',
+  'Forecast vs Actuals':  '/forecast-vs-actuals',
   'NOBL Air Performance': '/nobl-air-performance',
   'Store:NOBL':           '/store/nobl',
   'Store:FLO':            '/store/flo',
@@ -99,6 +101,7 @@ function pathToActiveTab(pathname, dynamicTabs) {
   if (pathname.startsWith('/nobl-channel-daily')) return 'NOBL Channel Level Daily';
   if (pathname.startsWith('/flo-topline')) return 'FLO Topline';
   if (pathname.startsWith('/flo-channel-daily')) return 'FLO Channel Level Daily';
+  if (pathname.startsWith('/forecast-vs-actuals')) return 'Forecast vs Actuals';
   if (pathname.startsWith('/forecast-engine')) return 'Forecast Engine';
   if (pathname.startsWith('/nobl-air-performance')) return 'NOBL Air Performance';
   if (pathname.startsWith('/store/nobl')) return 'Store:NOBL';
@@ -217,6 +220,7 @@ function AppRoot() {
         <Route path="/flo-topline"            element={<PageHost Comp={FloToplinePage} />} />
         <Route path="/flo-channel-daily"      element={<PageHost Comp={FloChannelDailyPage} />} />
         <Route path="/forecast-engine"      element={<PageHost Comp={ForecastEnginePage} />} />
+        <Route path="/forecast-vs-actuals"  element={<PageHost Comp={ForecastVsActualsPage} />} />
         <Route path="/nobl-air-performance" element={<PageHost Comp={NoblAirPerformancePage} />} />
         <Route path="/store/nobl"           element={<PageHost Comp={StoreNoblPage} />} />
         <Route path="/store/flo"            element={<PageHost Comp={StoreFLOPage} />} />

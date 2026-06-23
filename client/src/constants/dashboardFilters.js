@@ -10,6 +10,7 @@ export const BRAND_OPTIONS = [
 export const REGION_OPTIONS = [
   { value: 'ALL', label: 'All regions' },
   { value: 'US', label: 'US — United States' },
+  { value: 'UK', label: 'UK — United Kingdom' },
   { value: 'EU', label: 'EU — Europe' },
   { value: 'CA', label: 'CA — Canada' },
   { value: 'AUS', label: 'AUS — Australia' },
@@ -47,7 +48,7 @@ export function normalizeMultiFilter(next, allowedSet, canonicalOrder = null) {
 }
 
 export function normalizeRegions(next) {
-  return normalizeMultiFilter(next, REGION_ALLOWED, ['US', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL']);
+  return normalizeMultiFilter(next, REGION_ALLOWED, ['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL']);
 }
 
 export function normalizeChannels(next) {
@@ -136,7 +137,9 @@ const GEO_REGION_ALIASES = {
   AUS: 'AUS', AU: 'AUS', AUSTRALIA: 'AUS',
   DUBAI: 'DUBAI', UAE: 'DUBAI', AE: 'DUBAI', 'UNITED ARAB EMIRATES': 'DUBAI',
   HK: 'HK', 'HONG KONG': 'HK',
-  EU: 'EU', UK: 'EU', GB: 'EU', DE: 'EU', FR: 'EU',
+  // UK is a first-class NOBL region (new Shopify store wdwzan-tc.myshopify.com).
+  UK: 'UK', GB: 'UK', 'UNITED KINGDOM': 'UK', 'GREAT BRITAIN': 'UK',
+  EU: 'EU', DE: 'EU', FR: 'EU',
   INTL: 'INTL', INTERNATIONAL: 'INTL',
 };
 
@@ -145,8 +148,8 @@ export function canonicalGeoRegion(value) {
   return GEO_REGION_ALIASES[u] || u;
 }
 
-/** NOBL Air subscriber region buckets (EU is a TW geo code, not an Air bucket). */
-export const AIR_REGION_ORDER = ['US', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL'];
+/** NOBL Air subscriber region buckets (EU is a TW geo code, not an Air bucket; UK is). */
+export const AIR_REGION_ORDER = ['US', 'CA', 'AUS', 'UK', 'DUBAI', 'HK', 'INTL'];
 
 /** Build nobl_air_region_daily region_key from global filter selection. */
 export function airRegionKeyFromSelection(selected) {
