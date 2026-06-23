@@ -284,10 +284,51 @@ function StatusPill({ status }) {
 }
 
 const PERIOD_COL_WIDTH = 118;
-const KPI_MATRIX_COL_WIDTH = 190;
+const KPI_LABEL_COL_WIDTH = 240;
 
 function periodMeta(period, index) {
   return { label: period.label, sub: index === 0 ? 'Latest' : period.sub };
+}
+
+function KpiRowLabel({ row, onSelect }) {
+  const st = STATUS_META[row.status] || STATUS_META.gray;
+  const brandColor = row.brand === 'NOBL' ? NOBL_ACCENT : FLO_ACCENT;
+  return (
+    <div
+      onClick={() => onSelect?.(row)}
+      style={{ cursor: onSelect ? 'pointer' : 'default', minWidth: 0 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0, marginBottom: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+          <span style={{ width: 7, height: 7, borderRadius: 999, background: st.color, flexShrink: 0 }} />
+          <span style={{ fontSize: 10.5, fontWeight: 950, color: brandColor, letterSpacing: '.07em' }}>{row.brand}</span>
+          <span style={{ fontSize: 10, color: 'var(--text4)', fontWeight: 800, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.department}>
+            {row.department}
+          </span>
+        </div>
+        <span style={{ fontSize: 9.5, fontWeight: 850, color: st.color, background: st.bg, border: `1px solid ${st.border}`, borderRadius: 999, padding: '2px 6px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+          {st.label}
+        </span>
+      </div>
+      <div title={row.metric} style={{ fontSize: 12, fontWeight: 950, lineHeight: 1.25, color: 'var(--text)', marginBottom: 6 }}>
+        {row.metric}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 5, fontSize: 10 }}>
+        <div title={`Target: ${row.target || '—'}`}>
+          <div style={{ fontSize: 8.5, color: 'var(--text4)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.05em' }}>Target</div>
+          <div style={{ marginTop: 2, color: 'var(--text2)', fontWeight: 850, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.target || '—'}</div>
+        </div>
+        <div title={`Owner: ${row.owner || '—'}`}>
+          <div style={{ fontSize: 8.5, color: 'var(--text4)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.05em' }}>Owner</div>
+          <div style={{ marginTop: 2, color: 'var(--text2)', fontWeight: 850, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.owner || '—'}</div>
+        </div>
+        <div title={`Latest: ${row.latest || '—'}`}>
+          <div style={{ fontSize: 8.5, color: 'var(--text4)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.05em' }}>Latest</div>
+          <div style={{ marginTop: 2, color: st.color, fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.latest || '—'}</div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function RawKpiTable({ rows, cadence, periods = [], onSelect }) {
@@ -317,11 +358,12 @@ function RawKpiTable({ rows, cadence, periods = [], onSelect }) {
       return haystack.includes(searchTerm);
     });
   }, [rows, searchTerm, ownerFilter]);
-  const tableWidth = PERIOD_COL_WIDTH + (Math.max(matrixRows.length, 1) * KPI_MATRIX_COL_WIDTH);
+  const tableWidth = KPI_LABEL_COL_WIDTH + (Math.max(periods.length, 1) * PERIOD_COL_WIDTH);
+  const cadenceLabel = cadence === 'daily' ? 'Daily' : cadence === 'weekly' ? 'Weekly' : 'Quarterly';
   return (
     <ChartPanel
-      title={`KPI period matrix — ${cadence === 'daily' ? 'Daily' : cadence === 'weekly' ? 'Weekly' : 'Quarterly'}`}
-      subtitle="Search filters KPI columns by owner, metric, department, brand, target, status, or period values."
+      title={`KPI matrix — ${cadenceLabel}`}
+      subtitle="Metrics down the left; dates across the top (latest column first). Search filters KPI rows."
       style={{ padding: 14, minHeight: 0 }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -330,7 +372,7 @@ function RawKpiTable({ rows, cadence, periods = [], onSelect }) {
           <input
             value={matrixSearch}
             onChange={(e) => setMatrixSearch(e.target.value)}
-            placeholder="Search matrix: owner, metric, department, target, status…"
+            placeholder="Search KPI rows: owner, metric, department, target, status…"
             style={{
               width: '100%',
               padding: '8px 30px 8px 30px',
@@ -344,7 +386,7 @@ function RawKpiTable({ rows, cadence, periods = [], onSelect }) {
             }}
             onFocus={(e) => { e.target.style.borderColor = 'var(--accent)'; }}
             onBlur={(e) => { e.target.style.borderColor = 'var(--border2)'; }}
-            aria-label="Search KPI matrix columns"
+            aria-label="Search KPI matrix rows"
           />
           <svg
             style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', opacity: 0.45, pointerEvents: 'none' }}
@@ -391,69 +433,45 @@ function RawKpiTable({ rows, cadence, periods = [], onSelect }) {
         />
         </div>
         <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 800, whiteSpace: 'nowrap' }}>
-          Showing <span style={{ color: 'var(--text)', fontWeight: 950 }}>{matrixRows.length}</span> of {rows.length} KPI columns
+          Showing <span style={{ color: 'var(--text)', fontWeight: 950 }}>{matrixRows.length}</span> of {rows.length} KPI rows
         </div>
       </div>
-      <div style={{ overflow: 'auto', maxHeight: 'clamp(220px, calc(100vh - 560px), 540px)', border: '1px solid var(--border)', borderRadius: 10 }}>
+      <div style={{ overflow: 'auto', maxHeight: 'clamp(280px, calc(100vh - 520px), 640px)', border: '1px solid var(--border)', borderRadius: 10 }}>
         <table style={{ width: tableWidth, minWidth: tableWidth, tableLayout: 'fixed', borderCollapse: 'separate', borderSpacing: 0, fontSize: 11.5 }}>
           <thead>
             <tr>
               <th style={{
-                position: 'sticky', top: 0, left: 0, zIndex: 8,
+                position: 'sticky', top: 0, left: 0, zIndex: 9,
                 background: 'var(--bg2)', color: 'var(--text3)', textAlign: 'left',
                 padding: '8px 10px', borderBottom: '1px solid var(--border)', borderRight: '1px solid var(--border)',
                 fontSize: 10.5, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.06em',
-                minWidth: PERIOD_COL_WIDTH, width: PERIOD_COL_WIDTH, boxShadow: '8px 0 12px -12px rgba(0,0,0,.35)',
+                minWidth: KPI_LABEL_COL_WIDTH, width: KPI_LABEL_COL_WIDTH,
+                boxShadow: '8px 0 12px -12px rgba(0,0,0,.35)',
               }}>
-                Period
+                KPI
               </th>
-              {matrixRows.map((row) => {
-                const st = STATUS_META[row.status] || STATUS_META.gray;
-                const brandColor = row.brand === 'NOBL' ? NOBL_ACCENT : FLO_ACCENT;
+              {periods.map((period, periodIndex) => {
+                const meta = periodMeta(period, periodIndex);
                 return (
                   <th
-                    key={`${row.brand}-${row.department}-${row.metric}`}
-                    onClick={() => onSelect?.(row)}
+                    key={period.key}
                     style={{
-                      position: 'sticky',
-                      top: 0,
-                      zIndex: 6,
-                      background: 'var(--bg2)',
-                      color: 'var(--text)',
-                      textAlign: 'left',
-                      padding: '9px 10px',
+                      position: 'sticky', top: 0, zIndex: 7,
+                      background: periodIndex === 0 ? 'rgba(31,111,84,.08)' : 'var(--bg2)',
+                      color: periodIndex === 0 ? 'var(--accent)' : 'var(--text)',
+                      textAlign: 'right',
+                      padding: '8px 10px',
                       borderBottom: '1px solid var(--border)',
                       borderRight: '1px solid var(--col-sep)',
-                      minWidth: KPI_MATRIX_COL_WIDTH,
-                      width: KPI_MATRIX_COL_WIDTH,
-                      cursor: 'pointer',
-                      verticalAlign: 'top',
+                      minWidth: PERIOD_COL_WIDTH,
+                      width: PERIOD_COL_WIDTH,
+                      fontWeight: 900,
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minWidth: 0, marginBottom: 7 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
-                        <span style={{ width: 7, height: 7, borderRadius: 999, background: st.color, flexShrink: 0 }} />
-                        <span style={{ fontSize: 10.5, fontWeight: 950, color: brandColor, letterSpacing: '.07em' }}>{row.brand}</span>
-                      </div>
-                      <span style={{ fontSize: 9.5, fontWeight: 850, color: st.color, background: st.bg, border: `1px solid ${st.border}`, borderRadius: 999, padding: '2px 6px', whiteSpace: 'nowrap' }}>
-                        {st.label}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 10.5, color: 'var(--text3)', fontWeight: 800, marginBottom: 4, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }} title={row.department}>
-                      {row.department}
-                    </div>
-                    <div title={row.metric} style={{ fontSize: 12, fontWeight: 950, lineHeight: 1.2, minHeight: 30, maxHeight: 44, overflow: 'hidden', color: 'var(--text)' }}>
-                      {row.metric}
-                    </div>
-                    <div style={{ marginTop: 7, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
-                      <div title={`Target: ${row.target || '—'}`} style={{ minWidth: 0, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, padding: '4px 6px' }}>
-                        <div style={{ fontSize: 8.5, color: 'var(--text4)', fontWeight: 900, letterSpacing: '.06em', textTransform: 'uppercase' }}>Target</div>
-                        <div style={{ marginTop: 2, fontSize: 10.5, color: 'var(--text2)', fontWeight: 850, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.target || '—'}</div>
-                      </div>
-                      <div title={`Owner: ${row.owner || '—'}`} style={{ minWidth: 0, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 7, padding: '4px 6px' }}>
-                        <div style={{ fontSize: 8.5, color: 'var(--text4)', fontWeight: 900, letterSpacing: '.06em', textTransform: 'uppercase' }}>Owner</div>
-                        <div style={{ marginTop: 2, fontSize: 10.5, color: 'var(--text2)', fontWeight: 850, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.owner || '—'}</div>
-                      </div>
+                    <div>{meta.label}</div>
+                    <div style={{ marginTop: 2, fontSize: 9.5, color: 'var(--text4)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                      {meta.sub}
                     </div>
                   </th>
                 );
@@ -463,64 +481,56 @@ function RawKpiTable({ rows, cadence, periods = [], onSelect }) {
           <tbody>
             {matrixRows.length === 0 ? (
               <tr>
-                <td style={{
-                  position: 'sticky', left: 0, zIndex: 4, background: 'var(--bg2)', color: 'var(--text)',
-                  padding: '12px 10px', borderBottom: '1px solid var(--row-sep)', borderRight: '1px solid var(--border)',
-                  fontWeight: 900, minWidth: PERIOD_COL_WIDTH, width: PERIOD_COL_WIDTH,
-                }}>
-                  No results
-                </td>
-                <td style={{ padding: 18, color: 'var(--text3)', textAlign: 'center', borderBottom: '1px solid var(--row-sep)' }}>
-                  No KPI columns match “{matrixSearch}”. Try owner, department, metric, brand, target, status, or a period value.
+                <td
+                  colSpan={Math.max(periods.length, 1) + 1}
+                  style={{ padding: 18, color: 'var(--text3)', textAlign: 'center', borderBottom: '1px solid var(--row-sep)' }}
+                >
+                  No KPI rows match “{matrixSearch}”. Try owner, department, metric, brand, target, status, or a period value.
                 </td>
               </tr>
-            ) : periods.map((period, periodIndex) => {
-              const meta = periodMeta(period, periodIndex);
+            ) : matrixRows.map((row) => {
+              const st = STATUS_META[row.status] || STATUS_META.gray;
               return (
-                <tr key={period.key}>
+                <tr key={`${row.brand}-${row.department}-${row.metric}`}>
                   <td style={{
-                  position: 'sticky',
-                  left: 0,
-                  zIndex: 4,
-                  background: 'var(--bg2)',
-                  color: periodIndex === 0 ? 'var(--accent)' : 'var(--text)',
-                  padding: '9px 10px',
-                  borderBottom: '1px solid var(--row-sep)',
-                  borderRight: '1px solid var(--border)',
-                  fontWeight: 900,
-                  whiteSpace: 'nowrap',
-                  minWidth: PERIOD_COL_WIDTH,
-                  width: PERIOD_COL_WIDTH,
-                  boxShadow: '8px 0 12px -12px rgba(0,0,0,.35)',
-                }}>
-                  <div>{meta.label}</div>
-                  <div style={{ marginTop: 2, fontSize: 9.5, color: 'var(--text4)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.04em' }}>{meta.sub}</div>
-                </td>
-                  {matrixRows.map((row) => {
-                    const st = STATUS_META[row.status] || STATUS_META.gray;
-                    return (
-                      <td
-                        key={`${period.key}-${row.brand}-${row.metric}`}
-                        onClick={() => onSelect?.(row)}
-                        style={{
-                          padding: '9px 8px',
-                          borderBottom: '1px solid var(--row-sep)',
-                          borderRight: '1px solid var(--col-sep)',
-                          color: periodIndex === 0 ? 'var(--text)' : 'var(--text2)',
-                          background: periodIndex === 0 ? 'rgba(31,111,84,.045)' : 'var(--bg2)',
-                          fontWeight: periodIndex === 0 ? 900 : 650,
-                          fontVariantNumeric: 'tabular-nums',
-                          whiteSpace: 'nowrap',
-                          minWidth: KPI_MATRIX_COL_WIDTH,
-                          width: KPI_MATRIX_COL_WIDTH,
-                          textAlign: 'right',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        <span style={{ color: periodIndex === 0 ? st.color : undefined }}>{row.values?.[periodIndex] || '—'}</span>
-                      </td>
-                    );
-                  })}
+                    position: 'sticky',
+                    left: 0,
+                    zIndex: 4,
+                    background: 'var(--bg2)',
+                    padding: '10px 10px',
+                    borderBottom: '1px solid var(--row-sep)',
+                    borderRight: '1px solid var(--border)',
+                    minWidth: KPI_LABEL_COL_WIDTH,
+                    width: KPI_LABEL_COL_WIDTH,
+                    verticalAlign: 'top',
+                    boxShadow: '8px 0 12px -12px rgba(0,0,0,.35)',
+                  }}>
+                    <KpiRowLabel row={row} onSelect={onSelect} />
+                  </td>
+                  {periods.map((period, periodIndex) => (
+                    <td
+                      key={`${period.key}-${row.brand}-${row.metric}`}
+                      onClick={() => onSelect?.(row)}
+                      style={{
+                        padding: '9px 8px',
+                        borderBottom: '1px solid var(--row-sep)',
+                        borderRight: '1px solid var(--col-sep)',
+                        color: periodIndex === 0 ? 'var(--text)' : 'var(--text2)',
+                        background: periodIndex === 0 ? 'rgba(31,111,84,.045)' : 'var(--bg2)',
+                        fontWeight: periodIndex === 0 ? 900 : 650,
+                        fontVariantNumeric: 'tabular-nums',
+                        whiteSpace: 'nowrap',
+                        minWidth: PERIOD_COL_WIDTH,
+                        width: PERIOD_COL_WIDTH,
+                        textAlign: 'right',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <span style={{ color: periodIndex === 0 ? st.color : undefined }}>
+                        {row.values?.[periodIndex] || '—'}
+                      </span>
+                    </td>
+                  ))}
                 </tr>
               );
             })}
