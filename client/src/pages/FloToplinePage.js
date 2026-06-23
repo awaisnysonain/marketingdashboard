@@ -212,7 +212,8 @@ export default function FloToplinePage() {
       geoByDateRg,
       productNames: sortByRevenueDesc(prSet, productRev),
       productByDatePr,
-      kpi: { totalRev, totalSpend, mer: periodMer, totalOrders, totalNew },
+      // Orders / new-customers aren't region-split in the geo table → null ("—") under a region filter.
+      kpi: { totalRev, totalSpend, mer: periodMer, totalOrders: isAllRegions ? totalOrders : null, totalNew: isAllRegions ? totalNew : null },
       chartData,
       chAgg,
       geoAgg,
@@ -275,8 +276,8 @@ export default function FloToplinePage() {
               <KpiCard label="Order Revenue" value={fmt$(kpi.totalRev)} fullValue={fmtFull$(kpi.totalRev)} tooltip={TIP.orderRevenue} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('order_revenue'), targetLabel: 'Order Revenue' }} />
               <KpiCard label="Total Spend" value={fmt$(kpi.totalSpend)} fullValue={fmtFull$(kpi.totalSpend)} tooltip={TIP.spend} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_spend'), targetLabel: 'Total Spend' }} />
               <KpiCard label="MER" value={fmtRatio(kpi.mer)} copyValue={kpi.mer != null ? Number(kpi.mer).toFixed(4) : undefined} tooltip={TIP.mer} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('mer'), targetLabel: 'MER' }} />
-              <KpiCard label="Total Orders" value={fmtNum(kpi.totalOrders)} fullValue={fmtFullNum(kpi.totalOrders)} tooltip={TIP.orders} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
-              <KpiCard label="New Customers" value={fmtNum(kpi.totalNew)} fullValue={fmtFullNum(kpi.totalNew)} tooltip={TIP.ncOrders} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }} />
+              <KpiCard label="Total Orders" value={kpi.totalOrders == null ? '—' : fmtNum(kpi.totalOrders)} fullValue={kpi.totalOrders == null ? 'Not broken out by region' : fmtFullNum(kpi.totalOrders)} sub={kpi.totalOrders == null ? 'n/a by region' : undefined} tooltip={TIP.orders} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }} />
+              <KpiCard label="New Customers" value={kpi.totalNew == null ? '—' : fmtNum(kpi.totalNew)} fullValue={kpi.totalNew == null ? 'Not broken out by region' : fmtFullNum(kpi.totalNew)} sub={kpi.totalNew == null ? 'n/a by region' : undefined} tooltip={TIP.ncOrders} accent="flo" commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }} />
             </div>
           </div>
 

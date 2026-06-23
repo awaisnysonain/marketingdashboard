@@ -54,88 +54,44 @@ router.get('/', async (req, res) => {
     // ── 3. Data freshness ────────────────────────────────────────────────────
     const fmtD = (d) => d ? (d instanceof Date ? d.toISOString().slice(0,10) : String(d).slice(0,10)) : null;
 
+    // Freshness for the data sources that are actually live in the current
+    // pipeline. (The old tw_orders/sessions/customers/segments/refunds/email_sms/
+    // benchmarks tables are unused/empty and were dropped from this view.)
     const [
-      noblSummR, floSummR, noblChR, floChR, appstleR, subRevR, klavR,
-      adsR, ordersR, sessionsR, customersR, segmentsR, refundsR, emailSmsR, benchmarksR,
+      noblSummR, floSummR, noblChR, floChR, appstleR, klavR, twAdsR, metaAdsR,
+      noblAirR, iapRevR, iapSubR, forecastR, perfR,
     ] = await Promise.all([
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_brand_tw_summary_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM flo_brand_tw_summary_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_brand_tw_channel_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM flo_brand_tw_channel_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT COUNT(*) as cnt, COUNT(CASE WHEN status='active' THEN 1 END) as active_cnt FROM appstle_subscriptions`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_air_sub_revenue_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM klaviyo_daily`).catch(() => ({ rows: [{}] })),
-      // New TW SQL tables
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_ads_daily`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT MAX(order_date) as max_date, COUNT(*) as cnt FROM tw_orders_detail`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_sessions_daily`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT COUNT(*) as cnt FROM tw_customers`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT MAX(segment_date) as max_date, COUNT(*) as cnt FROM tw_customer_segments`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_refunds_daily`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_email_sms_daily`).catch(() => ({ rows: [{}] })),
-      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_benchmarks`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM meta_ads_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_air_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM iap_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM iap_subscription_daily`).catch(() => ({ rows: [{}] })),
+      // Plan/import tables are future-dated, so freshness uses MAX(updated_at) = last import.
+      pgQuery(`SELECT MAX(updated_at)::date as max_date, COUNT(*) as cnt FROM forecast_plan_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(updated_at)::date as max_date, COUNT(*) as cnt FROM brand_performance_daily`).catch(() => ({ rows: [{}] })),
     ]);
 
-    // Use keys that match exactly what SyncPage.js FRESHNESS_CARDS expects
+    const mk = (r, extra = {}) => ({ latest_date: fmtD(r.rows[0]?.max_date), row_count: parseInt(r.rows[0]?.cnt || 0), ...extra });
     const data_freshness = {
-      nobl_summary: {
-        latest_date: fmtD(noblSummR.rows[0]?.max_date),
-        row_count:   parseInt(noblSummR.rows[0]?.cnt || 0),
-      },
-      flo_summary: {
-        latest_date: fmtD(floSummR.rows[0]?.max_date),
-        row_count:   parseInt(floSummR.rows[0]?.cnt || 0),
-      },
-      nobl_channels: {
-        latest_date: fmtD(noblChR.rows[0]?.max_date),
-        row_count:   parseInt(noblChR.rows[0]?.cnt || 0),
-      },
-      flo_channels: {
-        latest_date: fmtD(floChR.rows[0]?.max_date),
-        row_count:   parseInt(floChR.rows[0]?.cnt || 0),
-      },
-      nobl_subs: {
-        latest_date: fmtD(subRevR.rows[0]?.max_date),
-        row_count:   parseInt(appstleR.rows[0]?.cnt || 0),
-        active:      parseInt(appstleR.rows[0]?.active_cnt || 0),
-      },
-      klaviyo_emails: {
-        latest_date: fmtD(klavR.rows[0]?.max_date),
-        row_count:   parseInt(klavR.rows[0]?.cnt || 0),
-      },
-      // New TW SQL tables
-      tw_ads: {
-        latest_date: fmtD(adsR.rows[0]?.max_date),
-        row_count:   parseInt(adsR.rows[0]?.cnt || 0),
-      },
-      tw_orders: {
-        latest_date: fmtD(ordersR.rows[0]?.max_date),
-        row_count:   parseInt(ordersR.rows[0]?.cnt || 0),
-      },
-      tw_sessions: {
-        latest_date: fmtD(sessionsR.rows[0]?.max_date),
-        row_count:   parseInt(sessionsR.rows[0]?.cnt || 0),
-      },
-      tw_customers: {
-        latest_date: null,
-        row_count:   parseInt(customersR.rows[0]?.cnt || 0),
-      },
-      tw_segments: {
-        latest_date: fmtD(segmentsR.rows[0]?.max_date),
-        row_count:   parseInt(segmentsR.rows[0]?.cnt || 0),
-      },
-      tw_refunds: {
-        latest_date: fmtD(refundsR.rows[0]?.max_date),
-        row_count:   parseInt(refundsR.rows[0]?.cnt || 0),
-      },
-      tw_email_sms: {
-        latest_date: fmtD(emailSmsR.rows[0]?.max_date),
-        row_count:   parseInt(emailSmsR.rows[0]?.cnt || 0),
-      },
-      tw_benchmarks: {
-        latest_date: fmtD(benchmarksR.rows[0]?.max_date),
-        row_count:   parseInt(benchmarksR.rows[0]?.cnt || 0),
-      },
+      nobl_summary:   mk(noblSummR),
+      flo_summary:    mk(floSummR),
+      nobl_channels:  mk(noblChR),
+      flo_channels:   mk(floChR),
+      meta_ads:       mk(metaAdsR),
+      tw_ads:         mk(twAdsR),
+      klaviyo_emails: mk(klavR),
+      nobl_subs:      { latest_date: null, row_count: parseInt(appstleR.rows[0]?.cnt || 0), active: parseInt(appstleR.rows[0]?.active_cnt || 0) },
+      nobl_air:       mk(noblAirR),
+      iap_revenue:    mk(iapRevR),
+      iap_subs:       mk(iapSubR),
+      forecast_plan:  mk(forecastR),
+      performance:    mk(perfR),
     };
 
     // ── 4. Gap check (quick, only check last 90 days) ────────────────────────

@@ -1326,7 +1326,9 @@ function buildNoblStoreDailyForecast(storeForecast, actualByDate, brandKey = 'NO
       const dayPlan = planRow ? toNum(planRow.plan_revenue) : (planMonthRev > 0 ? planMonthRev * (factors.weight / monthWeightSum) : 0);
       const allocatedRevenue = isFuture ? remainingRevenue * (factors.weight / futureWeight) : 0;
       const forecastRevenue = isFuture ? allocatedRevenue : dayPlan;
-      const projectedSpend = actual ? toNum(actual.spend) : (targetMer > 0 ? forecastRevenue / targetMer : 0);
+      // Plan-derived spend on every day (forecast revenue ÷ target MER), so the
+      // spend/MER variance is meaningful instead of echoing the actual back at itself.
+      const projectedSpend = targetMer > 0 ? forecastRevenue / targetMer : (actual ? toNum(actual.spend) : 0);
       rows.push({
         date,
         month: monthLabel(key),
@@ -1581,6 +1583,105 @@ router.get('/forecast-daily', async (req, res) => {
     res.json(body);
   } catch (e) {
     console.error('[Analytics /forecast-daily]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /iap — In-app purchase daily revenue/units by brand + platform.
+// Reads iap_daily (rollup rows, product_id='ALL'). Returns empty + pending=true
+// when the table doesn't exist yet (schema not applied) or no rows are synced.
+router.get('/iap', async (req, res) => {
+  try {
+    const brand = String(req.query.brand || 'ALL').toUpperCase();
+    const start = req.query.start ? String(req.query.start).slice(0, 10) : '2026-01-01';
+    const end = req.query.end ? String(req.query.end).slice(0, 10) : '2026-12-31';
+    const params = [start, end];
+    let brandFilter = '';
+    if (brand === 'NOBL' || brand === 'FLO') { params.push(brand); brandFilter = `AND brand = $3`; }
+    const q = await pgQuery(`
+      SELECT date::text AS date, brand, platform,
+             SUM(units)::int AS units,
+             SUM(revenue_usd)::numeric(14,2) AS revenue_usd,
+             SUM(proceeds_raw)::numeric(14,2) AS proceeds_raw
+      FROM iap_daily
+      WHERE product_id = 'ALL' AND date BETWEEN $1::date AND $2::date ${brandFilter}
+      GROUP BY date, brand, platform
+      ORDER BY date ASC
+    `, params).catch((e) => { throw Object.assign(e, { _missing: e.code === '42P01' || /relation .* does not exist/i.test(e.message || '') }); });
+
+    const rows = fmtRows(q.rows);
+    const byPlatform = { apple: { units: 0, revenue_usd: 0 }, google: { units: 0, revenue_usd: 0 } };
+    const byDateMap = {};
+    for (const r of rows) {
+      const p = byPlatform[r.platform] || (byPlatform[r.platform] = { units: 0, revenue_usd: 0 });
+      p.units += toNum(r.units); p.revenue_usd += toNum(r.revenue_usd);
+      const d = byDateMap[r.date] || (byDateMap[r.date] = { date: r.date, apple_revenue: 0, google_revenue: 0, apple_units: 0, google_units: 0 });
+      d[`${r.platform}_revenue`] += toNum(r.revenue_usd);
+      d[`${r.platform}_units`] += toNum(r.units);
+    }
+    const series = Object.values(byDateMap).sort((a, b) => a.date.localeCompare(b.date));
+    const totalRevenue = byPlatform.apple.revenue_usd + byPlatform.google.revenue_usd;
+
+    // Subscription state. active/trials are point-in-time snapshots whose recency
+    // differs per platform (Apple ~daily, Google lags ~10d), so we FORWARD-FILL
+    // each (brand,platform) series before summing — otherwise the latest date
+    // would only reflect whichever platform reported last and undercount the
+    // total. new/cancelled are flows → summed over the period.
+    let subs = { active: 0, trials: 0, new: 0, cancelled: 0, series: [] };
+    try {
+      const sq = await pgQuery(`
+        SELECT date::text AS date, brand, platform, active_subs, trials, new_subs, cancelled_subs
+        FROM iap_subscription_daily
+        WHERE date BETWEEN $1::date AND $2::date ${brandFilter}
+        ORDER BY date ASC
+      `, params);
+      const srows = fmtRows(sq.rows);
+      if (srows.length) {
+        const dates = [...new Set(srows.map((r) => r.date))].sort();
+        const keys = [...new Set(srows.map((r) => `${r.brand}|${r.platform}`))];
+        const snap = {}; // key → date → {active, trials}
+        const flow = {}; // date → {new, cancelled}
+        for (const r of srows) {
+          const k = `${r.brand}|${r.platform}`;
+          (snap[k] = snap[k] || {})[r.date] = { active: toNum(r.active_subs), trials: toNum(r.trials) };
+          const f = flow[r.date] || (flow[r.date] = { new: 0, cancelled: 0 });
+          f.new += toNum(r.new_subs); f.cancelled += toNum(r.cancelled_subs);
+        }
+        const carry = {};
+        const sseries = dates.map((d) => {
+          let active = 0; let trials = 0;
+          for (const k of keys) {
+            if (snap[k][d]) carry[k] = snap[k][d];
+            if (carry[k]) { active += carry[k].active; trials += carry[k].trials; }
+          }
+          return { date: d, active, trials, new_subs: flow[d]?.new || 0, cancelled_subs: flow[d]?.cancelled || 0 };
+        });
+        const latest = sseries[sseries.length - 1];
+        subs = {
+          active: latest.active,
+          trials: latest.trials,
+          new: sseries.reduce((s, r) => s + r.new_subs, 0),
+          cancelled: sseries.reduce((s, r) => s + r.cancelled_subs, 0),
+          series: sseries,
+        };
+      }
+    } catch (e) { if (e.code !== '42P01') throw e; }
+
+    res.json({
+      brand, start, end, rows, series, byPlatform, subs,
+      totals: {
+        revenue_usd: totalRevenue,
+        units: byPlatform.apple.units + byPlatform.google.units,
+      },
+      pending: rows.length === 0,
+      // Google earnings reports lag ~1 month, so Play data trails Apple by a report cycle.
+      google_status: byPlatform.google.revenue_usd > 0 ? 'active' : 'no_data',
+    });
+  } catch (e) {
+    if (e._missing) {
+      return res.json({ rows: [], series: [], byPlatform: { apple: { units: 0, revenue_usd: 0 }, google: { units: 0, revenue_usd: 0 } }, totals: { revenue_usd: 0, units: 0 }, pending: true, not_applied: true });
+    }
+    console.error('[Analytics /iap]', e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -22,7 +22,7 @@ import LivePage          from './pages/LivePage';
 import KpiPulsePage      from './pages/KpiPulsePage';
 import StoreNoblPage     from './pages/StoreNoblPage';
 import StoreFLOPage      from './pages/StoreFLOPage';
-import AppComingSoonPage from './pages/AppComingSoonPage';
+import IapPage from './pages/IapPage';
 import NoblAirPerformancePage from './pages/NoblAirPerformancePage';
 import MetaAdsPage       from './pages/MetaAdsPage';
 import ForecastEnginePage from './pages/ForecastEnginePage';
@@ -427,11 +427,11 @@ function PageHost({ Comp }) {
 }
 
 function NoblAppPage() {
-  return <AppComingSoonPage brand="nobl" />;
+  return <IapPage brand="NOBL" />;
 }
 
 function FloAppPage() {
-  return <AppComingSoonPage brand="flo" />;
+  return <IapPage brand="FLO" />;
 }
 
 function AiBuilderRoute() {

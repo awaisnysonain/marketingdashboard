@@ -1385,6 +1385,7 @@ const ALL_DAILY_TASKS = [
   'forecast_sheet',      // import NOBL plan calendar into forecast_plan_daily
   'performance_dashboard', // import NOBL + FLO performance workbook into brand_performance_daily
   'product_daily',       // recompute shopify_product_daily
+  'iap',                 // Apple App Store + Google Play IAP revenue → iap_daily (self-widens ~45d for late Play earnings)
 ];
 
 // Live/Snapshot page — lightweight hourly refresh (summary + channel + geo via tw_refresh)
@@ -1403,6 +1404,8 @@ try {
   const cron = require('node-cron');
   const { pgQuery, pgRun } = require('./db/postgres');
   const { sendAlert, ensureSchema: ensureAlertsSchema } = require('./etl/alerts');
+  const { describeTaskFailure, describeTasksImpact, taskInfo } = require('./etl/taskCatalog');
+  const SLOW_TASK_SEC = parseInt(process.env.CRON_SLOW_TASK_SEC || '600', 10); // warn if a single task exceeds this
   const { CRON_TZ, pakistanTodayStr, pakistanYesterdayStr, addDaysStr } = require('./utils/pakistanTime');
   const { reportTodayStr, reportYesterdayStr, maxDateStr } = require('./utils/reportTime');
 
@@ -1502,11 +1505,25 @@ try {
         syncResult = await Promise.race([syncPromise, timeoutPromise]);
       } catch (e) {
         syncErr = e.message;
+        // Determine which tasks did NOT complete (timeout/crash leaves them non-success).
+        let incomplete = ALL_DAILY_TASKS;
+        try {
+          const done = await pgQuery(`SELECT DISTINCT task FROM etl_run_log WHERE run_id=$1 AND status='success'`, [runId]);
+          const doneSet = new Set(done.rows.map(r => r.task));
+          incomplete = ALL_DAILY_TASKS.filter(t => !doneSet.has(t));
+        } catch { /* fall back to all tasks */ }
+        const isTimeout = /timed out/i.test(e.message);
         await sendAlert({
           severity: 'critical',
-          subject: `Cron failed/timed out: ${runId}`,
-          body: `The daily cron sync errored: ${e.message}`,
-          context: { runId, startDate, endDate, elapsed_min: ((Date.now()-t0)/60000).toFixed(1) },
+          subject: `Cron ${isTimeout ? 'TIMED OUT' : 'FAILED'}: ${runId}`,
+          body:
+            `The daily cron sync did not finish for ${startDate} → ${endDate}.\n\n` +
+            `Reason:  ${e.message}\n` +
+            `Elapsed: ${((Date.now() - t0) / 60000).toFixed(1)} min (hard timeout ${CRON_HARD_TIMEOUT_MS / 60000} min)\n\n` +
+            `Tasks that did NOT complete (${incomplete.length}/${ALL_DAILY_TASKS.length}) and the data they leave stale/missing:\n\n` +
+            `${describeTasksImpact(incomplete)}\n\n` +
+            `ACTION: check the upstream source (Triple Whale / Meta / Shopify API) or the DB connection, then re-run via the manual Sync trigger. Until re-run, the above data is missing for ${startDate} → ${endDate}.`,
+          context: { runId, startDate, endDate, reason: e.message, timeout: isTimeout, incompleteTasks: incomplete, elapsed_min: ((Date.now() - t0) / 60000).toFixed(1) },
         });
       }
 
@@ -1515,28 +1532,49 @@ try {
       if (issues.length) {
         await sendAlert({
           severity: 'error',
-          subject: `Cron data validation failed for ${yStr}`,
-          body: `After cron run ${runId}, the following data is missing or incomplete:\n\n${issues.join('\n')}`,
+          subject: `Cron data validation failed for ${yStr} — ${runId}`,
+          body:
+            `Post-run validation for ${yStr} (run ${runId}) found missing/incomplete data:\n\n` +
+            `${issues.map(i => `• ${i}`).join('\n')}\n\n` +
+            `What this affects: tw_summary_daily backs Overview/Topline revenue+spend+MER; shopify_orders_raw backs order detail + product lines; nobl_air_daily backs NOBL Air Performance. Missing rows here mean yesterday's numbers will be blank/stale on those pages.\n\n` +
+            `Likely cause: the source API (Triple Whale / Shopify / NOBL Air) returned no/partial data, or a task above errored. Re-run the daily sync; if it persists, check the source.`,
           context: { runId, yStr, issues },
         });
       }
 
-      // Step 4: check for any error rows in this cron run
+      // Step 4: detailed alerts for task errors + slow tasks in this run
       try {
-        const errs = await pgQuery(
-          `SELECT task, brand, error_message FROM etl_run_log
-           WHERE run_id = $1 AND status = 'error' LIMIT 10`,
+        const runRows = await pgQuery(
+          `SELECT task, brand, status, error_message,
+                  EXTRACT(EPOCH FROM (COALESCE(finished_at, NOW()) - started_at))::int AS dur_sec
+           FROM etl_run_log WHERE run_id = $1 ORDER BY dur_sec DESC NULLS LAST`,
           [runId]
         );
-        if (errs.rows.length) {
+        const errRows = runRows.rows.filter(r => r.status === 'error');
+        if (errRows.length) {
+          const details = errRows.map(r => describeTaskFailure(r.task, r.brand, r.error_message)).join('\n\n');
           await sendAlert({
             severity: 'error',
-            subject: `Cron task errors in ${runId}`,
-            body: errs.rows.map(r => `• ${r.task} (${r.brand}): ${r.error_message?.slice(0, 200)}`).join('\n'),
-            context: { runId, errorCount: errs.rows.length },
+            subject: `Cron: ${errRows.length} ETL task(s) failed — ${runId}`,
+            body:
+              `${errRows.length} task(s) failed in the daily cron for ${startDate} → ${endDate}.\n\n${details}\n\n` +
+              `ACTION: re-run the affected task(s) from the manual Sync trigger, or wait for the next daily cron (${CRON_TZ} 11:00) to retry. The data listed above stays stale until a successful re-run.`,
+            context: { runId, startDate, endDate, failedTasks: errRows.map(r => `${r.task}:${r.brand}`) },
           });
         }
-      } catch {}
+        const slow = runRows.rows.filter(r => r.status === 'success' && r.dur_sec >= SLOW_TASK_SEC);
+        if (slow.length) {
+          await sendAlert({
+            severity: 'warn',
+            subject: `Cron: ${slow.length} slow task(s) — ${runId}`,
+            body:
+              `These tasks finished but took longer than ${Math.round(SLOW_TASK_SEC / 60)} min — watch for a future timeout:\n\n` +
+              slow.map(r => `• ${r.task} (${r.brand}) — ${taskInfo(r.task).label}\n    took ${Math.floor(r.dur_sec / 60)}m ${r.dur_sec % 60}s · script: ${taskInfo(r.task).script}`).join('\n') +
+              `\n\nHard timeout is ${CRON_HARD_TIMEOUT_MS / 60000} min; if a task nears it the whole run aborts and that day's data lands incomplete.`,
+            context: { runId, slowTasks: slow.map(r => ({ task: r.task, brand: r.brand, dur_sec: r.dur_sec })) },
+          });
+        }
+      } catch (e) { console.warn('[Cron] alert step failed:', e.message); }
 
       const elapsed = ((Date.now()-t0)/60000).toFixed(1);
       lastCronRunAt = new Date().toISOString();
@@ -1594,6 +1632,18 @@ try {
       return { runId, ...lastLiveSnapshotStatus };
     } catch (e) {
       console.error('[LiveSnapshot]', e.message);
+      // Previously silent — now alerts (dedupe in alerts.js prevents hourly spam).
+      await sendAlert({
+        severity: 'warn',
+        subject: 'Hourly Live-snapshot sync failed',
+        body:
+          `The hourly Live/Snapshot refresh failed (tasks: ${LIVE_SNAPSHOT_TASKS.join(', ')}).\n\n` +
+          `Reason: ${e.message}\n` +
+          `Run:    ${runId}\n\n` +
+          `Script: server/etl/tripleWhaleSQL.js (tw_refresh) + server/etl/twFullSync.js (tw_order_revenue)\n` +
+          `Impact: the Live page and today's intraday revenue/spend/MER will be stale until the next hourly tick or the ${CRON_TZ} 11:00 daily cron. Historical days are unaffected.`,
+        context: { runId, tasks: LIVE_SNAPSHOT_TASKS, reason: e.message },
+      }).catch(() => {});
       lastLiveSnapshotAt = new Date().toISOString();
       lastLiveSnapshotStatus = { runId, ok: false, errors: 1, ts: lastLiveSnapshotAt };
       return { runId, ok: false, error: e.message };

@@ -681,6 +681,28 @@ async function runSync(options = {}) {
     }
   }
 
+  // ── IAP sync (Apple App Store + Google Play → iap_daily) ────────────
+  if (tasks.includes('iap')) {
+    // Google earnings reports publish ~1 month late, so always re-sync a wider
+    // ~45-day window (regardless of the daily 7-day backfill) to capture them.
+    const iapEnd = endDate;
+    const ws = new Date(`${endDate}T00:00:00Z`);
+    ws.setUTCDate(ws.getUTCDate() - 45);
+    const iapStart = ws.toISOString().slice(0, 10);
+    const logId = await logStart(runId, 'ALL', 'iap', iapStart, iapEnd);
+    try {
+      const { syncIap } = require('./syncIap');
+      const r = await syncIap({ start: iapStart, end: iapEnd, commit: true, brands });
+      await logFinish(logId, 'success', r.written);
+      results.push({ task: 'iap', rows: r.written, apple: r.apple, google: r.google });
+    } catch (e) {
+      const msg = `iap: ${e.message}`;
+      console.error('[SyncEngine]', msg);
+      errors.push(msg);
+      await logFinish(logId, 'error', 0, e.message);
+    }
+  }
+
   const duration = Date.now() - t0;
   const totalRows = results.reduce((s, r) => s + (r.rows || 0), 0);
   console.log(`[SyncEngine] ✓ Run ${runId} complete in ${(duration / 1000).toFixed(1)}s | ${totalRows} rows total | ${errors.length} errors`);

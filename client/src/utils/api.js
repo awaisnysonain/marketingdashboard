@@ -338,6 +338,12 @@ export const getForecastDaily = (brand = 'ALL', start = '', end = '') =>
     ),
   ).then(x => x.data);
 
+export const getIap = (brand = 'ALL', start = '', end = '') =>
+  fetchJson(
+    `${B}/api/analytics/iap?brand=${encodeURIComponent(brand)}${start ? `&start=${encodeURIComponent(start)}` : ''}${end ? `&end=${encodeURIComponent(end)}` : ''}`,
+    '/api/analytics/iap'
+  );
+
 export const getDashboardForecast = (asOf = '') =>
   cachedAnalyticsFetch(`dashboard-forecast:${asOf}`,
     () => fetchJson(

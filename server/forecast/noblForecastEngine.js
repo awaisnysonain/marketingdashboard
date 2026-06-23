@@ -489,8 +489,13 @@ function auditToDailyApiRows(audit, merTargets = NOBL.MER_TARGETS) {
       plan_revenue: r.planRevenue,
       projected_revenue: r.projectedRevenue,
       forecast_revenue: r.projectedRevenue,
-      forecast_spend: r.isActual ? r.spend : r.projectedSpend,
-      forecast_mer: r.isActual ? r.mer : r.projectedMer,
+      // The forecast is the PLAN on past AND future days — never the actual echoed
+      // back at itself. Echoing actual spend (the old behaviour) made every past-day
+      // spend/MER variance read as a meaningless 0%, hiding real over/under-spend vs
+      // plan. projectedSpend/projectedMer are the plan-derived values (plan_spend and
+      // plan_revenue/plan_spend) and exist for every row.
+      forecast_spend: r.projectedSpend,
+      forecast_mer: r.projectedMer,
       plan_revenue_month: null,
       projected_revenue_month: null,
       mer_target: targetMer,

@@ -9,6 +9,19 @@ export function dailyVarianceStatus(pct) {
   return 'red';
 }
 
+/**
+ * Variance status for spend, where the good direction is INVERTED — spending at
+ * or under plan is green, overspending grades to amber/red. Use this (not
+ * dailyVarianceStatus) for any spend/cost vs-forecast pill so a +20% overspend
+ * doesn't read as a green "win".
+ */
+export function spendVarianceStatus(pct) {
+  if (pct == null || !Number.isFinite(pct)) return 'model';
+  if (pct <= 0.05) return 'green';
+  if (pct <= 0.15) return 'amber';
+  return 'red';
+}
+
 export const FORECAST_STATUS_STYLE = {
   green: { color: 'var(--success)', label: 'Hit / beat forecast' },
   amber: { color: 'var(--warn)', label: 'Slightly behind forecast' },

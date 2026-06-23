@@ -7,9 +7,9 @@ import {
   getOverview, getSyncStatus, triggerSync, getSubscriptions, getNoblAirPerformanceBundle,
   fmt$, fmtRatio, fmtNum, fmtFullNum, fmtPct,
 } from '../utils/api';
-import useDailyForecast from '../hooks/useDailyForecast';
+import useDailyForecast, { spendVarianceStatus, dailyVarianceStatus } from '../hooks/useDailyForecast';
 import { buildForecastCellStatus } from '../utils/forecastCellStatus';
-import { ForecastVsBadge, ForecastVariancePill } from '../components/ForecastIndicator';
+import { ForecastVsBadge, ForecastVariancePill, forecastColor } from '../components/ForecastIndicator';
 import ForecastChartTooltip from '../components/ForecastChartTooltip';
 import { resolveAirPerfFromBundle } from '../utils/noblAirRegional';
 import { addDaysISO } from '../utils/dateRange';
@@ -129,7 +129,7 @@ function Tile({ label, value, pct, invert, fcPct }) {
         <Delta pct={pct} invert={invert} />
         {hasFc && (
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: 'var(--text3)' }}>
-            <ForecastVariancePill pct={fcPct} />
+            <ForecastVariancePill pct={fcPct} statusOverride={invert ? spendVarianceStatus(fcPct) : undefined} />
             <span>vs forecast</span>
           </span>
         )}
@@ -166,19 +166,43 @@ function ShareRow({ name, pctw, val, color }) {
   );
 }
 
-function ScRow({ label, nobl, flo, comb, showNobl, showFlo, forecast, variancePct }) {
+function ScRow({ label, nobl, flo, comb, showNobl, showFlo, forecast, variancePct, invertSpend }) {
   // Hide near-zero variances (the engine echoes actual as forecast for unplanned
   // metrics like spend, producing a misleading uniform 0% pill on every row).
   const showPill = variancePct != null && Number.isFinite(variancePct) && Math.abs(variancePct) >= 0.005;
+  const status = showPill ? (invertSpend ? spendVarianceStatus(variancePct) : dailyVarianceStatus(variancePct)) : null;
+  // Subtle variance tint on the forecast cells (color-mix keeps it light over any theme).
+  const tint = status ? `color-mix(in srgb, ${forecastColor(status)} 10%, transparent)` : undefined;
   return (
     <tr>
       <td>{label}</td>
       {showNobl && <td>{nobl}</td>}
       {showFlo && <td>{flo}</td>}
       <td>{comb}</td>
-      <td style={{ color: 'var(--text3)' }}>{forecast != null && showPill ? forecast : '—'}</td>
-      <td>{showPill ? <ForecastVariancePill pct={variancePct} /> : <span style={{ color: 'var(--text4)' }}>—</span>}</td>
+      <td style={{ color: 'var(--text3)', background: tint }}>{forecast != null && showPill ? forecast : '—'}</td>
+      <td style={{ background: tint }}>{showPill
+        ? <ForecastVariancePill pct={variancePct} statusOverride={invertSpend ? spendVarianceStatus(variancePct) : undefined} />
+        : <span style={{ color: 'var(--text4)' }}>—</span>}</td>
     </tr>
+  );
+}
+
+/** One actual-vs-forecast comparison tile for the period strip. */
+function FcCompare({ label, actual, forecast, pct, invert }) {
+  if (forecast == null) return null;
+  const status = pct == null || !Number.isFinite(pct) ? 'model' : (invert ? spendVarianceStatus(pct) : dailyVarianceStatus(pct));
+  const tint = `color-mix(in srgb, ${forecastColor(status)} 8%, transparent)`;
+  return (
+    <div className="card" style={{ flex: '1 1 180px', minWidth: 180, padding: '12px 14px', background: tint }}>
+      <div className="kpi__label">{label}</div>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 4, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 18, fontWeight: 800, color: 'var(--text)' }}>{actual}</span>
+        {pct != null && Number.isFinite(pct) && Math.abs(pct) >= 0.005 && (
+          <ForecastVariancePill pct={pct} statusOverride={invert ? spendVarianceStatus(pct) : undefined} />
+        )}
+      </div>
+      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>Forecast {forecast}</div>
+    </div>
   );
 }
 
@@ -423,7 +447,7 @@ export default function OverviewPage({ showToast }) {
                   <ScRow label="Sales" showNobl={showNobl} showFlo={showFlo} nobl={fmt$(noblRev)} flo={fmt$(floRev)} comb={fmt$(totals.total_revenue || 0)}
                     forecast={fcPeriod?.forecast != null ? fmt$(fcPeriod.forecast) : null} variancePct={fcPeriod?.revPct} />
                   <ScRow label="Ad spend" showNobl={showNobl} showFlo={showFlo} nobl={fmt$(totals.nobl_spend || 0)} flo={fmt$(totals.flo_spend || 0)} comb={fmt$(totals.total_spend || 0)}
-                    forecast={fcPeriod?.forecastSpend != null ? fmt$(fcPeriod.forecastSpend) : null} variancePct={fcPeriod?.spPct} />
+                    forecast={fcPeriod?.forecastSpend != null ? fmt$(fcPeriod.forecastSpend) : null} variancePct={fcPeriod?.spPct} invertSpend />
                   <ScRow label={L.blendedMer} showNobl={showNobl} showFlo={showFlo} nobl={fmtRatio(totals.nobl_mer || 0)} flo={fmtRatio(totals.flo_mer || 0)} comb={fmtRatio(totals.blended_mer || 0)}
                     forecast={fcPeriod?.forecastMer != null ? fmtRatio(fcPeriod.forecastMer) : null} variancePct={fcPeriod?.merPct} />
                   <ScRow label="Orders" showNobl={showNobl} showFlo={showFlo} nobl={fmtNum(totals.nobl_orders || 0)} flo={fmtNum(totals.flo_orders || 0)} comb={fmtNum((totals.nobl_orders || 0) + (totals.flo_orders || 0))} />
@@ -494,6 +518,17 @@ export default function OverviewPage({ showToast }) {
             </ChartPanel>
             </div>
           </div>
+
+          {fcPeriod && (
+            <div className="section">
+              <div className="section__title">Period vs forecast</div>
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+                <FcCompare label="Sales" actual={fmt$(fcPeriod.actual)} forecast={fmt$(fcPeriod.forecast)} pct={fcPeriod.revPct} />
+                <FcCompare label="Ad spend" actual={fmt$(fcPeriod.actualSpend)} forecast={fmt$(fcPeriod.forecastSpend)} pct={fcPeriod.spPct} invert />
+                <FcCompare label={L.blendedMer} actual={fmtRatio(fcPeriod.actualMer || 0)} forecast={fmtRatio(fcPeriod.forecastMer || 0)} pct={fcPeriod.merPct} />
+              </div>
+            </div>
+          )}
 
           <div className="section">
             <div className="section__title">Daily detail</div>
