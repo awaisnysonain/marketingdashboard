@@ -1,6 +1,6 @@
 const express = require('express');
 const router  = express.Router();
-const { pgQuery } = require('../db/postgres');
+const { pgQuery, pgQueryBatch } = require('../db/postgres');
 const { METRICS: REVENUE_METRICS } = require('../config/revenueMetrics');
 const { refreshNoblAirMetaAdDaily } = require('../etl/noblAirMetaAdDaily');
 const { metaAdsDailySourceSql } = require('../etl/metaAdsSync');
@@ -1392,7 +1392,18 @@ function buildNoblAirDailyForecast(storeDailyRows, airActualByDate, airForecast)
 router.get('/dashboard-forecast', async (req, res) => {
   try {
     const requestedAsOf = req.query.asOf ? String(req.query.asOf).slice(0, 10) : null;
-    const version = await getDataVersion();
+    const [dataVersion, auxVersion] = await Promise.all([
+      getDataVersion(),
+      pgQuery(`
+        SELECT CONCAT_WS('|',
+          (SELECT COALESCE(MAX(updated_at)::text, 'none') FROM ops_metrics_daily),
+          (SELECT COALESCE(MAX(updated_at)::text, 'none') FROM cs_tickets_daily),
+          (SELECT COALESCE(MAX(updated_at)::text, 'none') FROM meta_ads_daily),
+          (SELECT COALESCE(MAX(created_at)::text, 'none') FROM klaviyo_daily)
+        ) AS version
+      `).catch(() => ({ rows: [{ version: 'none' }] })),
+    ]);
+    const version = `${dataVersion}:${auxVersion.rows[0]?.version || 'none'}`;
     const { body } = await withResponseCache('forecast', `df:${requestedAsOf || 'latest'}`, version, async () => {
     const { byDate: planByDate, meta: forecastMeta } = await loadForecastPlanMap();
     const nobl = await loadForecastBrand('NOBL', requestedAsOf);
@@ -2507,20 +2518,173 @@ router.get('/kpi-pulse', async (req, res) => {
       const niceMD = (iso) => { const [, m, d] = iso.split('-'); return `${MONTHS[parseInt(m,10)-1]} ${parseInt(d,10)}`; };
       const weekEndISO = (iso) => { const [y,m,d] = iso.split('-').map(Number); const dt = new Date(Date.UTC(y,m-1,d)); dt.setUTCDate(dt.getUTCDate() + ((7 - dt.getUTCDay()) % 7)); return dt.toISOString().slice(0,10); };
 
-      const [noblSum, floSum, noblGeo, floGeo, air] = await Promise.all([
-        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
-        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
-        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM nobl_brand_tw_geo_daily WHERE region IN ('US','CA') AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
-        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM flo_brand_tw_geo_daily WHERE region = 'US' AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
-        pgQuery(`SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, total_orders to_, air_orders ao, converted_count conv, mature_count mat, combined_net_revenue arev FROM nobl_air_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, [start, end]),
+      const emptyRows = () => ({ rows: [] });
+      const [noblSum, floSum, noblGeo, floGeo, air, ops, cs, meta, metaStrat, klav, airSubs, floIapSubs, floReturning, products, floAppstle, floAppstleTtp, noblBundle] = await pgQueryBatch([
+        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
+        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
+        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM nobl_brand_tw_geo_daily WHERE region IN ('US','CA') AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
+        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM flo_brand_tw_geo_daily WHERE region = 'US' AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
+        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, total_orders to_, air_orders ao, converted_count conv, mature_count mat, combined_net_revenue arev FROM nobl_air_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
+        // Ops (per brand × date): for "Avg Shipping Cost / Order" + "Orders Unfulfilled".
+        // We store the AVG per day; for weekly/quarterly we re-average ACROSS days
+        // (cost) and take MAX (the snapshot count) so the rollup is sensible.
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, orders_count oc, avg_shipping_cost_per_order asc_, orders_unfulfilled ouf, orders_unfulfilled_over_24h ouf24 FROM ops_metrics_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
+        // CS tickets per brand × date.
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, total_tickets tt FROM cs_tickets_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
+        // Meta Ads — for CVR % = purchases / link_clicks (or clicks if link_clicks=0).
+        // Sum across all ads per brand × day.
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d,
+                  SUM(purchases) p,
+                  SUM(link_clicks) lc,
+                  SUM(clicks) c,
+                  SUM(spend) s,
+                  SUM(spend) FILTER (WHERE LOWER(CONCAT_WS(' ', campaign_name, adset_name, ad_name)) ~ 'whitelist|white list|whitelisting|\\bwl\\b') whitelist_spend,
+                  SUM(spend) FILTER (WHERE LOWER(CONCAT_WS(' ', campaign_name, adset_name, ad_name)) ~ 'retarget|remarket|\\bbof\\b|bottom|warm|existing|past purchaser|winback') bof_spend
+                FROM meta_ads_daily WHERE date BETWEEN $1::date AND $2::date GROUP BY brand, date`, params: [start, end], fallback: emptyRows },
+        // Meta Ads — strategist Share of Spend + FLO product CAC. Driven by the
+        // ad-name code convention from the Nysonian Meta GAS script:
+        //   002TC = Taylor, 002FA = Franz, 002LK = Luke, 002CA = Chris.
+        // FLO product bucket comes from normalized substring in campaign|adset|ad name:
+        //   "portable" → portable, "studio"|"sutido" → studio, "home" → home.
+        // Per the GAS script: no TOF/MOF/BOF filtering — all strategist-coded spend
+        // counts as the strategist's funnel for the Share-of-Spend metric.
+        { sql: `
+          SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d,
+            -- per-strategist spend (NOBL uses all four; FLO mostly Chris)
+            SUM(spend) FILTER (WHERE UPPER(ad_name) LIKE '%002TC%') AS sp_taylor,
+            SUM(spend) FILTER (WHERE UPPER(ad_name) LIKE '%002FA%') AS sp_franz,
+            SUM(spend) FILTER (WHERE UPPER(ad_name) LIKE '%002LK%') AS sp_luke,
+            SUM(spend) FILTER (WHERE UPPER(ad_name) LIKE '%002CA%') AS sp_chris,
+            -- FLO Chris by product bucket (only meaningful for brand='FLO')
+            SUM(spend)     FILTER (WHERE UPPER(ad_name) LIKE '%002CA%' AND (
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%portable%'
+            )) AS sp_portable,
+            SUM(purchases) FILTER (WHERE UPPER(ad_name) LIKE '%002CA%' AND (
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%portable%'
+            )) AS pu_portable,
+            SUM(spend)     FILTER (WHERE UPPER(ad_name) LIKE '%002CA%' AND (
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%studio%' OR
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%sutido%'
+            )) AS sp_studio,
+            SUM(purchases) FILTER (WHERE UPPER(ad_name) LIKE '%002CA%' AND (
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%studio%' OR
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%sutido%'
+            )) AS pu_studio,
+            SUM(spend)     FILTER (WHERE UPPER(ad_name) LIKE '%002CA%' AND (
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%home%'
+            )) AS sp_home,
+            SUM(purchases) FILTER (WHERE UPPER(ad_name) LIKE '%002CA%' AND (
+              LOWER(REGEXP_REPLACE(coalesce(campaign_name,'')||' '||coalesce(adset_name,'')||' '||coalesce(ad_name,''), '[^a-z0-9]', '', 'g')) LIKE '%home%'
+            )) AS pu_home
+          FROM meta_ads_daily
+          WHERE date BETWEEN $1::date AND $2::date
+          GROUP BY brand, date`, params: [start, end], fallback: emptyRows },
+        // Klaviyo — email-attributed revenue. Used for "Retention Rev %"
+        // (email_rev / total_rev) — undercounts SMS (Klaviyo SMS not in this table).
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, revenue r FROM klaviyo_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
+        // NOBL Air subscriber state for "Net Subscriber Adds": new = created in window,
+        // cancelled = cancelled_on in window. Net = new - cancelled.
+        { sql: `SELECT TO_CHAR(created_at::date,'YYYY-MM-DD') d, 'new'::text kind FROM nobl_air_subscribers WHERE created_at::date BETWEEN $1::date AND $2::date UNION ALL SELECT TO_CHAR(cancelled_on::date,'YYYY-MM-DD') d, 'canc'::text kind FROM nobl_air_subscribers WHERE cancelled_on IS NOT NULL AND cancelled_on::date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
+        // FLO App churn (iap_subscription_daily) — Monthly Churn = cancelled / active
+        // (apple + google summed). Active is a snapshot; we use the period-end value.
+        { sql: `SELECT TO_CHAR(date,'YYYY-MM-DD') d, SUM(active_subs) act, SUM(new_subs) ns, SUM(cancelled_subs) cs FROM iap_subscription_daily WHERE brand='FLO' AND date BETWEEN $1::date AND $2::date GROUP BY date`, params: [start, end], fallback: emptyRows },
+        // FLO Returning Customer Revenue % — for each FLO order, mark "returning" iff
+        // the same customer_email had ANY earlier FLO order. Aggregated daily so the
+        // metric can be summed for weekly/quarterly buckets.
+        { sql: `WITH ranked AS (
+          SELECT customer_email, date_key, total_price,
+                 ROW_NUMBER() OVER (PARTITION BY brand, lower(customer_email) ORDER BY created_at) AS rn
+          FROM shopify_orders_raw
+          WHERE brand='FLO' AND customer_email IS NOT NULL AND customer_email <> ''
+        )
+        SELECT TO_CHAR(date_key,'YYYY-MM-DD') d,
+               SUM(total_price) total_rev,
+               SUM(CASE WHEN rn > 1 THEN total_price ELSE 0 END) returning_rev
+        FROM ranked
+        WHERE date_key BETWEEN $1::date AND $2::date
+        GROUP BY date_key`, params: [start, end], fallback: emptyRows },
+        { sql: `SELECT TO_CHAR(date,'YYYY-MM-DD') d, brand, LOWER(product_line) product_line, SUM(spend) spend, SUM(new_cust_orders) orders FROM tw_product_daily WHERE date BETWEEN $1::date AND $2::date GROUP BY date, brand, product_line`, params: [start, end], fallback: emptyRows },
+        { sql: `SELECT TO_CHAR(created_at::date,'YYYY-MM-DD') d,
+                  COUNT(*) app_units,
+                  0 mature,
+                  0 converted
+                FROM flo_appstle_subscribers
+                WHERE created_at::date BETWEEN $1::date AND $2::date
+                GROUP BY created_at::date`, params: [start, end], fallback: emptyRows },
+        { sql: `SELECT TO_CHAR((created_at::date + INTERVAL '14 days')::date,'YYYY-MM-DD') d,
+                  COUNT(*) FILTER (WHERE is_mature) mature,
+                  COUNT(*) FILTER (WHERE is_mature AND is_converted) converted
+                FROM flo_appstle_subscribers
+                WHERE (created_at::date + INTERVAL '14 days')::date BETWEEN $1::date AND $2::date
+                GROUP BY (created_at::date + INTERVAL '14 days')::date`, params: [start, end], fallback: emptyRows },
+        { sql: `SELECT TO_CHAR(date,'YYYY-MM-DD') d,
+                  SUM(net_revenue) total_product_rev,
+                  SUM(net_revenue) FILTER (WHERE LOWER(product_title) LIKE '%bundle%') bundle_rev
+                FROM shopify_product_daily
+                WHERE brand='NOBL' AND date BETWEEN $1::date AND $2::date
+                GROUP BY date`, params: [start, end], fallback: emptyRows },
       ]);
 
       const nMap = {}, fMap = {}, ngeo = {}, fgeo = {}, aMap = {};
+      const opsN = {}, opsF = {}, csN = {}, csF = {}, metaN = {}, metaF = {}, klavN = {}, klavF = {};
+      const airSubsByDay = {}; // d → {new, canc}
+      const floIapSubsByDay = {}; // d → {act, ns, cs}
+      const floReturnByDay = {}; // d → {total_rev, returning_rev}
+      const productByDay = {}; // d → brand → product_line → {spend, orders}
+      const floAppByDay = {}; // d → {app_units,mature,converted}; app_units by signup date, TTP by maturity date
+      const noblBundleByDay = {}; // d → {bundle_rev,total_product_rev}
       for (const r of noblSum.rows) nMap[r.d] = { rev: num(r.rev), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
       for (const r of floSum.rows)  fMap[r.d] = { rev: num(r.rev), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
       for (const r of noblGeo.rows) { (ngeo[r.d] = ngeo[r.d] || {})[r.region] = { rev: num(r.rev), spend: num(r.spend) }; }
       for (const r of floGeo.rows)  { (fgeo[r.d] = fgeo[r.d] || {})[r.region] = { rev: num(r.rev), spend: num(r.spend) }; }
       for (const r of air.rows)     aMap[r.d] = { to: num(r.to_), ao: num(r.ao), conv: num(r.conv), mat: num(r.mat), arev: num(r.arev) };
+      for (const r of ops.rows) {
+        const dest = r.brand === 'NOBL' ? opsN : (r.brand === 'FLO' ? opsF : null);
+        if (dest) dest[r.d] = { oc: num(r.oc), asc: r.asc_ == null ? null : num(r.asc_), ouf: num(r.ouf), ouf24: num(r.ouf24) };
+      }
+      for (const r of cs.rows) {
+        const dest = r.brand === 'NOBL' ? csN : (r.brand === 'FLO' ? csF : null);
+        if (dest) dest[r.d] = { tt: num(r.tt) };
+      }
+      for (const r of meta.rows) {
+        const dest = r.brand === 'NOBL' ? metaN : (r.brand === 'FLO' ? metaF : null);
+        if (dest) dest[r.d] = { p: num(r.p), lc: num(r.lc), c: num(r.c), s: num(r.s), whitelist: num(r.whitelist_spend), bof: num(r.bof_spend) };
+      }
+      // Per-day strategist spend (NOBL) and FLO Chris-by-product spend/purchases.
+      const stratN = {}, stratF = {};
+      for (const r of metaStrat.rows) {
+        const row = {
+          sp_taylor: num(r.sp_taylor), sp_franz: num(r.sp_franz),
+          sp_luke:   num(r.sp_luke),   sp_chris: num(r.sp_chris),
+          sp_portable: num(r.sp_portable), pu_portable: num(r.pu_portable),
+          sp_studio:   num(r.sp_studio),   pu_studio:   num(r.pu_studio),
+          sp_home:     num(r.sp_home),     pu_home:     num(r.pu_home),
+        };
+        if (r.brand === 'NOBL') stratN[r.d] = row;
+        else if (r.brand === 'FLO') stratF[r.d] = row;
+      }
+      for (const r of klav.rows) {
+        const dest = r.brand === 'NOBL' ? klavN : (r.brand === 'FLO' ? klavF : null);
+        if (dest) dest[r.d] = { r: num(r.r) };
+      }
+      for (const r of airSubs.rows) {
+        const bucket = (airSubsByDay[r.d] = airSubsByDay[r.d] || { new: 0, canc: 0 });
+        if (r.kind === 'new') bucket.new += 1; else bucket.canc += 1;
+      }
+      for (const r of floIapSubs.rows) floIapSubsByDay[r.d] = { act: num(r.act), ns: num(r.ns), cs: num(r.cs) };
+      for (const r of floReturning.rows) floReturnByDay[r.d] = { total_rev: num(r.total_rev), returning_rev: num(r.returning_rev) };
+      for (const r of products.rows) {
+        const brandMap = (productByDay[r.d] = productByDay[r.d] || {});
+        const lineMap = (brandMap[r.brand] = brandMap[r.brand] || {});
+        lineMap[r.product_line] = { spend: num(r.spend), orders: num(r.orders) };
+      }
+      for (const r of floAppstle.rows) floAppByDay[r.d] = { app_units: num(r.app_units), mature: num(r.mature), converted: num(r.converted) };
+      for (const r of floAppstleTtp.rows) {
+        const bucket = (floAppByDay[r.d] = floAppByDay[r.d] || { app_units: 0, mature: 0, converted: 0 });
+        bucket.mature += num(r.mature);
+        bucket.converted += num(r.converted);
+      }
+      for (const r of noblBundle.rows) noblBundleByDay[r.d] = { bundle_rev: num(r.bundle_rev), total_product_rev: num(r.total_product_rev) };
 
       // Cap at yesterday (report TZ) so today's partial, in-progress day is excluded —
       // keeps daily/weekly/quarterly on complete data and advances automatically each day.
@@ -2530,29 +2694,169 @@ router.get('/kpi-pulse', async (req, res) => {
       const latest = allDates[allDates.length - 1] || cutoff;
       const div = (x, y) => (y > 0 ? x / y : null);
 
+      // Helpers for the rollups: re-average a per-day cost across days that have it,
+      // take MAX of a snapshot count (so weekly/quarterly are "peak", not summed),
+      // weight by orders when relevant.
+      function avgOf(values) { const f = values.filter((v) => v != null); return f.length ? f.reduce((s, v) => s + v, 0) / f.length : null; }
+      function maxOf(values) { const f = values.filter((v) => v != null); return f.length ? Math.max(...f) : null; }
+      function lastNonNull(values) { for (let i = values.length - 1; i >= 0; i -= 1) if (values[i] != null) return values[i]; return null; }
+
       function metricsFor(dates) {
         const a = { n:{rev:0,spend:0,orders:0,amazon:0,tsales:0}, f:{rev:0,spend:0,orders:0,amazon:0,tsales:0}, nUS:{rev:0,spend:0}, nCA:{rev:0,spend:0}, fUS:{rev:0,spend:0}, air:{to:0,ao:0,conv:0,mat:0,arev:0} };
         let hasN = false, hasF = false;
+        // Ops aggregates
+        const opsNcost = [], opsFcost = [], opsNorders = [], opsForders = [], opsNuf = [], opsFuf = [], opsNuf24 = [], opsFuf24 = [];
+        // CS aggregates
+        let csNtotal = 0, csFtotal = 0, csNseen = false, csFseen = false;
+        // Meta aggregates
+        const m = { n:{p:0,lc:0,c:0,s:0,whitelist:0,bof:0}, f:{p:0,lc:0,c:0,s:0,whitelist:0,bof:0} };
+        let hasMetaN = false, hasMetaF = false;
+        // Strategist aggregates (NOBL): per-code spend totals over the window.
+        const stratNobl = { taylor: 0, franz: 0, luke: 0, chris: 0 };
+        // FLO: Chris spend (for Share of Spend), and product-level spend/purchases.
+        const stratFlo  = { chris: 0, portableSpend: 0, portablePurch: 0, studioSpend: 0, studioPurch: 0, homeSpend: 0, homePurch: 0 };
+        // Account spend totals (denominators for Share of Spend) come from the
+        // `meta` aggregate above (m.n.s and m.f.s) — that's already summed across
+        // all ads, so account-total == ad-level-sum, same as the GAS script's
+        // /insights level=account.
+        // NOTE: Klaviyo `revenue` in klaviyo_daily is total brand revenue (a snapshot
+        // pulled per day), NOT flow/campaign-attributed revenue, so it can't drive
+        // a "Retention Rev %" KPI. Kept here so the data is collected but not
+        // exposed as a KPI; needs a flow-attributed-revenue Klaviyo ETL upgrade.
+        let klavNrev = 0, klavFrev = 0, klavNseen = false, klavFseen = false; // eslint-disable-line no-unused-vars
+        // Air subs in window
+        let airNew = 0, airCanc = 0;
+        // FLO IAP subs (snapshot=last act, sum new/cs)
+        const floIapActs = []; let floIapNs = 0, floIapCs = 0;
+        let floAppUnits = 0, floAppMature = 0, floAppConverted = 0;
+        // FLO returning
+        let floRetTotal = 0, floRetReturning = 0;
+        let noblBundleRev = 0, noblProductRev = 0;
+
         for (const d of dates) {
           const n = nMap[d]; if (n) { hasN = true; a.n.rev+=n.rev; a.n.spend+=n.spend; a.n.orders+=n.orders; a.n.amazon+=n.amazon; a.n.tsales+=n.tsales; }
           const f = fMap[d]; if (f) { hasF = true; a.f.rev+=f.rev; a.f.spend+=f.spend; a.f.orders+=f.orders; a.f.amazon+=f.amazon; a.f.tsales+=f.tsales; }
           const ng = ngeo[d]; if (ng) { if (ng.US){a.nUS.rev+=ng.US.rev;a.nUS.spend+=ng.US.spend;} if (ng.CA){a.nCA.rev+=ng.CA.rev;a.nCA.spend+=ng.CA.spend;} }
           const fg = fgeo[d]; if (fg && fg.US){a.fUS.rev+=fg.US.rev;a.fUS.spend+=fg.US.spend;}
           const ai = aMap[d]; if (ai){a.air.to+=ai.to;a.air.ao+=ai.ao;a.air.conv+=ai.conv;a.air.mat+=ai.mat;a.air.arev+=ai.arev;}
+
+          const on = opsN[d]; if (on) { opsNorders.push(on.oc); opsNcost.push(on.asc); opsNuf.push(on.ouf); opsNuf24.push(on.ouf24); }
+          const of_ = opsF[d]; if (of_) { opsForders.push(of_.oc); opsFcost.push(of_.asc); opsFuf.push(of_.ouf); opsFuf24.push(of_.ouf24); }
+
+          const cn = csN[d]; if (cn) { csNtotal += cn.tt; csNseen = true; }
+          const cf_ = csF[d]; if (cf_) { csFtotal += cf_.tt; csFseen = true; }
+
+          const mn = metaN[d]; if (mn) { hasMetaN = true; m.n.p += mn.p; m.n.lc += mn.lc; m.n.c += mn.c; m.n.s += mn.s; m.n.whitelist += mn.whitelist; m.n.bof += mn.bof; }
+          const mf = metaF[d]; if (mf) { hasMetaF = true; m.f.p += mf.p; m.f.lc += mf.lc; m.f.c += mf.c; m.f.s += mf.s; m.f.whitelist += mf.whitelist; m.f.bof += mf.bof; }
+
+          const sn = stratN[d]; if (sn) {
+            stratNobl.taylor += sn.sp_taylor;
+            stratNobl.franz  += sn.sp_franz;
+            stratNobl.luke   += sn.sp_luke;
+            stratNobl.chris  += sn.sp_chris;
+          }
+          const sf = stratF[d]; if (sf) {
+            stratFlo.chris         += sf.sp_chris;
+            stratFlo.portableSpend += sf.sp_portable;
+            stratFlo.portablePurch += sf.pu_portable;
+            stratFlo.studioSpend   += sf.sp_studio;
+            stratFlo.studioPurch   += sf.pu_studio;
+            stratFlo.homeSpend     += sf.sp_home;
+            stratFlo.homePurch     += sf.pu_home;
+          }
+
+          const kn = klavN[d]; if (kn) { klavNrev += kn.r; klavNseen = true; }
+          const kf = klavF[d]; if (kf) { klavFrev += kf.r; klavFseen = true; }
+
+          const as = airSubsByDay[d]; if (as) { airNew += as.new; airCanc += as.canc; }
+          const fi = floIapSubsByDay[d]; if (fi) { floIapActs.push(fi.act); floIapNs += fi.ns; floIapCs += fi.cs; }
+          const fa = floAppByDay[d]; if (fa) { floAppUnits += fa.app_units; floAppMature += fa.mature; floAppConverted += fa.converted; }
+          const fr = floReturnByDay[d]; if (fr) { floRetTotal += fr.total_rev; floRetReturning += fr.returning_rev; }
+          const nb = noblBundleByDay[d]; if (nb) { noblBundleRev += nb.bundle_rev; noblProductRev += nb.total_product_rev; }
+          const fp = productByDay[d]?.FLO;
+          if (fp) {
+            // Product fallback for FLO CAC when Chris-coded Meta ads are not product-tagged.
+            // FLO product-line convention in tw_product_daily:
+            //   portable = Portable Reformer, metal = Home Reformer, wooden = Studio Reformer.
+            stratFlo.portableSpend += fp.portable?.spend || 0;
+            stratFlo.portablePurch += fp.portable?.orders || 0;
+            stratFlo.studioSpend += fp.wooden?.spend || 0;
+            stratFlo.studioPurch += fp.wooden?.orders || 0;
+            stratFlo.homeSpend += fp.metal?.spend || 0;
+            stratFlo.homePurch += fp.metal?.orders || 0;
+          }
         }
         const attach = div(a.air.ao, a.air.to), ttp = div(a.air.conv, a.air.mat);
+
+        // Meta CVR — purchases / link_clicks (preferred) or /clicks (fallback).
+        const metaCvr = (sum) => sum.lc > 0 ? sum.p / sum.lc : (sum.c > 0 ? sum.p / sum.c : null);
+
+        // FLO IAP "active" is a snapshot → take last non-null day in window.
+        const floIapAct = lastNonNull(floIapActs);
+        // Churn = cancellations in period / active at end of period.
+        const floChurn = (floIapAct && floIapAct > 0) ? floIapCs / floIapAct : null;
+
         return {
           NOBL: {
             mer: div(a.n.rev, a.n.spend), sales: hasN ? a.n.rev : null, aov: div(a.n.rev, a.n.orders),
             amazon_pct: div(a.n.amazon, a.n.tsales), us_mer: div(a.nUS.rev, a.nUS.spend), ca_mer: div(a.nCA.rev, a.nCA.spend),
             air_rev_pct: div(a.air.arev, a.n.rev), attach, ttp, activation: (attach != null && ttp != null) ? attach * ttp : null,
+            // Phase 2/3 additions
+            avg_shipping_cost: avgOf(opsNcost),
+            orders_unfulfilled: maxOf(opsNuf),
+            orders_unfulfilled_24h: maxOf(opsNuf24),
+            cs_tickets_pct: (csNseen && a.n.orders > 0) ? csNtotal / a.n.orders : null,
+            meta_cvr: hasMetaN ? metaCvr(m.n) : null,
+            whitelisting_spend_pct: hasMetaN ? div(m.n.whitelist, m.n.s) : null,
+            tof_spend_pct: hasMetaN ? div(Math.max(0, m.n.s - m.n.bof), m.n.s) : null,
+            retention_rev_pct: (klavNseen && a.n.rev > 0) ? klavNrev / a.n.rev : null,
+            new_customer_cac: div(a.n.spend, a.n.orders),
+            bundle_rev_pct: div(noblBundleRev, noblProductRev),
+            net_sub_adds: airNew - airCanc,
+            // Strategist Share of Spend — ad-level spend tagged with the
+            // strategist's code, over total NOBL account spend in window.
+            sos_taylor: hasMetaN ? div(stratNobl.taylor, m.n.s) : null,
+            sos_franz:  hasMetaN ? div(stratNobl.franz,  m.n.s) : null,
+            sos_luke:   hasMetaN ? div(stratNobl.luke,   m.n.s) : null,
+            sos_chris:  hasMetaN ? div(stratNobl.chris,  m.n.s) : null,
           },
-          FLO: { mer: div(a.f.rev, a.f.spend), sales: hasF ? a.f.rev : null, aov: div(a.f.rev, a.f.orders), us_mer: div(a.fUS.rev, a.fUS.spend) },
+          FLO: {
+            mer: div(a.f.rev, a.f.spend), sales: hasF ? a.f.rev : null, aov: div(a.f.rev, a.f.orders), us_mer: div(a.fUS.rev, a.fUS.spend),
+            avg_shipping_cost: avgOf(opsFcost),
+            orders_unfulfilled: maxOf(opsFuf),
+            orders_unfulfilled_24h: maxOf(opsFuf24),
+            cs_tickets_pct: (csFseen && a.f.orders > 0) ? csFtotal / a.f.orders : null,
+            meta_cvr: hasMetaF ? metaCvr(m.f) : null,
+            whitelisting_spend_pct: hasMetaF ? div(m.f.whitelist, m.f.s) : null,
+            tof_spend_pct: hasMetaF ? div(Math.max(0, m.f.s - m.f.bof), m.f.s) : null,
+            retention_rev_pct: (klavFseen && a.f.rev > 0) ? klavFrev / a.f.rev : null,
+            app_attach_pct: div(floAppUnits, a.f.orders),
+            app_ttp: div(floAppConverted, floAppMature),
+            monthly_churn: floChurn,
+            returning_cust_rev_pct: floRetTotal > 0 ? floRetReturning / floRetTotal : null,
+            // FLO Chris Share of Spend — Chris-tagged spend / FLO total spend.
+            sos_chris: hasMetaF ? div(stratFlo.chris, m.f.s) : null,
+            // FLO product CAC = ad spend / purchase count (Chris-coded ads).
+            portable_cac:    div(stratFlo.portableSpend, stratFlo.portablePurch),
+            studio_cac:      div(stratFlo.studioSpend,   stratFlo.studioPurch),
+            home_cac:        div(stratFlo.homeSpend,     stratFlo.homePurch),
+            home_studio_cac: div(stratFlo.homeSpend + stratFlo.studioSpend, stratFlo.homePurch + stratFlo.studioPurch),
+          },
         };
       }
 
-      const KN = ['mer','sales','aov','amazon_pct','us_mer','ca_mer','air_rev_pct','attach','ttp','activation'];
-      const KF = ['mer','sales','aov','us_mer'];
+      const KN = [
+        'mer','sales','aov','amazon_pct','us_mer','ca_mer','air_rev_pct','attach','ttp','activation',
+        'avg_shipping_cost','orders_unfulfilled','orders_unfulfilled_24h','cs_tickets_pct',
+        'meta_cvr','whitelisting_spend_pct','tof_spend_pct','retention_rev_pct','new_customer_cac','bundle_rev_pct','net_sub_adds',
+        'sos_taylor','sos_franz','sos_luke','sos_chris',
+      ];
+      const KF = [
+        'mer','sales','aov','us_mer',
+        'avg_shipping_cost','orders_unfulfilled','orders_unfulfilled_24h','cs_tickets_pct',
+        'meta_cvr','whitelisting_spend_pct','tof_spend_pct','retention_rev_pct','app_attach_pct','app_ttp','monthly_churn','returning_cust_rev_pct',
+        'sos_chris','portable_cac','studio_cac','home_cac','home_studio_cac',
+      ];
       function buildCadence(defs) {
         const series = { NOBL: {}, FLO: {} };
         KN.forEach(k => series.NOBL[k] = []);
@@ -2565,8 +2869,10 @@ router.get('/kpi-pulse', async (req, res) => {
         return { periods: defs.map(p => ({ key: p.key, label: p.label, sub: p.sub })), series };
       }
 
-      // Daily — last 7 days with data (latest first)
-      const dailyDefs = allDates.filter(d => d <= latest).slice(-7).reverse()
+      // Daily — current selected month-to-date, latest first (no MTD column).
+      const dailyMonth = latest.slice(0, 7);
+      const dailyMonthStart = `${dailyMonth}-01`;
+      const dailyDefs = allDates.filter(d => d >= dailyMonthStart && d <= latest).reverse()
         .map(d => ({ key: d, label: niceMD(d), sub: 'Day', dates: [d] }));
 
       // Weekly — last 7 completed week-ends (Sunday), latest first
@@ -2581,14 +2887,52 @@ router.get('/kpi-pulse', async (req, res) => {
       const quarterlyDefs = Object.keys(qMap).sort().slice(-4).reverse()
         .map(q => { const [y, qq] = q.split('-Q'); return { key: q, label: `Q${qq} ${y}`, sub: 'Quarter', dates: qMap[q] }; });
 
+      const overrides = await (async () => {
+        try {
+          await ensureKpiPulseOverrideTable();
+          const r = await pgQuery(`SELECT override_key, payload FROM kpi_pulse_overrides`);
+          return Object.fromEntries(r.rows.map(row => [row.override_key, row.payload || {}]));
+        } catch {
+          return {};
+        }
+      })();
+
       return {
         asOf: latest,
         cadences: { daily: buildCadence(dailyDefs), weekly: buildCadence(weeklyDefs), quarterly: buildCadence(quarterlyDefs) },
+        overrides,
       };
     });
     res.json(body);
   } catch (e) {
     console.error('[Analytics /kpi-pulse]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+async function ensureKpiPulseOverrideTable() {
+  await pgQuery(`
+    CREATE TABLE IF NOT EXISTS kpi_pulse_overrides (
+      override_key TEXT PRIMARY KEY,
+      payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+      updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+}
+
+router.put('/kpi-pulse/overrides', async (req, res) => {
+  try {
+    const { key, payload } = req.body || {};
+    if (!key || typeof key !== 'string') return res.status(400).json({ error: 'Missing override key' });
+    await ensureKpiPulseOverrideTable();
+    await pgQuery(`
+      INSERT INTO kpi_pulse_overrides (override_key, payload, updated_at)
+      VALUES ($1, $2::jsonb, NOW())
+      ON CONFLICT (override_key) DO UPDATE SET payload=EXCLUDED.payload, updated_at=NOW()
+    `, [key, JSON.stringify(payload || {})]);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error('[Analytics /kpi-pulse/overrides]', e.message);
     res.status(500).json({ error: e.message });
   }
 });

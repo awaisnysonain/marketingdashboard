@@ -59,7 +59,7 @@ router.get('/', async (req, res) => {
     // benchmarks tables are unused/empty and were dropped from this view.)
     const [
       noblSummR, floSummR, noblChR, floChR, appstleR, klavR, twAdsR, metaAdsR,
-      noblAirR, iapRevR, iapSubR, forecastR, perfR,
+      noblAirR, iapRevR, iapSubR, forecastR, perfR, opsR, csR, sessionsR, emailSmsR,
     ] = await Promise.all([
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM nobl_brand_tw_summary_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM flo_brand_tw_summary_daily`).catch(() => ({ rows: [{}] })),
@@ -75,6 +75,10 @@ router.get('/', async (req, res) => {
       // Plan/import tables are future-dated, so freshness uses MAX(updated_at) = last import.
       pgQuery(`SELECT MAX(updated_at)::date as max_date, COUNT(*) as cnt FROM forecast_plan_daily`).catch(() => ({ rows: [{}] })),
       pgQuery(`SELECT MAX(updated_at)::date as max_date, COUNT(*) as cnt FROM brand_performance_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM ops_metrics_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM cs_tickets_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_sessions_daily`).catch(() => ({ rows: [{}] })),
+      pgQuery(`SELECT MAX(date) as max_date, COUNT(*) as cnt FROM tw_email_sms_daily`).catch(() => ({ rows: [{}] })),
     ]);
 
     const mk = (r, extra = {}) => ({ latest_date: fmtD(r.rows[0]?.max_date), row_count: parseInt(r.rows[0]?.cnt || 0), ...extra });
@@ -92,6 +96,10 @@ router.get('/', async (req, res) => {
       iap_subs:       mk(iapSubR),
       forecast_plan:  mk(forecastR),
       performance:    mk(perfR),
+      ops_metrics:    mk(opsR),
+      cs_tickets:     mk(csR),
+      tw_sessions:    mk(sessionsR),
+      tw_email_sms:   mk(emailSmsR),
     };
 
     // ── 4. Gap check (quick, only check last 90 days) ────────────────────────

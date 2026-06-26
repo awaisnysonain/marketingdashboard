@@ -85,6 +85,11 @@ async function logFinish(logId, status, rowsWritten, errorMessage = null) {
   }
 }
 
+async function logTaskResult(logId, result) {
+  const errors = Array.isArray(result?.errors) ? result.errors : [];
+  await logFinish(logId, errors.length ? 'error' : 'success', result?.rows || 0, errors.join('; ') || null);
+}
+
 // ── Public API ────────────────────────────────────────────────────────────────
 
 let syncRunning = false;
@@ -213,7 +218,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'klaviyo', chunk.start, chunk.end);
         try {
           const r = await syncKlaviyoDaily(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'klaviyo', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -279,7 +284,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_channels', chunk.start, chunk.end);
         try {
           const r = await syncTWChannels(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_channels', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -300,7 +305,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_geo', chunk.start, chunk.end);
         try {
           const r = await syncTWGeo(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_geo', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -347,7 +352,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_ads', chunk.start, chunk.end);
         try {
           const r = await syncTWAds(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_ads', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -367,7 +372,7 @@ async function runSync(options = {}) {
       const logId = await logStart(runId, 'NOBL', 'tw_air_attribution', chunk.start, chunk.end);
       try {
         const r = await syncTWAirOrderAttribution('NOBL', chunk.start, chunk.end);
-        await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+        await logTaskResult(logId, r);
         results.push({ task: 'tw_air_attribution', brand: 'NOBL', chunk, rows: r.rows });
         if (r.errors.length) errors.push(...r.errors);
         try {
@@ -397,7 +402,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_orders', chunk.start, chunk.end);
         try {
           const r = await syncTWOrders(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_orders', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -418,7 +423,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_sessions', chunk.start, chunk.end);
         try {
           const r = await syncTWSessions(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_sessions', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -437,7 +442,7 @@ async function runSync(options = {}) {
       const logId = await logStart(runId, brand, 'tw_customers', startDate, endDate);
       try {
         const r = await syncTWCustomers(brand);
-        await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+        await logTaskResult(logId, r);
         results.push({ task: 'tw_customers', brand, rows: r.rows });
         if (r.errors.length) errors.push(...r.errors);
       } catch (e) {
@@ -455,7 +460,7 @@ async function runSync(options = {}) {
       const logId = await logStart(runId, brand, 'tw_segments', startDate, endDate);
       try {
         const r = await syncTWSegments(brand);
-        await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+        await logTaskResult(logId, r);
         results.push({ task: 'tw_segments', brand, rows: r.rows });
         if (r.errors.length) errors.push(...r.errors);
       } catch (e) {
@@ -475,7 +480,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_refunds', chunk.start, chunk.end);
         try {
           const r = await syncTWRefunds(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_refunds', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -496,7 +501,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_email_sms', chunk.start, chunk.end);
         try {
           const r = await syncTWEmailSms(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_email_sms', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -515,7 +520,7 @@ async function runSync(options = {}) {
       const logId = await logStart(runId, brand, 'tw_benchmarks', startDate, endDate);
       try {
         const r = await syncTWBenchmarks(brand);
-        await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+        await logTaskResult(logId, r);
         results.push({ task: 'tw_benchmarks', brand, rows: r.rows });
         if (r.errors.length) errors.push(...r.errors);
       } catch (e) {
@@ -537,7 +542,7 @@ async function runSync(options = {}) {
         const logId = await logStart(runId, brand, 'tw_order_revenue', chunk.start, chunk.end);
         try {
           const r = await syncTWOrderRevenue(brand, chunk.start, chunk.end);
-          await logFinish(logId, 'success', r.rows, r.errors.join('; ') || null);
+          await logTaskResult(logId, r);
           results.push({ task: 'tw_order_revenue', brand, chunk, rows: r.rows });
           if (r.errors.length) errors.push(...r.errors);
         } catch (e) {
@@ -674,6 +679,43 @@ async function runSync(options = {}) {
         results.push({ task: 'product_daily', brand, rows: r.rows });
       } catch (e) {
         const msg = `product_daily ${brand}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
+      }
+    }
+  }
+
+  // ── Ops metrics (ERP Postgres + UPS API → ops_metrics_daily) ──────────
+  // The ETL pulls both brands in one shot (single ERP query + single UPS pass),
+  // so it logs under brand='ALL' — the same pattern as IAP.
+  if (tasks.includes('ops_metrics')) {
+    const logId = await logStart(runId, 'ALL', 'ops_metrics', startDate, endDate);
+    try {
+      const { runOpsMetrics } = require('./syncOpsMetrics');
+      const r = await runOpsMetrics({ start: startDate, end: endDate, commit: true });
+      await logFinish(logId, 'success', r.written);
+      results.push({ task: 'ops_metrics', rows: r.written, statusCounts: r.statusCounts });
+    } catch (e) {
+      const msg = `ops_metrics ${startDate}-${endDate}: ${e.message}`;
+      console.error('[SyncEngine]', msg);
+      errors.push(msg);
+      await logFinish(logId, 'error', 0, e.message);
+    }
+  }
+
+  // ── CS tickets (crmdb + flodb Mongo → cs_tickets_daily) ──────────────
+  if (tasks.includes('cs_tickets')) {
+    // Each brand has its own Mongo DB, so we can fail one without the other.
+    for (const brand of brands) {
+      const logId = await logStart(runId, brand, 'cs_tickets', startDate, endDate);
+      try {
+        const { runCsTickets } = require('./syncCsTickets');
+        const r = await runCsTickets({ start: startDate, end: endDate, commit: true, brands: [brand] });
+        await logFinish(logId, 'success', r.rows);
+        results.push({ task: 'cs_tickets', brand, rows: r.rows });
+      } catch (e) {
+        const msg = `cs_tickets ${brand} ${startDate}-${endDate}: ${e.message}`;
         console.error('[SyncEngine]', msg);
         errors.push(msg);
         await logFinish(logId, 'error', 0, e.message);

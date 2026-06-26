@@ -23,7 +23,7 @@ require('dotenv').config({ path: require('path').join(__dirname, '../../.env') }
  */
 
 const { pgRun, pgQuery } = require('../db/postgres');
-const { twSqlSafe, chDateRange } = require('./twSqlApi');
+const { twSqlQuery, chDateRange } = require('./twSqlApi');
 const { fetchDualRevenueMetrics, fetchBlendedShopifyRevenue, fetchAmazonRevenue } = require('./tripleWhaleSQL');
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -156,7 +156,7 @@ async function syncTWAds(brand, startDate, endDate) {
     HAVING SUM(pjt.spend) > 0
   `;
 
-  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWAds ${brand}: no rows`);
     return { rows: 0, errors };
@@ -281,7 +281,7 @@ async function syncTWAirOrderAttribution(brand, startDate, endDate) {
       AND lowerUTF8(tupleElement(pi, 'product_name')) LIKE '%nobl air%'
   `;
 
-  const rows = await twSqlSafe(brand, sql, { period: { startDate, endDate } });
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWAirOrderAttribution ${brand}: no rows`);
     return { rows: 0, errors };
@@ -380,7 +380,7 @@ async function syncTWOrders(brand, startDate, endDate) {
     ORDER BY order_date DESC
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlQuery(brand, sql);
   if (!rows.length) {
     console.log(`[twFullSync] syncTWOrders ${brand}: no rows`);
     return { rows: 0, errors };
@@ -462,7 +462,7 @@ async function syncTWSessions(brand, startDate, endDate) {
     ORDER BY session_date DESC
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlQuery(brand, sql);
   if (!rows.length) {
     console.log(`[twFullSync] syncTWSessions ${brand}: no rows`);
     return { rows: 0, errors };
@@ -546,7 +546,7 @@ async function syncTWCustomers(brand) {
     ORDER BY total_spent DESC
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlQuery(brand, sql);
   if (!rows.length) {
     console.log(`[twFullSync] syncTWCustomers ${brand}: no rows`);
     return { rows: 0, errors };
@@ -620,7 +620,7 @@ async function syncTWSegments(brand) {
     ORDER BY total_spent DESC
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlQuery(brand, sql);
   if (!rows.length) {
     console.log(`[twFullSync] syncTWSegments ${brand}: no rows`);
     return { rows: 0, errors };
@@ -693,7 +693,7 @@ async function syncTWRefunds(brand, startDate, endDate) {
     ORDER BY refund_date DESC
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlQuery(brand, sql);
   if (!rows.length) {
     console.log(`[twFullSync] syncTWRefunds ${brand}: no rows`);
     return { rows: 0, errors };
@@ -761,7 +761,7 @@ async function syncTWEmailSms(brand, startDate, endDate) {
     ORDER BY date DESC, revenue DESC
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlQuery(brand, sql);
   if (!rows.length) {
     console.log(`[twFullSync] syncTWEmailSms ${brand}: no rows`);
     return { rows: 0, errors };
@@ -847,7 +847,7 @@ async function syncTWBenchmarks(brand) {
     ORDER BY date DESC, vertical, metric_name
   `;
 
-  const rows = await twSqlSafe(brand, sql);
+  const rows = await twSqlQuery(brand, sql);
   if (!rows.length) {
     console.log(`[twFullSync] syncTWBenchmarks ${brand}: no rows`);
     return { rows: 0, errors };
@@ -934,7 +934,7 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
     [dualRevMap, shopifyRevMap, refundRows] = await Promise.all([
       fetchDualRevenueMetrics(brand, startDate, endDate),
       fetchBlendedShopifyRevenue(brand, startDate, endDate),
-      twSqlSafe(brand, refundsSql),
+      twSqlQuery(brand, refundsSql),
     ]);
     if (brand === 'NOBL') {
       amazonRevMap = await fetchAmazonRevenue(brand, startDate, endDate);

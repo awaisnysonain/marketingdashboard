@@ -82,6 +82,18 @@ const TASK_CATALOG = {
     populates: ['iap_daily', 'iap_subscription_daily'],
     impact: 'The NOBL/FLO App pages (IAP revenue, units, active subscribers) will be stale or missing.',
   },
+  ops_metrics: {
+    label: 'Ops metrics (shipment fulfillment + UPS + unfulfilled)',
+    script: 'server/etl/syncOpsMetrics.js',
+    populates: ['ops_metrics_daily'],
+    impact: 'The KPI Pulse Ops rows (Avg Shipping Cost / Order, Orders Unfulfilled, Orders Unfulfilled >24h) will be stale. Requires the ERP Postgres (erp_maindb) to be reachable and a fresh UPS token in public.third_party_tokens.',
+  },
+  cs_tickets: {
+    label: 'CS tickets count + region + closes (crmdb + flodb)',
+    script: 'server/etl/syncCsTickets.js',
+    populates: ['cs_tickets_daily'],
+    impact: 'The KPI Pulse CS rows (CS Tickets % of Orders, region splits, effective closes) will be stale. Requires the two Mongo SSH tunnels (port 27018 → crmdb, port 27019 → flodb) to be active on the cron host.',
+  },
 };
 
 function taskInfo(task) {

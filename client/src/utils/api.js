@@ -211,13 +211,23 @@ export const getDataBounds = () =>
 
 /** Leadership KPI matrix (daily/weekly/quarterly) computed from existing DB tables. */
 export const getKpiPulse = () =>
-  cachedAnalyticsFetch('kpi-pulse',
-    () => fetch(`${B}/api/analytics/kpi-pulse`).then(async (r) => {
-      const d = await r.json();
-      if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
-      return d;
-    }),
-  ).then((x) => x.data);
+  fetch(`${B}/api/analytics/kpi-pulse?ts=${Date.now()}`).then(async (r) => {
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
+    return d;
+  });
+
+export const saveKpiPulseOverride = (key, payload) =>
+  fetch(`${B}/api/analytics/kpi-pulse/overrides`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ key, payload }),
+  }).then(async (r) => {
+    const d = await r.json();
+    if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
+    return d;
+  });
 
 export const getNoblAirSubscribers = (start, end) =>
   cachedAnalyticsFetch(

@@ -6,7 +6,7 @@ const { pool } = require('./postgres');
 
 // All schema files are idempotent (CREATE TABLE/INDEX IF NOT EXISTS), so this is
 // safe to re-run. Add new schema files here.
-const SCHEMA_FILES = ['nobl_air_schema.sql', 'iap_schema.sql'];
+const SCHEMA_FILES = ['nobl_air_schema.sql', 'iap_schema.sql', 'ops_cs_schema.sql'];
 
 (async () => {
   // pg's `query` accepts multi-statement strings when no parameters are passed.

@@ -1386,6 +1386,8 @@ const ALL_DAILY_TASKS = [
   'performance_dashboard', // import NOBL + FLO performance workbook into brand_performance_daily
   'product_daily',       // recompute shopify_product_daily
   'iap',                 // Apple App Store + Google Play IAP revenue → iap_daily (self-widens ~45d for late Play earnings)
+  'ops_metrics',         // ERP shipments + UPS + unfulfilled → ops_metrics_daily (KPI Pulse Ops rows)
+  'cs_tickets',          // crmdb + flodb Mongo → cs_tickets_daily (KPI Pulse CS rows)
 ];
 
 // Live/Snapshot page — lightweight hourly refresh (summary + channel + geo via tw_refresh)
@@ -1400,7 +1402,13 @@ let lastCronStatus = null; // { runId, ok, errors, ts }
 let lastLiveSnapshotAt = null;
 let lastLiveSnapshotStatus = null;
 
-try {
+const CRON_ENABLED = process.env.ENABLE_CRON != null
+  ? process.env.ENABLE_CRON === 'true'
+  : isProd;
+
+if (!CRON_ENABLED) {
+  console.log('[Cron] Disabled for this process. Set ENABLE_CRON=true to run scheduled ETL jobs.');
+} else try {
   const cron = require('node-cron');
   const { pgQuery, pgRun } = require('./db/postgres');
   const { sendAlert, ensureSchema: ensureAlertsSchema } = require('./etl/alerts');
@@ -1437,7 +1445,7 @@ try {
     // After a cron run, verify yesterday's data actually landed for both brands.
     const checks = [
       { table: 'tw_summary_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_summary_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
-      { table: 'shopify_orders_raw', sql: `SELECT brand, COUNT(*)::int n FROM shopify_orders_raw WHERE date_key = $1::date GROUP BY brand`, expect: 1 }, // NOBL min
+      { table: 'shopify_orders_raw', sql: `SELECT brand, COUNT(*)::int n FROM shopify_orders_raw WHERE date_key = $1::date GROUP BY brand`, expect: 2 },
       { table: 'nobl_air_daily', sql: `SELECT 'na' AS brand, COUNT(*)::int n FROM nobl_air_daily WHERE date = $1::date`, expect: 1 },
     ];
     const issues = [];
@@ -1505,6 +1513,12 @@ try {
         syncResult = await Promise.race([syncPromise, timeoutPromise]);
       } catch (e) {
         syncErr = e.message;
+        await pgRun(
+          `UPDATE etl_run_log
+           SET status='error', error_message=$2, finished_at=NOW()
+           WHERE run_id=$1 AND status='running'`,
+          [runId, `cron aborted: ${e.message}`]
+        ).catch(() => {});
         // Determine which tasks did NOT complete (timeout/crash leaves them non-success).
         let incomplete = ALL_DAILY_TASKS;
         try {
@@ -1524,6 +1538,20 @@ try {
             `${describeTasksImpact(incomplete)}\n\n` +
             `ACTION: check the upstream source (Triple Whale / Meta / Shopify API) or the DB connection, then re-run via the manual Sync trigger. Until re-run, the above data is missing for ${startDate} → ${endDate}.`,
           context: { runId, startDate, endDate, reason: e.message, timeout: isTimeout, incompleteTasks: incomplete, elapsed_min: ((Date.now() - t0) / 60000).toFixed(1) },
+        });
+      }
+
+      const syncErrors = Array.isArray(syncResult?.errors) ? syncResult.errors : [];
+      if (syncErrors.length) {
+        await sendAlert({
+          severity: 'error',
+          subject: `Cron completed with ${syncErrors.length} ETL error(s) — ${runId}`,
+          body:
+            `The daily cron finished for ${startDate} → ${endDate}, but one or more ETL tasks reported errors.\n\n` +
+            `${syncErrors.slice(0, 25).map(e => `• ${e}`).join('\n')}` +
+            `${syncErrors.length > 25 ? `\n…${syncErrors.length - 25} more` : ''}\n\n` +
+            `Affected rows are stale/missing until the failed task is re-run successfully.`,
+          context: { runId, startDate, endDate, errors: syncErrors.slice(0, 100) },
         });
       }
 
@@ -1579,8 +1607,8 @@ try {
       const elapsed = ((Date.now()-t0)/60000).toFixed(1);
       lastCronRunAt = new Date().toISOString();
       lastCronStatus = {
-        runId, ok: !syncErr && !issues.length,
-        errors: (syncErr ? 1 : 0) + issues.length,
+        runId, ok: !syncErr && !issues.length && !syncErrors.length,
+        errors: (syncErr ? 1 : 0) + issues.length + syncErrors.length,
         elapsed_min: elapsed, ts: lastCronRunAt
       };
       console.log(`[Cron] ✓ Done ${runId} in ${elapsed}min — ${lastCronStatus.ok ? 'OK' : `${lastCronStatus.errors} issue(s)`}`);
@@ -1595,7 +1623,7 @@ try {
     runDailySync().catch(e => console.error('[Cron unhandled]', e));
   }, { timezone: CRON_TZ });
 
-  console.log(`[Cron] Scheduled: 11:00 AM ${CRON_TZ} (PKT, UTC+5) daily — syncs yesterday, 10 tasks, 7-day backfill`);
+  console.log(`[Cron] Scheduled: 11:00 AM ${CRON_TZ} (PKT, UTC+5) daily — syncs yesterday, ${ALL_DAILY_TASKS.length} tasks, 7-day backfill`);
 
   async function runLiveSnapshotSync(opts = {}) {
     if (syncEngine.isSyncRunning()) {
@@ -1611,13 +1639,18 @@ try {
 
     try {
       console.log(`[LiveSnapshot] ▶ ${runId} | ${yesterday} → ${today}`);
-      const result = await syncEngine.runSync({
+      const syncPromise = syncEngine.runSync({
         runId,
         tasks: LIVE_SNAPSHOT_TASKS,
         startDate: yesterday,
         endDate: today,
         brands: ['NOBL', 'FLO'],
       });
+      const liveTimeoutMs = parseInt(process.env.LIVE_SNAPSHOT_TIMEOUT_MS || `${25 * 60 * 1000}`, 10);
+      const result = await Promise.race([
+        syncPromise,
+        new Promise((_, rej) => setTimeout(() => rej(new Error(`Live snapshot timed out after ${Math.round(liveTimeoutMs / 60000)} min`)), liveTimeoutMs)),
+      ]);
       const elapsed = ((Date.now() - t0) / 60000).toFixed(1);
       lastLiveSnapshotAt = new Date().toISOString();
       lastLiveSnapshotStatus = {
@@ -1632,6 +1665,12 @@ try {
       return { runId, ...lastLiveSnapshotStatus };
     } catch (e) {
       console.error('[LiveSnapshot]', e.message);
+      await pgRun(
+        `UPDATE etl_run_log
+         SET status='error', error_message=$2, finished_at=NOW()
+         WHERE run_id=$1 AND status='running'`,
+        [runId, `live snapshot aborted: ${e.message}`]
+      ).catch(() => {});
       // Previously silent — now alerts (dedupe in alerts.js prevents hourly spam).
       await sendAlert({
         severity: 'warn',
@@ -1657,11 +1696,30 @@ try {
 
   console.log(`[Cron] Scheduled: hourly ${CRON_TZ} (skip 11:00) — Live snapshot tw_refresh + tw_order_revenue (ET yesterday→today)`);
 
-  // Run once after deploy so Live page is not stale until the next :00 tick.
-  setTimeout(() => {
-    runLiveSnapshotSync({ runId: `boot_live_snapshot_${reportTodayStr()}` })
-      .catch(e => console.error('[LiveSnapshot boot]', e));
-  }, 20_000);
+  // Optional boot refresh. Disabled by default to avoid duplicate/stuck ETL rows
+  // when PM2/nodemon restarts repeatedly; the hourly schedule handles freshness.
+  if (process.env.RUN_BOOT_LIVE_SYNC === 'true') {
+    setTimeout(async () => {
+      try {
+        const recent = await pgQuery(`
+          SELECT 1 FROM etl_run_log
+          WHERE task IN ('tw_refresh','tw_order_revenue')
+            AND status IN ('running','success')
+            AND started_at > NOW() - interval '45 minutes'
+          LIMIT 1
+        `);
+        if (recent.rows.length) {
+          console.log('[LiveSnapshot boot] Skipped — recent/running TW sync exists');
+          return;
+        }
+        await runLiveSnapshotSync({ runId: `boot_live_snapshot_${reportTodayStr()}_${Date.now()}` });
+      } catch (e) {
+        console.error('[LiveSnapshot boot]', e.message);
+      }
+    }, 20_000);
+  } else {
+    console.log('[LiveSnapshot boot] Disabled. Set RUN_BOOT_LIVE_SYNC=true to enable a one-time boot refresh.');
+  }
 
   // ── Manual sync trigger — admin only, single-flight, rate-limited ────────
   // Tracks per-user manual triggers in this Map; purges every hour
@@ -1721,8 +1779,9 @@ try {
     } catch {}
 
     // Spawn background
-    runDailySync({ runId: `manual_${Date.now()}` }).catch(e => console.error('[Manual sync]', e));
-    res.json({ ok: true, msg: 'Sync started in background', run_id: `manual_${Date.now()}` });
+    const runId = `manual_${Date.now()}`;
+    runDailySync({ runId }).catch(e => console.error('[Manual sync]', e));
+    res.json({ ok: true, msg: 'Sync started in background', run_id: runId });
   });
 
   // Public status endpoint — anyone authed can read sync status
