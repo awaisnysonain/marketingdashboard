@@ -2520,8 +2520,8 @@ router.get('/kpi-pulse', async (req, res) => {
 
       const emptyRows = () => ({ rows: [] });
       const [noblSum, floSum, noblGeo, floGeo, air, ops, cs, meta, metaStrat, klav, airSubs, floIapSubs, floReturning, products, floAppstle, floAppstleTtp, noblBundle] = await pgQueryBatch([
-        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
-        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
+        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, gross_minus_discounts gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
+        { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, gross_minus_discounts gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM nobl_brand_tw_geo_daily WHERE region IN ('US','CA') AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM flo_brand_tw_geo_daily WHERE region = 'US' AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, total_orders to_, air_orders ao, converted_count conv, mature_count mat, combined_net_revenue arev FROM nobl_air_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
@@ -2538,7 +2538,7 @@ router.get('/kpi-pulse', async (req, res) => {
                   SUM(link_clicks) lc,
                   SUM(clicks) c,
                   SUM(spend) s,
-                  SUM(spend) FILTER (WHERE LOWER(CONCAT_WS(' ', campaign_name, adset_name, ad_name)) ~ 'whitelist|white list|whitelisting|\\bwl\\b') whitelist_spend,
+                  SUM(spend) FILTER (WHERE LOWER(CONCAT_WS(' ', campaign_name, adset_name, ad_name)) ~ 'whitelist|white list|whitelisting|(^|[^a-z0-9])wl([^a-z0-9]|$)') whitelist_spend,
                   SUM(spend) FILTER (WHERE LOWER(CONCAT_WS(' ', campaign_name, adset_name, ad_name)) ~ 'retarget|remarket|\\bbof\\b|bottom|warm|existing|past purchaser|winback') bof_spend
                 FROM meta_ads_daily WHERE date BETWEEN $1::date AND $2::date GROUP BY brand, date`, params: [start, end], fallback: emptyRows },
         // Meta Ads — strategist Share of Spend + FLO product CAC. Driven by the
@@ -2619,7 +2619,7 @@ router.get('/kpi-pulse', async (req, res) => {
                 GROUP BY (created_at::date + INTERVAL '14 days')::date`, params: [start, end], fallback: emptyRows },
         { sql: `SELECT TO_CHAR(date,'YYYY-MM-DD') d,
                   SUM(net_revenue) total_product_rev,
-                  SUM(net_revenue) FILTER (WHERE LOWER(product_title) LIKE '%bundle%') bundle_rev
+                  SUM(net_revenue) FILTER (WHERE sku_prefix IN ('ALLB1','ALLB2','ALLB3','EPB1','EPB3')) bundle_rev
                 FROM shopify_product_daily
                 WHERE brand='NOBL' AND date BETWEEN $1::date AND $2::date
                 GROUP BY date`, params: [start, end], fallback: emptyRows },
@@ -2633,8 +2633,8 @@ router.get('/kpi-pulse', async (req, res) => {
       const productByDay = {}; // d → brand → product_line → {spend, orders}
       const floAppByDay = {}; // d → {app_units,mature,converted}; app_units by signup date, TTP by maturity date
       const noblBundleByDay = {}; // d → {bundle_rev,total_product_rev}
-      for (const r of noblSum.rows) nMap[r.d] = { rev: num(r.rev), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
-      for (const r of floSum.rows)  fMap[r.d] = { rev: num(r.rev), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
+      for (const r of noblSum.rows) nMap[r.d] = { rev: num(r.rev), gmd: num(r.gmd), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
+      for (const r of floSum.rows)  fMap[r.d] = { rev: num(r.rev), gmd: num(r.gmd), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales) };
       for (const r of noblGeo.rows) { (ngeo[r.d] = ngeo[r.d] || {})[r.region] = { rev: num(r.rev), spend: num(r.spend) }; }
       for (const r of floGeo.rows)  { (fgeo[r.d] = fgeo[r.d] || {})[r.region] = { rev: num(r.rev), spend: num(r.spend) }; }
       for (const r of air.rows)     aMap[r.d] = { to: num(r.to_), ao: num(r.ao), conv: num(r.conv), mat: num(r.mat), arev: num(r.arev) };
@@ -2702,7 +2702,7 @@ router.get('/kpi-pulse', async (req, res) => {
       function lastNonNull(values) { for (let i = values.length - 1; i >= 0; i -= 1) if (values[i] != null) return values[i]; return null; }
 
       function metricsFor(dates) {
-        const a = { n:{rev:0,spend:0,orders:0,amazon:0,tsales:0}, f:{rev:0,spend:0,orders:0,amazon:0,tsales:0}, nUS:{rev:0,spend:0}, nCA:{rev:0,spend:0}, fUS:{rev:0,spend:0}, air:{to:0,ao:0,conv:0,mat:0,arev:0} };
+        const a = { n:{rev:0,gmd:0,spend:0,orders:0,amazon:0,tsales:0}, f:{rev:0,gmd:0,spend:0,orders:0,amazon:0,tsales:0}, nUS:{rev:0,spend:0}, nCA:{rev:0,spend:0}, fUS:{rev:0,spend:0}, air:{to:0,ao:0,conv:0,mat:0,arev:0} };
         let hasN = false, hasF = false;
         // Ops aggregates
         const opsNcost = [], opsFcost = [], opsNorders = [], opsForders = [], opsNuf = [], opsFuf = [], opsNuf24 = [], opsFuf24 = [];
@@ -2734,8 +2734,8 @@ router.get('/kpi-pulse', async (req, res) => {
         let noblBundleRev = 0, noblProductRev = 0;
 
         for (const d of dates) {
-          const n = nMap[d]; if (n) { hasN = true; a.n.rev+=n.rev; a.n.spend+=n.spend; a.n.orders+=n.orders; a.n.amazon+=n.amazon; a.n.tsales+=n.tsales; }
-          const f = fMap[d]; if (f) { hasF = true; a.f.rev+=f.rev; a.f.spend+=f.spend; a.f.orders+=f.orders; a.f.amazon+=f.amazon; a.f.tsales+=f.tsales; }
+          const n = nMap[d]; if (n) { hasN = true; a.n.rev+=n.rev; a.n.gmd+=n.gmd; a.n.spend+=n.spend; a.n.orders+=n.orders; a.n.amazon+=n.amazon; a.n.tsales+=n.tsales; }
+          const f = fMap[d]; if (f) { hasF = true; a.f.rev+=f.rev; a.f.gmd+=f.gmd; a.f.spend+=f.spend; a.f.orders+=f.orders; a.f.amazon+=f.amazon; a.f.tsales+=f.tsales; }
           const ng = ngeo[d]; if (ng) { if (ng.US){a.nUS.rev+=ng.US.rev;a.nUS.spend+=ng.US.spend;} if (ng.CA){a.nCA.rev+=ng.CA.rev;a.nCA.spend+=ng.CA.spend;} }
           const fg = fgeo[d]; if (fg && fg.US){a.fUS.rev+=fg.US.rev;a.fUS.spend+=fg.US.spend;}
           const ai = aMap[d]; if (ai){a.air.to+=ai.to;a.air.ao+=ai.ao;a.air.conv+=ai.conv;a.air.mat+=ai.mat;a.air.arev+=ai.arev;}
@@ -2798,9 +2798,9 @@ router.get('/kpi-pulse', async (req, res) => {
 
         return {
           NOBL: {
-            mer: div(a.n.rev, a.n.spend), sales: hasN ? a.n.rev : null, aov: div(a.n.rev, a.n.orders),
-            amazon_pct: div(a.n.amazon, a.n.tsales), us_mer: div(a.nUS.rev, a.nUS.spend), ca_mer: div(a.nCA.rev, a.nCA.spend),
-            air_rev_pct: div(a.air.arev, a.n.rev), attach, ttp, activation: (attach != null && ttp != null) ? attach * ttp : null,
+            mer: div(a.n.gmd || a.n.rev, a.n.spend), sales: hasN ? (a.n.gmd || a.n.rev) : null, aov: div(a.n.gmd || a.n.rev, a.n.orders),
+            amazon_pct: div(a.n.amazon, a.n.gmd || a.n.tsales), us_mer: div(a.nUS.rev, a.nUS.spend), ca_mer: div(a.nCA.rev, a.nCA.spend),
+            air_rev_pct: div(a.air.arev, a.n.gmd || a.n.rev), attach, ttp, activation: (attach != null && ttp != null) ? attach * ttp : null,
             // Phase 2/3 additions
             avg_shipping_cost: avgOf(opsNcost),
             orders_unfulfilled: maxOf(opsNuf),
@@ -2809,9 +2809,9 @@ router.get('/kpi-pulse', async (req, res) => {
             meta_cvr: hasMetaN ? metaCvr(m.n) : null,
             whitelisting_spend_pct: hasMetaN ? div(m.n.whitelist, m.n.s) : null,
             tof_spend_pct: hasMetaN ? div(Math.max(0, m.n.s - m.n.bof), m.n.s) : null,
-            retention_rev_pct: (klavNseen && a.n.rev > 0) ? klavNrev / a.n.rev : null,
+            retention_rev_pct: null,
             new_customer_cac: div(a.n.spend, a.n.orders),
-            bundle_rev_pct: div(noblBundleRev, noblProductRev),
+            bundle_rev_pct: div(noblBundleRev, a.n.gmd || noblProductRev),
             net_sub_adds: airNew - airCanc,
             // Strategist Share of Spend — ad-level spend tagged with the
             // strategist's code, over total NOBL account spend in window.
@@ -2821,7 +2821,7 @@ router.get('/kpi-pulse', async (req, res) => {
             sos_chris:  hasMetaN ? div(stratNobl.chris,  m.n.s) : null,
           },
           FLO: {
-            mer: div(a.f.rev, a.f.spend), sales: hasF ? a.f.rev : null, aov: div(a.f.rev, a.f.orders), us_mer: div(a.fUS.rev, a.fUS.spend),
+            mer: div(a.f.gmd || a.f.rev, a.f.spend), sales: hasF ? (a.f.gmd || a.f.rev) : null, aov: div(a.f.gmd || a.f.rev, a.f.orders), us_mer: div(a.fUS.rev, a.fUS.spend),
             avg_shipping_cost: avgOf(opsFcost),
             orders_unfulfilled: maxOf(opsFuf),
             orders_unfulfilled_24h: maxOf(opsFuf24),
@@ -2829,7 +2829,7 @@ router.get('/kpi-pulse', async (req, res) => {
             meta_cvr: hasMetaF ? metaCvr(m.f) : null,
             whitelisting_spend_pct: hasMetaF ? div(m.f.whitelist, m.f.s) : null,
             tof_spend_pct: hasMetaF ? div(Math.max(0, m.f.s - m.f.bof), m.f.s) : null,
-            retention_rev_pct: (klavFseen && a.f.rev > 0) ? klavFrev / a.f.rev : null,
+            retention_rev_pct: null,
             app_attach_pct: div(floAppUnits, a.f.orders),
             app_ttp: div(floAppConverted, floAppMature),
             monthly_churn: floChurn,

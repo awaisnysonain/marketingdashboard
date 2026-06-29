@@ -931,10 +931,9 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
   let amazonRevMap = {};
   let refundRows = [];
   try {
-    [dualRevMap, shopifyRevMap, refundRows] = await Promise.all([
+    [dualRevMap, shopifyRevMap] = await Promise.all([
       fetchDualRevenueMetrics(brand, startDate, endDate),
       fetchBlendedShopifyRevenue(brand, startDate, endDate),
-      twSqlQuery(brand, refundsSql),
     ]);
     if (brand === 'NOBL') {
       amazonRevMap = await fetchAmazonRevenue(brand, startDate, endDate);
@@ -944,6 +943,18 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
     console.error('[twFullSync]', msg);
     errors.push(msg);
     return { rows: 0, errors };
+  }
+
+  // Refunds are helpful for total_sales, but Triple Whale's refunds_table SQL
+  // intermittently returns 500s. Do not fail the whole order-revenue refresh
+  // when only refunds are unavailable; keep order_revenue/shopify/amazon fresh
+  // and reuse zero refunds for that window. This prevents hourly snapshot error
+  // spam while preserving a hard failure for the core revenue queries above.
+  try {
+    refundRows = await twSqlQuery(brand, refundsSql);
+  } catch (e) {
+    console.warn(`[twFullSync] syncTWOrderRevenue refunds unavailable ${brand}: ${e.message}`);
+    refundRows = [];
   }
 
   const allDates = new Set([
