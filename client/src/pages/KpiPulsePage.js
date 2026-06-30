@@ -25,36 +25,105 @@ const DB_KEY = {
   // Core (NOBL summary + geo + Air)
   'NOBL Blended MER': 'mer',
   'Gross Sales − Discounts': 'sales',
+  'Gross Sales − Discounts (Flo)': 'sales',
+  'Gross Sales − Discounts (FLO)': 'sales',
   'AOV': 'aov',
   'Amazon Rev % of Gross Sales': 'amazon_pct',
+  'Amazon Rev as % of Gross Sales': 'amazon_pct',
+  'Amazon Rev as % of Gross Sales − Discounts': 'amazon_pct',
   'US MER': 'us_mer',
+  'US — MER': 'us_mer',
+  'USA — MER': 'us_mer',
   'Canada MER': 'ca_mer',
+  'Canada — MER': 'ca_mer',
+  'Australia — MER': 'au_mer',
+  'EU — MER': 'eu_mer',
+  'UK — MER': 'uk_mer',
+  'USA Sales as % of Total Sales': 'us_sales_pct',
+  'Canada Sales as % of Total Sales': 'ca_sales_pct',
+  'Australia Sales as % of Total Sales': 'au_sales_pct',
+  'EU Sales as % of Total Sales': 'eu_sales_pct',
+  'Uk Sales as % of Total Sales': 'uk_sales_pct',
+  'UK Sales as % of Total Sales': 'uk_sales_pct',
   'NOBL Air Rev % of Sales': 'air_rev_pct',
+  'NOBL Air Rev as % of Total Sales': 'air_rev_pct',
   'Attach Rate': 'attach',
   'Activation Rate': 'activation',
+  'Activation Rate (Attach × TTP)': 'activation',
+  'Activation Rate (Attach Rate × TTP)': 'activation',
   'Trial-to-Paid': 'ttp',
+  'Trial-to-Paid (TTP)': 'ttp',
   // Ops (ops_metrics_daily, via ERP)
   'Avg Shipping Cost / Order': 'avg_shipping_cost',
+  'Avg Shipping Cost per Order': 'avg_shipping_cost',
   'Orders Partially Unfulfilled': 'orders_unfulfilled',
+  'Total orders partially unfulfilled': 'orders_unfulfilled',
+  'Orders partially unfulfilled': 'orders_unfulfilled',
   'Orders Unfulfilled >24hrs': 'orders_unfulfilled_24h',
   'Unfulfilled Orders': 'orders_unfulfilled',
+  'unfulfilled orders': 'orders_unfulfilled',
+  'Time to Fulfillment': 'avg_fulfillment_days',
+  'US Time to Fulfillment': 'avg_fulfillment_days',
+  'Avg shipping time length (from shipped to customer door)': 'avg_ship_to_door_days',
+  'CA Time to Fulfillment': 'ca_ttf_days',
+  'AUS Time to Fulfillment': 'au_ttf_days',
+  // Live APIs from the legacy scripts
+  'PageSpeed (PDP AIO avg)': 'pagespeed_pdp_aio',
+  'PageSpeed PDP AIO Avg': 'pagespeed_pdp_aio',
+  'DAU / MAU (stickiness)': 'dau_mau_stickiness',
+  'DAU / MAU Stickiness': 'dau_mau_stickiness',
+  'Nobl MAU / Active Subscribers': 'dau_mau_stickiness',
+  'MAU / Active Subs (opened in 30d)': 'dau_mau_stickiness',
   // CS (cs_tickets_daily, via Mongo)
   'CS Tickets % of Orders': 'cs_tickets_pct',
   'CS Tickets as % of Orders': 'cs_tickets_pct', // FLO weekly label variant
+  'CS Tickets as % of orders': 'cs_tickets_pct',
+  'Total CS Tickets as % of total orders': 'cs_tickets_pct',
+  'Total CS Tickets # amount': 'cs_tickets_count',
+  'US CS Tickets as % of US orders': 'us_cs_tickets_pct',
+  'US CS Tickets as % of Total orders': 'us_cs_tickets_pct',
+  'US CS Tickets # amount': 'us_cs_tickets_count',
+  'UK CS Tickets as % of UK orders': 'uk_cs_tickets_pct',
+  'UK CS Tickets as % of US orders': 'uk_cs_tickets_pct',
+  'UK CS Tickets # amount': 'uk_cs_tickets_count',
+  'AUS CS Tickets as % of AUS orders': 'au_cs_tickets_pct',
+  'AUS CS Tickets as % of Total orders': 'au_cs_tickets_pct',
+  'AUS CS Tickets # amount': 'au_cs_tickets_count',
+  'Canada CS Tickets as % of Canada orders': 'ca_cs_tickets_pct',
+  'Canada CS Tickets as % of Total orders': 'ca_cs_tickets_pct',
+  'Canada CS Tickets # amount': 'ca_cs_tickets_count',
+  '# of tickets closed effective': 'cs_closed_count',
+  'Ratio= # of tickets closed effective / total orders for that day': 'cs_closed_pct',
   // Paid Media derivations
   'Meta CVR %': 'meta_cvr',
   'Whitelisting Spend % of Meta Spend': 'whitelisting_spend_pct',
-  'TOF vs BOF Spend Split': 'tof_spend_pct',
+  'Whitelisting Spend as % of Weekly Meta Spend': 'whitelisting_spend_pct',
+  '% Total Meta Spend on Whitelist': 'whitelisting_spend_pct',
+  '% of Spend on Test Ad Sets': 'test_spend_pct',
+  'TOF vs BOF Spend Split': 'tof_bof_spend_split',
   'Retention Rev %': 'retention_rev_pct',
+  'Retention Rev as % of Gross Sales − Discounts': 'retention_rev_pct',
+  'SMS % of Sales': 'sms_sales_pct',
+  'SMS % of Gross Sales − Discounts': 'sms_sales_pct',
+  'Email % of Gross Sales − Discounts': 'email_sales_pct',
+  'Unsubscribe Rate': 'unsubscribe_rate',
   'Blended nCPA': 'new_customer_cac',
   'Bundle % of NOBL Revenue': 'bundle_rev_pct',
+  'Bundle % of Total NOBL Revenue': 'bundle_rev_pct',
+  'Total Refund Rate': 'refund_rate',
   // Air subs (NOBL only)
   'Net Subscriber Adds': 'net_sub_adds',
+  'Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week': 'net_sub_adds',
   // FLO IAP
+  'App Rev as % of Gross Sales − Discounts': 'app_rev_pct',
   'App Attach %': 'app_attach_pct',
   'Trial-to-Paid %': 'app_ttp',
+  'Trial-to-Paid % (annual)': 'app_ttp',
+  'App Net New Subs / Week — new paid subs minus cancellations same week': 'app_net_sub_adds',
   'Monthly Churn Rate': 'monthly_churn',
+  'Monthly Churn Rate — cancelled this month / active subs at month start': 'monthly_churn',
   'Returning Customer Revenue %': 'returning_cust_rev_pct',
+  'Returning Customer Revenue as % of Gross Sales − Discounts': 'returning_cust_rev_pct',
   // Strategist Share of Spend (NOBL ad_name code: 002TC/002FA/002LK/002CA)
   'Share of Spend TOF — Taylor': 'sos_taylor',
   'Share of Spend TOF — Franz':  'sos_franz',
@@ -64,42 +133,51 @@ const DB_KEY = {
   // FLO Chris Share of Spend + product-bucket CAC (Chris is the FLO strategist)
   'Share of Spend — Chris':      'sos_chris',
   'Portable Reformer CAC':       'portable_cac',
+  'nCPA — Portable Reformer':    'portable_cac',
   'Portable Ad CAC — Chris':     'portable_cac',
   'Home + Studio Blended CAC':   'home_studio_cac',
+  'Home + Studio Reformer Blended CAC': 'home_studio_cac',
   'Sutido Ad CAC — Chris':       'studio_cac',
   'Studio Ad CAC — Chris':       'studio_cac',
+  'nCPA — Studio Reformer':      'studio_cac',
   'Home Ad CAC — Chris':         'home_cac',
+  'nCPA — Home Reformer':        'home_cac',
 };
+
+const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 const PCT_KEYS = new Set([
   'amazon_pct', 'air_rev_pct', 'attach', 'activation', 'ttp',
-  'cs_tickets_pct', 'meta_cvr', 'monthly_churn', 'returning_cust_rev_pct',
+  'cs_tickets_pct', 'us_cs_tickets_pct', 'uk_cs_tickets_pct', 'au_cs_tickets_pct', 'ca_cs_tickets_pct', 'meta_cvr', 'monthly_churn', 'returning_cust_rev_pct',
   'sos_taylor', 'sos_franz', 'sos_luke', 'sos_chris',
-  'whitelisting_spend_pct', 'tof_spend_pct', 'retention_rev_pct', 'app_attach_pct', 'app_ttp',
-  'bundle_rev_pct',
+  'whitelisting_spend_pct', 'test_spend_pct', 'tof_spend_pct', 'retention_rev_pct', 'app_attach_pct', 'app_ttp',
+  'bundle_rev_pct', 'us_sales_pct', 'ca_sales_pct', 'au_sales_pct', 'eu_sales_pct', 'uk_sales_pct',
+  'refund_rate', 'cs_closed_pct', 'app_rev_pct', 'app_activation', 'sms_sales_pct', 'email_sales_pct', 'unsubscribe_rate', 'dau_mau_stickiness',
 ]);
-const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer']);
+const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer']);
 const MONEY_KEYS = new Set([
   'sales', 'aov', 'avg_shipping_cost', 'new_customer_cac',
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
 ]);
-const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'net_sub_adds']);
+const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio']);
+const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days']);
 
 // Keys only available for NOBL. (US MER works for both; Canada MER + Air metrics +
 // blended MER + Amazon + AOV are NOBL-only at the data layer. The strategist Share
 // of Spend keys are available on BOTH brands — Chris notably is the FLO strategist,
 // but the same endpoint key `sos_chris` is returned per brand from its own series.)
 const NOBL_ONLY_KEYS = new Set([
-  'mer', 'aov', 'amazon_pct', 'ca_mer', 'air_rev_pct', 'attach', 'activation', 'ttp', 'net_sub_adds', 'new_customer_cac', 'bundle_rev_pct',
+  'amazon_pct', 'air_rev_pct', 'attach', 'activation', 'ttp', 'net_sub_adds', 'new_customer_cac', 'bundle_rev_pct',
   'sos_taylor', 'sos_franz', 'sos_luke',
 ]);
 // Keys only available for FLO.
 const FLO_ONLY_KEYS = new Set([
-  'monthly_churn', 'returning_cust_rev_pct', 'app_attach_pct', 'app_ttp',
+  'monthly_churn', 'returning_cust_rev_pct', 'app_attach_pct', 'app_ttp', 'app_rev_pct', 'app_net_sub_adds', 'app_activation',
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
 ]);
 
 function dbKeyFor(brand, metric) {
+  if (brand === 'FLO' && metric === 'Activation Rate (Attach Rate × TTP)') return 'app_activation';
   const k = DB_KEY[metric];
   if (!k) return null;
   if (brand !== 'NOBL' && NOBL_ONLY_KEYS.has(k)) return null;
@@ -108,12 +186,14 @@ function dbKeyFor(brand, metric) {
 }
 
 function fmtMetricValue(key, v) {
+  if (key === 'tof_bof_spend_split') return v == null || v === '' ? null : String(v);
   if (v == null || !Number.isFinite(Number(v))) return null;
   const n = Number(v);
   if (RATIO_KEYS.has(key)) return `${n.toFixed(2)}x`;
   if (PCT_KEYS.has(key))   return `${(n * 100).toFixed(2)}%`;
   if (MONEY_KEYS.has(key)) return `$${(Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (INT_KEYS.has(key))   return Math.round(n).toLocaleString();
+  if (DAY_KEYS.has(key))   return `${n.toFixed(2)}d`;
   return String(v);
 }
 
@@ -132,7 +212,11 @@ function isLowerIsBetter(target, key) {
   if (target && /^[\s]*<|≤/.test(String(target))) return true;
   // Default by key for metrics whose target string isn't always "< X" but
   // semantically lower is still better.
-  return new Set(['cs_tickets_pct', 'orders_unfulfilled', 'orders_unfulfilled_24h', 'monthly_churn']).has(key);
+  return new Set([
+    'cs_tickets_pct', 'cs_tickets_count', 'orders_unfulfilled', 'orders_unfulfilled_24h', 'monthly_churn',
+    'avg_shipping_cost', 'avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days',
+    'new_customer_cac', 'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac', 'refund_rate',
+  ]).has(key);
 }
 
 function varianceFor(key, rawLatest, target) {
@@ -191,12 +275,12 @@ function categoryFor(row) {
   if (/air|app|subscriber|trial-to-paid|attach|activation|churn|dau|mau/.test(text)) return 'AIR_APP';
   if (/retention|email|sms|unsubscribe|returning/.test(text)) return 'RETENTION';
   if (/meta|cac|spend|tof|bof|creative|taylor|chris|ad /.test(text)) return 'ADS';
-  if (/social|instagram|tiktok|pagespeed|site conversion/.test(text)) return 'CREATIVE';
+  if (/social|instagram|tiktok|pagespeed|site conversion|partnership|instructor|influencer/.test(text)) return 'CREATIVE';
   return 'REVENUE';
 }
 
-function rowOverrideKey(row) { return `row:${row.cadence}:${row.brand}:${row.baseMetric || row.metric}`; }
-function cellOverrideKey(row, period) { return `cell:${row.cadence}:${row.brand}:${row.baseMetric || row.metric}:${period.key}`; }
+function rowOverrideKey(row) { return `row:${row.cadence}:${row.brand}:${row.department || ''}:${row.baseMetric || row.metric}`; }
+function cellOverrideKey(row, period) { return `cell:${row.cadence}:${row.brand}:${row.department || ''}:${row.baseMetric || row.metric}:${period.key}`; }
 
 function applyOverrides(row, periods, overrides = {}) {
   const baseMetric = row.baseMetric || row.metric;
@@ -272,93 +356,302 @@ function SingleFilterSelect({ label, value, onChange, options, minWidth = 150, c
   );
 }
 
+const DAILY_KPI_CATALOG = `
+NOBL|Paid Media|Brad|NOBL Blended MER|3
+NOBL|Paid Media|Brad|Gross Sales − Discounts|n/a
+NOBL|Paid Media|Brad|NOBL Air Rev as % of Total Sales|0.05
+NOBL|Paid Media|Brad|Amazon Rev as % of Gross Sales|0.015
+NOBL|NOBL Bundles Pod|Alex|Bundle % of Total NOBL Revenue|0.55
+NOBL|NOBL Bundles Pod|Alex|AOV|553
+NOBL|NOBL Bundles Pod|Alex|Bundle CM1 %|60 %
+NOBL|NOBL Air Pod|Simon|Activation Rate (Attach × TTP)|0.12
+NOBL|NOBL Air Pod|Simon|Attach Rate|0.2
+NOBL|NOBL Air Pod|Simon|Trial-to-Paid (TTP)|n/a
+NOBL|Creative|Brad|TOF vs BOF Spend Split|n/a
+NOBL|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|0.3
+NOBL|Retention|Daniel|SMS % of Gross Sales − Discounts|0.1
+NOBL|Retention|Daniel|Email % of Gross Sales − Discounts|0.2
+NOBL|Partnerships / Whitelisting|Shaleem|% Total Meta Spend on Whitelist|50%
+NOBL|Ops|Shumail|Total orders partially unfulfilled|<4000
+NOBL|Ops||US Orders partially unfulfilled|
+NOBL|Ops||UK orders partially unfulfilled|
+NOBL|Ops||UK Time to Fulfillment|
+NOBL|Ops|Shumail|US Time to Fulfillment|2 Days
+NOBL|Ops||AUS Time to Fulfillment|
+NOBL|Ops||CA Time to Fulfillment|
+NOBL|Ops|Shumail|Avg Shipping Cost per Order|20
+NOBL|Ops|Shumail|Avg shipping time length (from shipped to customer door)|4 Days
+NOBL|Ops|Shumail|CANADA Partially Unfulfilled Orders #|<200
+NOBL|Ops|Shumail|AUSTRALIA Partially Unfulfilled Orders #|<50
+NOBL|CS|Hassan|Total CS Tickets as % of total orders|n/a
+NOBL|CS|Hassan|Total CS Tickets # amount|n/a
+NOBL|CS||US CS Tickets as % of US orders|
+NOBL|CS||US CS Tickets # amount|
+NOBL|CS||UK CS Tickets as % of UK orders|
+NOBL|CS||UK CS Tickets # amount|
+NOBL|CS||AUS CS Tickets as % of AUS orders|
+NOBL|CS||AUS CS Tickets # amount|
+NOBL|CS||Canada CS Tickets as % of Canada orders|
+NOBL|CS||Canada CS Tickets # amount|
+NOBL|CS|Hassan|Total CB Rate|n/a
+NOBL|CS||US CB Rate|
+NOBL|CS||UK CB Rate|
+NOBL|CS||AUS CB Rate|
+NOBL|CS||Canada CB Rate|
+NOBL|CS||Total Refund Rate|
+NOBL|CS||US Refund Rate|
+NOBL|CS||AUS Refund Rate|
+NOBL|CS||Canada Refund Rate|
+NOBL|CS|Hassan|# of tickets closed effective|n/a
+NOBL|CS|Hassan|Ratio= # of tickets closed effective / total orders for that day|n/a
+NOBL|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
+NOBL|App / NOBL Air|Ali Hashim|MAU / Active Subs (opened in 30d)|Set baseline
+NOBL|App / NOBL Air|Ali Hashim|Sessions per MAU|Set baseline
+FLO|Paid Media|Brad|Portable Reformer CAC|129
+FLO|Paid Media|Brad|Home + Studio Reformer Blended CAC|1097
+FLO|Paid Media|Brad|Gross Sales − Discounts (Flo)|n/a
+FLO|Paid Media|Brad|App Rev as % of Gross Sales − Discounts|0.36
+FLO|FLO App|Kolachi|Flo sub vs hardware % split|n/a
+FLO|FLO App|Kolachi|Hardware Mix Sales (Portable vs Home/Studio %)|n/a
+FLO|FLO App|Kolachi|App Attach %|≥70%
+FLO|FLO App|Kolachi|App Lifetime Value (months)|2.6 months
+FLO|FLO App|Kolachi|LTV / CAC|2.5
+FLO|Creative|Luke|TOF vs BOF Spend Split|n/a
+FLO|Partnerships / Whitelisting||% Total Meta Spend on Whitelist|
+FLO|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|0.3
+FLO|Retention|Daniel|SMS % of Gross Sales − Discounts|0.1
+FLO|Retention|Daniel|Email % of Gross Sales − Discounts|0.2
+FLO|Ops|Shumail|Orders partially unfulfilled|100
+FLO|Ops|Shumail|US Time to Fulfillment|1.5 days
+FLO|Ops||AUS Time to Fulfillment|
+FLO|Ops||CA Time to Fulfillment|
+FLO|Ops|Shumail|Avg Shipping Cost per Order|13
+FLO|Ops|Shumail|Avg shipping time length (from shipped to customer door)|4 days
+FLO|Ops|Shumail|CANADA Partially Unfulfilled Orders #|
+FLO|Ops|Shumail|AUSTRALIA Partially Unfulfilled Orders #|
+FLO|CS|Hassan|Total CS Tickets as % of total orders|0.02
+FLO|CS|Hassan|Total CS Tickets # amount|n/a
+FLO|CS||US CS Tickets as % of Total orders|
+FLO|CS||US CS Tickets # amount|
+FLO|CS||AUS CS Tickets as % of Total orders|
+FLO|CS||AUS CS Tickets # amount|
+FLO|CS||Canada CS Tickets as % of Total orders|
+FLO|CS||Canada CS Tickets # amount|
+FLO|CS|Hassan|CB Rate|
+FLO|CS||US CB Rate|
+FLO|CS||AUS CB Rate|
+FLO|CS||Canada CB Rate|
+FLO|CS||Total Refund Rate|
+FLO|CS||US Refund Rate|
+FLO|CS||AUS Refund Rate|
+FLO|CS||Canada Refund Rate|
+FLO|CS|Hassan|# of tickets closed effective|
+FLO|CS|Hassan|Ratio= # of tickets closed effective / total orders for that day|n/a
+FLO|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
+FLO|App|Ali Hashim|DAU / MAU (stickiness)|n/a
+FLO|App|Ali Hashim|Sessions per DAU|n/a
+`;
+
+const WEEKLY_KPI_CATALOG = `
+NOBL|Paid Media|Brad|NOBL Blended MER|3.2x
+NOBL|Paid Media|Brad|Gross Sales − Discounts|On plan
+NOBL|Paid Media|Simon|NOBL Air Rev as % of Total Sales|0.05
+NOBL|Paid Media|Brad|Amazon Rev as % of Gross Sales − Discounts|0.015
+NOBL|Paid Media|Brad|Blended nCPA|197
+NOBL|Paid Media|Brad|Meta CVR %|0.0059
+NOBL|Paid Media|Brad|% of Spend on Test Ad Sets|0.25
+NOBL|Paid Media|Anthony|Whitelisting Spend as % of Weekly Meta Spend|0.5
+NOBL|Paid Media|Brad|US — MER|3.35
+NOBL|Paid Media||UK — MER|
+NOBL|Paid Media|Brad|Canada — MER|2.44
+NOBL|Paid Media|Brad|Australia — MER|2.31
+NOBL|Paid Media|Brad|EU — MER|2.44
+NOBL|Paid Media|Brad|USA Sales as % of Total Sales|0.94
+NOBL|Paid Media|Brad|Canada Sales as % of Total Sales|0.05
+NOBL|Paid Media|Brad|Australia Sales as % of Total Sales|0.02
+NOBL|Paid Media|Brad|EU Sales as % of Total Sales|0.0075
+NOBL|Paid Media||Uk Sales as % of Total Sales|
+NOBL|NOBL Bundles Pod|Alex|Bundle % of Total NOBL Revenue|0.65
+NOBL|NOBL Bundles Pod|Alex|AOV|560
+NOBL|NOBL Bundles Pod|Alex|Bundle CM1 %|0.6
+NOBL|CRO / Site|Alex|Site Conversion Rate|0.012
+NOBL|CRO / Site|Alex|Returning vs New Customer Split (as visitors)|35% / 65%
+NOBL|CRO / Site|Alex|Discounts as % of Gross Sales − Discounts|0.1
+NOBL|NOBL Air Pod|Simon|Activation Rate (Attach × TTP)|12% by Apr 30
+NOBL|NOBL Air Pod|Simon|Attach Rate|≥50%
+NOBL|NOBL Air Pod|Simon|Trial-to-Paid (TTP)|≥70%
+NOBL|NOBL Air Pod|Simon|Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week|Set target
+NOBL|NOBL Air Pod|Simon|International Activation Rate|Set baseline
+NOBL|NOBL Air Pod||AUS Activation Rate %|
+NOBL|NOBL Air Pod||CA Activation Rate %|
+NOBL|NOBL Air Pod||UK Activation Rate%|
+NOBL|Creative|Luke|TOF vs BOF Spend Split|Set target
+NOBL|Creative|Luke|Share of Spend TOF — Taylor|0.33
+NOBL|Creative|Luke|Share of Spend TOF — Franz|0.33
+NOBL|Creative|Luke|Share of Spend TOF — Luke|0.33
+NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Taylor|0.95
+NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Franz|0.95
+NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Luke|0.95
+NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Chris|0.95
+NOBL|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|≥30%
+NOBL|Retention|Daniel|SMS % of Gross Sales − Discounts|Set baseline
+NOBL|Retention|Daniel|Email — Flow vs Campaign Split|≥60% flows
+NOBL|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|Set baseline
+NOBL|Retention|Daniel|Unsubscribe Rate|<0.3%
+NOBL|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|Net positive
+NOBL|Partnerships / Whitelisting|Shaleem|New Partners Onboarded / Week|Set target
+NOBL|Social Media|Fatima|Engagement Rate (Insta)|<2.5%
+NOBL|Social Media|Fatima|Engagement Rate (TikTok)|<3%
+NOBL|Social Media|Fatima|Instagram Total Posts (feed + stories + reels)|77
+NOBL|Social Media|Fatima|TikTok Total Posts (all formats)|21
+NOBL|Social Media|Fatima|Follower Growth — Instagram|Set target
+NOBL|Social Media|Fatima|Follower Growth — TikTok|Set target
+NOBL|Ops||Orders Unfulfilled >24hrs|0
+NOBL|Ops||US Orders Unfulfilled >24hrs|
+NOBL|Ops||UK Orders Unfulfilled >24hrs|
+NOBL|Ops|Shumail|unfulfilled orders|<4000
+NOBL|Ops||US unfulfilled orders|
+NOBL|Ops||UK unfulfilled orders|
+NOBL|Ops||UK Time to Fulfillment|
+NOBL|Ops|Shumail|Time to Fulfillment|<2
+NOBL|Ops|Shumail|Avg Shipping Cost per Order|20
+NOBL|Sales + CS|Hassan|CS Tickets as % of orders|<2%
+NOBL|Sales + CS||Total CS Tickets # amount|
+NOBL|Sales + CS||US CS Tickets as % of US orders|
+NOBL|Sales + CS||US CS Tickets # amount|
+NOBL|Sales + CS||UK CS Tickets as % of US orders|
+NOBL|Sales + CS||UK CS Tickets # amount|
+NOBL|Sales + CS||AUS CS Tickets as % of AUS orders|
+NOBL|Sales + CS||AUS CS Tickets # amount|
+NOBL|Sales + CS||Canada CS Tickets as % of Canada orders|
+NOBL|Sales + CS||Canada CS Tickets # amount|
+NOBL|Sales + CS||Total CB Rate|
+NOBL|Sales + CS||US CB Rate|
+NOBL|Sales + CS||Uk CB Rate|
+NOBL|Sales + CS||AUS CB Rate|
+NOBL|Sales + CS||Canada CB Rate|
+NOBL|Sales + CS||Total Refund Rate|
+NOBL|Sales + CS||US Refund Rate|
+NOBL|Sales + CS||UK Refund Rate|
+NOBL|Sales + CS||AUS Refund Rate|
+NOBL|Sales + CS||Canada Refund Rate|
+NOBL|Sales + CS||# of tickets closed effective|
+NOBL|Sales + CS|Hassan|B2B Revenue ($)|12000
+NOBL|Sales + CS|Hassan|B2C Revenue ($)|85000
+NOBL|Sales + CS|Hassan|Wrong Order Rate % ( wrong order tickets as % of total orders)|<0.5%
+NOBL|Sales + CS|Hassan|First Response Time|<2 hours
+NOBL|Sales + CS|Hassan|Recovery Revenue (saved cancellations)|300000
+NOBL|Sales + CS|Hassan|Top 3 Ticket Themes + AI Summary|Declining themes
+NOBL|Sales + CS||Csat|
+NOBL|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
+NOBL|App|Kolachi|Activation Rate (Attach Rate × TTP)|12% by Apr 30
+NOBL|App|Ali Hashim|Nobl MAU / Active Subscribers|5
+NOBL|App|Ali Hashim|Sessions per MAU|10
+FLO|Paid Media|Brad|Portable Reformer CAC|125
+FLO|Paid Media|Brad|Home + Studio Reformer Blended CAC|1047
+FLO|Paid Media|Brad|Gross Sales − Discounts (Flo)|On plan
+FLO|Paid Media|Brad|App Rev as % of Gross Sales − Discounts|0.294
+FLO|Paid Media|Brad|nCPA — Portable Reformer|125
+FLO|Paid Media|Brad|nCPA — Home Reformer|1148
+FLO|Paid Media|Brad|nCPA — Studio Reformer|648
+FLO|Paid Media|Brad|Meta CVR %|0.0093
+FLO|Paid Media|Brad|% of Spend on Test Ad Sets|0.3
+FLO|Paid Media|Anthony|Whitelisting Spend as % of Weekly Meta Spend|0.5
+FLO|Paid Media|Brad|US — MER|1.82
+FLO|Paid Media|Brad|Canada — MER|1.06
+FLO|Paid Media|Brad|Australia — MER|1.65
+FLO|Paid Media|Brad|EU — MER|Set target
+FLO|Paid Media|Brad|USA Sales as % of Total Sales|0.942
+FLO|Paid Media|Brad|Canada Sales as % of Total Sales|0.03
+FLO|Paid Media|Brad|Australia Sales as % of Total Sales|0.028
+FLO|Paid Media|Brad|EU Sales as % of Total Sales|Set baseline
+FLO|FLO App|Kolachi|Flo Hardware Revenue vs Plan|Tracking $34M FY
+FLO|FLO App|Kolachi|Hardware Mix Sales (Portable vs Home/Studio %)|Portable ≥65%
+FLO|FLO App|Kolachi|App Attach %|≥70%
+FLO|FLO App|Kolachi|App Lifetime Value (months)|Set baseline
+FLO|FLO App|Kolachi|LTV / CAC|>3.0x
+FLO|FLO App|Kolachi|App Net New Subs / Week — new paid subs minus cancellations same week|≥1,000
+FLO|FLO App|Kolachi|Trial-to-Paid % (annual)|≥60%
+FLO|FLO App|Kolachi|Monthly Churn Rate — cancelled this month / active subs at month start|<8%
+FLO|CRO / Site|Alex|Site Conversion Rate|Set baseline
+FLO|CRO / Site|Alex|Returning vs New Customer Split (as visitors)|Track
+FLO|CRO / Site|Alex|Discounts as % of Gross Sales − Discounts|Set target
+FLO|Creative|Brad|TOF vs BOF Spend Split|Set target
+FLO|Creative|Luke|Share of Spend — Chris|1
+FLO|Creative|Luke|Portable Ad CAC — Chris|94
+FLO|Creative|Luke|Sutido Ad CAC — Chris|486
+FLO|Creative|Luke|Home Ad CAC — Chris|861
+FLO|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|≥30%
+FLO|Retention|Daniel|SMS % of Gross Sales − Discounts|Set baseline
+FLO|Retention|Daniel|Email — Flow vs Campaign Split|≥60% flows
+FLO|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|Set baseline
+FLO|Retention|Daniel|Unsubscribe Rate|<0.3%
+FLO|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|Net positive
+FLO|Partnerships / Organic + Instructors|Olivia|Flo Instructors Onboarded|3
+FLO|Partnerships / Organic + Instructors|Olivia|USA Influencers Onboarded|11
+FLO|Partnerships / Organic + Instructors|Olivia|Canada Influencers Onboarded|11
+FLO|Partnerships / Organic + Instructors|Olivia|Australia Influencers Onboarded|6
+FLO|Partnerships / Organic + Instructors|Olivia|UK Influencers Onboarded|9
+FLO|Social Media|Fatima|Engagement Rate (Insta)|<2%
+FLO|Social Media|Fatima|Engagement Rate (TikTok)|<4%
+FLO|Social Media|Fatima|Instagram Total Posts (feed + stories + reels)|50
+FLO|Social Media|Fatima|TikTok Total Posts (all formats)|21
+FLO|Social Media|Fatima|Follower Growth — Instagram|Set target
+FLO|Social Media|Fatima|Follower Growth — TikTok|Set target
+FLO|Ops|Shumail|Orders Unfulfilled >24hrs|0
+FLO|Ops|Shumail|Time to Fulfillment|1
+FLO|Ops|Shumail|Avg Shipping Cost per Order|14
+FLO|Sales + CS|Hassan|CS Tickets as % of Orders|<2%
+FLO|Sales + CS|Hassan|B2C Revenue ($)|12000
+FLO|Sales + CS|Hassan|Wrong Order Rate %|<0.5%
+FLO|Sales + CS|Hassan|First Response Time|<2 hours
+FLO|Sales + CS|Hassan|Recovery Revenue (saved cancellations)|
+FLO|Sales + CS|Hassan|Top 3 Ticket Themes + AI Summary|
+FLO|Sales + CS||Csat|
+FLO|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
+FLO|App|Ali Hashim|Activation Rate (Attach Rate × TTP)|0.4
+FLO|App|Ali Hashim|DAU / MAU (stickiness)|0.15
+FLO|App|Ali Hashim|Sessions per DAU|≥1.5
+`;
+
+// QTD_Weekly Sheet tab. Kept separate from Weekly so Quarterly can diverge
+// without accidentally inheriting non-QTD rows.
+const QUARTERLY_KPI_CATALOG = WEEKLY_KPI_CATALOG;
+
+function normalizeCatalogTarget(metric, target) {
+  const t = String(target || '').trim();
+  if (!t) return '';
+  if (/^(n\/a|na)$/i.test(t)) return 'n/a';
+  const n = Number(t.replace(/[$,%x,]/g, ''));
+  if (!Number.isFinite(n)) return t;
+  const pctLike = /%|rate|split|cvr|attach|trial-to-paid|churn|stickiness|activation|retention|sms|email|returning|whitelist|spend|refund|tickets as %|growth/i.test(metric);
+  if (pctLike && n > 0 && n < 1) return `${(n * 100).toFixed(n * 100 < 1 ? 2 : 1).replace(/\.0$/, '')}%`;
+  if (/\bMER\b/i.test(metric)) return `${n}x`;
+  if (/CAC|nCPA|AOV|Shipping Cost|Revenue \(\$\)|B2B Revenue|B2C Revenue|Recovery Revenue/i.test(metric)) return `$${n.toLocaleString()}`;
+  return t;
+}
+
+function catalogRows(cadence, csv) {
+  return csv.trim().split('\n').map((line) => {
+    const [brand, department, owner, metric, target] = line.split('|');
+    return {
+      cadence,
+      brand,
+      department,
+      owner,
+      metric,
+      target: normalizeCatalogTarget(metric, target),
+      variance: '',
+      latest: '—',
+      values: [],
+    };
+  });
+}
+
 const KPI_ROWS = [
-  // DAILY — NOBL
-  { cadence: 'daily', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'NOBL Blended MER', target: '3.0x', variance: '-24.2%', latest: '2.27x', values: ['2.27', '2.33', '2.24', '2.26', '2.41', '2.42', '2.13'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'Gross Sales − Discounts', target: 'On plan', variance: '', latest: '$706k', values: ['$706,470', '$722,337', '$705,161', '$783,733', '$758,343', '$620,142', '$572,233'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'Amazon Rev % of Gross Sales', target: '1.50%', variance: '-4.0%', latest: '1.44%', values: ['1.44%', '2.03%', '1.72%', '1.73%', '1.70%', '2.06%', '1.61%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'Meta CVR %', target: '0.59%', variance: '11.9%', latest: '0.66%', values: ['0.66%', '0.57%', '0.71%', '0.94%', '0.55%', '0.51%', '0.56%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Paid Media', owner: 'Anthony', metric: 'Whitelisting Spend % of Meta Spend', target: '50%', variance: '-39.4%', latest: '30.30%', values: ['30.30%', '38.99%', '27.13%', '28.02%', '31.05%', '22.04%', '14.74%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Geo', owner: 'Brad', metric: 'US MER', target: '3.35x', variance: '-21.8%', latest: '2.62x', values: ['2.62', '2.61', '2.92', '3.15', '3.10', '3.32', '3.58'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Geo', owner: 'Brad', metric: 'Canada MER', target: '2.44x', variance: '-22.5%', latest: '1.89x', values: ['1.89', '2.09', '1.66', '1.63', '1.94', '1.89', '2.20'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Bundles Pod', owner: 'Alex', metric: 'Bundle % of NOBL Revenue', target: '55%', variance: '15.6%', latest: '63.55%', values: ['63.55%', '61.08%', '61.48%', '60.26%', '57.71%', '54.48%', '53.05%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Bundles Pod', owner: 'Alex', metric: 'AOV', target: '$553', variance: '-34.8%', latest: '$360.35', values: ['$360.35', '$359.32', '$346.19', '$359.34', '$326.93', '$322.86', '$319.48'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'CRO / Site', owner: 'Alex', metric: 'Site Conversion Rate', target: '1.20%', variance: '-43.3%', latest: '0.68%', values: ['0.68%', '0.61%', '0.73%', '0.75%', '0.62%', '0.48%', '1.00%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'NOBL Air Rev % of Sales', target: '5%', variance: '57.4%', latest: '7.87%', values: ['7.87%', '6.58%', '8.73%', '8.63%', '14.01%', '14.33%', '13.68%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'Activation Rate', target: '12%', variance: '33.3%', latest: '16.0%', values: ['16.0%', '17.5%', '18.0%', '19.8%', '18.5%', '17.0%', '16.0%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'Attach Rate', target: '20%', variance: '1.8%', latest: '20.35%', values: ['20.35%', '22.56%', '20.95%', '23.34%', '22.13%', '20.64%', '21.98%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'Trial-to-Paid', target: '≥70%', variance: '', latest: '78.61%', values: ['78.61%', '77.33%', '85.90%', '84.67%', '83.64%', '82.51%', '72.83%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Creative', owner: 'Luke', metric: 'TOF vs BOF Spend Split', target: 'Track', variance: '', latest: '95% / 5%', values: ['95%/5%', '94%/6%', '93%/7%', '95%/5%', '95%/5%', '94%/6%', '93%/7%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Retention', owner: 'Daniel', metric: 'Retention Rev %', target: '30%', variance: '-26.5%', latest: '22.04%', values: ['22.0%', '20.7%', '22.7%', '23.7%', '23.3%', '19.6%', '19.2%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Retention', owner: 'Daniel', metric: 'SMS % of Sales', target: '10%', variance: '-64.2%', latest: '3.58%', values: ['3.58%', '3.53%', '6.77%', '6.90%', '6.73%', '4.74%', '2.19%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Ops', owner: 'Shumail', metric: 'Orders Partially Unfulfilled', target: '<4000', variance: '', latest: '6,019', values: ['6,019', '7,302', '8,388', '9,512', '9,574', '9,068', '9,750'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Ops', owner: 'Shumail', metric: 'Avg Shipping Cost / Order', target: '$20', variance: '-43.2%', latest: '$28.64', values: ['$28.64', '$24.95', '$23.50', '$21.86', '$24.53', '$24.76', '$24.86'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'CS', owner: 'Hassan', metric: 'CS Tickets % of Orders', target: '<2%', variance: '', latest: '45.48%', values: ['45.48%', '57.61%', '52.59%', '36.18%', '43.66%', '48.12%', '55.17%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'CS', owner: 'Hassan', metric: 'Chargeback Rate', target: '<1%', variance: '', latest: '1.88%', values: ['1.88%', '0.67%', '0.60%', '0.38%', '0.89%', '1.12%', '0.91%'] },
-  { cadence: 'daily', brand: 'NOBL', department: 'Web Eng', owner: 'Sobayyal', metric: 'PageSpeed PDP AIO Avg', target: '70', variance: '-52.9%', latest: '33', values: ['33', '28', '53', '37', '33', '52', '51'] },
-
-  // DAILY — FLO
-  { cadence: 'daily', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Portable Reformer CAC', target: '$125', variance: '-23.6%', latest: '$154.52', values: ['$154.52', '$169.72', '$118.14', '$124.31', '$141.23', '$98.61', '$125.92'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Home + Studio Blended CAC', target: '$1,047', variance: '86.4%', latest: '$1,951.52', values: ['$1,951.52', '$972.56', '$1,315.81', '$822.42', '$756.20', '$747.02', '$995.02'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Gross Sales − Discounts', target: 'On plan', variance: '', latest: '$334k', values: ['$334,382', '$364,301', '$379,769', '$406,693', '$474,930', '$397,913', '$330,847'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Meta CVR %', target: '0.93%', variance: '-22.6%', latest: '0.72%', values: ['0.72%', '0.51%', '0.97%', '1.01%', '0.84%', '1.23%', '0.81%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Geo', owner: 'Brad', metric: 'US MER', target: '1.82x', variance: '-11.5%', latest: '1.61x', values: ['1.61', '1.52', '1.59', '1.68', '1.80', '1.65', '1.57'] },
-  { cadence: 'daily', brand: 'FLO', department: 'FLO App', owner: 'Kolachi', metric: 'App Attach %', target: '→70%', variance: '', latest: '14.50%', values: ['14.50%', '23.39%', '28.71%', '25.71%', '20.07%', '30.61%', '33.32%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'FLO App', owner: 'Kolachi', metric: 'Trial-to-Paid %', target: '≥60%', variance: '', latest: '85.45%', values: ['85.45%', '85.69%', '84.37%', '85.94%', '75.81%', '86.20%', '70.77%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'FLO App', owner: 'Kolachi', metric: 'Monthly Churn Rate', target: '<8%', variance: '', latest: '5.48%', values: ['5.48%', '2.43%', '12.79%', '10.31%', '7.15%', '3.32%', '0.82%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'CRO / Site', owner: 'Alex', metric: 'Site Conversion Rate', target: 'Set baseline', variance: '', latest: '0.66%', values: ['0.66%', '0.61%', '0.86%', '0.81%', '0.54%', '0.74%', '0.81%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Creative', owner: 'Luke', metric: 'TOF vs BOF Spend Split', target: 'Track', variance: '', latest: '93% / 7%', values: ['93%/7%', '94%/6%', '95%/5%', '95%/5%', '94%/6%', '96%/4%', '95%/5%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Retention', owner: 'Daniel', metric: 'Retention Rev %', target: '≥30%', variance: '', latest: '8.64%', values: ['8.64%', '9.84%', '12.00%', '8.81%', '8.71%', '15.58%', '15.64%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Social', owner: 'Fatima', metric: 'Instagram Engagement Rate', target: '<2%', variance: '', latest: '2.14%', values: ['2.14%', '2.04%', '2.11%', '1.62%', '2.48%', '1.48%', '1.79%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'Ops', owner: 'Shumail', metric: 'Orders Unfulfilled >24hrs', target: '0', variance: '', latest: '638', values: ['638', '600', '753', '519', '568', '1,030', '508'] },
-  { cadence: 'daily', brand: 'FLO', department: 'CS', owner: 'Hassan', metric: 'CS Tickets % of Orders', target: '<2%', variance: '', latest: '16.50%', values: ['16.50%', '17.60%', '16.21%', '13.60%', '14.20%', '16.84%', '20.88%'] },
-  { cadence: 'daily', brand: 'FLO', department: 'App', owner: 'Ali Hashim', metric: 'DAU / MAU Stickiness', target: '15%', variance: '-85.5%', latest: '2.21%', values: ['2.21%', '2.72%', '2.59%', '2.21%', '1.62%', '1.31%', '1.68%'] },
-
-  // WEEKLY — sample mirrors sheet sections more broadly
-  { cadence: 'weekly', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'NOBL Blended MER', target: '3.2x', variance: '', latest: '2.31x', values: ['2.31', '2.35', '2.70', '2.87', '2.90', '3.12', '3.12'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'Paid Media', owner: 'Simon', metric: 'NOBL Air Rev % of Sales', target: '5%', variance: '110.0%', latest: '10.50%', values: ['10.50%', '5.84%', '3.84%', '8.01%', '15.24%', '5.91%', '6.90%'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'Blended nCPA', target: '$197', variance: '-42.3%', latest: '$280.30', values: ['$280.30', '$261.78', '$229.69', '$232.49', '$245.89', '$212.83', '$201.50'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'Bundles Pod', owner: 'Alex', metric: 'Bundle % of NOBL Revenue', target: '65%', variance: '-10.8%', latest: '57.97%', values: ['57.97%', '61.01%', '66.28%', '60.88%', '54.25%', '62.61%', '62.24%'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'Activation Rate', target: '12%', variance: '', latest: '31.36%', values: ['31.36%', '14.31%', '16.37%', '19.05%', '20.57%', '16.36%', '21.40%'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'Net Subscriber Adds', target: 'Set target', variance: '', latest: '-1,300', values: ['-1,300', '-698', '-762', '-857', '-743', '-424', '1,699'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'Creative', owner: 'Luke', metric: 'Share of Spend TOF — Taylor', target: '33%', variance: '92.9%', latest: '63.65%', values: ['63.65%', '64.02%', '63.13%', '64.41%', '51.12%', '48.91%', '48.47%'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'Retention', owner: 'Daniel', metric: 'Email Flow vs Campaign Split', target: '≥60% flows', variance: '', latest: '56.8% / 43.2%', values: ['56.8% / 43.2%', '58.8% / 41.2%', '64.4% / 35.6%', '57.7% / 42.3%', '63.3% / 36.7%', '62.3% / 37.7%', '54.6% / 45.4%'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'Social', owner: 'Fatima', metric: 'Instagram Total Posts', target: '77', variance: '', latest: '65', values: ['65', '69', '70', '76', '73', '54', '52'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'Ops', owner: 'Shumail', metric: 'Unfulfilled Orders', target: '<4000', variance: '', latest: '9,512', values: ['9512', '14678', '14296', '8993', '8157', '15520', '19410'] },
-  { cadence: 'weekly', brand: 'NOBL', department: 'CS', owner: 'Hassan', metric: 'CS Tickets % of Orders', target: '<2%', variance: '', latest: '45.48%', values: ['45.48%', '57.61%', '52.59%', '36.18%', '43.66%', '48.12%', '55.17%'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Portable Reformer CAC', target: '$125', variance: '-23.6%', latest: '$154.52', values: ['$154.52', '$169.72', '$118.14', '$124.31', '$139.73', '$104.19', '$122.13'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Home + Studio Blended CAC', target: '$1,047', variance: '86.4%', latest: '$1,951.52', values: ['$1951.52', '$972.56', '$1315.81', '$822.42', '$756.20', '$747.02', '$995.02'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'FLO App', owner: 'Kolachi', metric: 'App Attach %', target: '→70%', variance: '', latest: '14.50%', values: ['14.50%', '23.39%', '28.71%', '25.71%', '20.07%', '30.61%', '33.32%'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'FLO App', owner: 'Kolachi', metric: 'Trial-to-Paid %', target: '≥60%', variance: '', latest: '85.45%', values: ['85.45%', '85.69%', '84.37%', '85.94%', '75.81%', '86.20%', '70.77%'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'CRO / Site', owner: 'Alex', metric: 'Site Conversion Rate', target: 'Set baseline', variance: '', latest: '0.66%', values: ['0.66%', '0.61%', '0.86%', '0.81%', '0.54%', '0.74%', '0.81%'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'Creative', owner: 'Luke', metric: 'Portable Ad CAC — Chris', target: '$94', variance: '219.4%', latest: '$300.28', values: ['$300.28', '$241.84', '$173.61', '$191.97', '$219.06', '$161.94', '$142.78'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'Retention', owner: 'Daniel', metric: 'Unsubscribe Rate', target: '<0.3%', variance: '', latest: '3.04%', values: ['3.04%', '2.43%', '2.32%', '3.21%', '3.88%', '2.53%', '3.64%'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'Social', owner: 'Fatima', metric: 'TikTok Total Posts', target: '21', variance: '', latest: '15', values: ['15', '18', '21', '21', '16', '12', '12'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'Ops', owner: 'Shumail', metric: 'Orders Unfulfilled >24hrs', target: '0', variance: '', latest: '638', values: ['638', '600', '753', '519', '568', '1,030', '508'] },
-  { cadence: 'weekly', brand: 'FLO', department: 'CS', owner: 'Hassan', metric: 'CS Tickets as % of Orders', target: '<2%', variance: '', latest: '19.42%', values: ['19.42%', '23.78%', '24.4%', '27.19%', '21.19%', '21.83%', '21.87%'] },
-
-  // QUARTERLY / QTD — NOBL + FLO
-  { cadence: 'quarterly', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'NOBL Blended MER', target: '3.2x', variance: '', latest: '2.83x', values: ['2.75', '2.83'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'Paid Media', owner: 'Brad', metric: 'Gross Sales − Discounts', target: 'On plan', variance: '', latest: '$51.4M', values: ['$53,314,778', '$51,379,678'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'Paid Media', owner: 'Simon', metric: 'NOBL Air Rev % of Sales', target: '5%', variance: '110.0%', latest: '6.27%', values: ['0.38%', '6.27%'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'Bundles Pod', owner: 'Alex', metric: 'Bundle % of NOBL Revenue', target: '65%', variance: '-10.8%', latest: '60.68%', values: ['49.81%', '60.68%'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'CRO / Site', owner: 'Alex', metric: 'Site Conversion Rate', target: '1.20%', variance: '-43.3%', latest: '0.79%', values: ['0.96%', '0.79%'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'Activation Rate', target: '12%', variance: '', latest: '16.42%', values: ['1.29%', '16.42%'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'NOBL Air Pod', owner: 'Simon', metric: 'Trial-to-Paid', target: '≥70%', variance: '', latest: '76.61%', values: ['11.48%', '76.61%'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'Creative', owner: 'Luke', metric: 'TOF vs BOF Spend Split', target: 'Track', variance: '', latest: '92.5% / 7.5%', values: ['91.4% / 8.6%', '92.5% / 7.5%'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'Retention', owner: 'Daniel', metric: 'Retention Rev %', target: '≥30%', variance: '', latest: '23.87%', values: ['26.19%', '23.87%'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'Ops', owner: 'Shumail', metric: 'Unfulfilled Orders', target: '<4000', variance: '', latest: '7,303', values: ['9,769', '7,303'] },
-  { cadence: 'quarterly', brand: 'NOBL', department: 'CS', owner: 'Hassan', metric: 'CS Tickets % of Orders', target: '<2%', variance: '', latest: '58.22%', values: ['43.30%', '58.22%'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Gross Sales − Discounts', target: 'On plan', variance: '', latest: '$4.29M', values: ['$6,085,888', '$4,291,728'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'Paid Media', owner: 'Brad', metric: 'Portable Reformer CAC', target: '$125', variance: '-23.6%', latest: '$132.21', values: ['$121.84', '$132.21'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'FLO App', owner: 'Kolachi', metric: 'App Attach %', target: '→70%', variance: '', latest: '25.25%', values: ['29.26%', '25.25%'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'FLO App', owner: 'Kolachi', metric: 'Monthly Churn Rate', target: '<8%', variance: '', latest: '6.30%', values: ['9.85%', '6.30%'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'CRO / Site', owner: 'Alex', metric: 'Site Conversion Rate', target: 'Set baseline', variance: '', latest: '0.71%', values: ['0.84%', '0.71%'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'Creative', owner: 'Luke', metric: 'Share of Spend — Chris', target: '100%', variance: '-43.0%', latest: '38.05%', values: ['6.25%', '38.05%'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'Retention', owner: 'Daniel', metric: 'Returning Customer Revenue %', target: 'Set baseline', variance: '', latest: '42.03%', values: ['24.35%', '42.03%'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'Social', owner: 'Fatima', metric: 'Instagram Total Posts', target: '50', variance: '', latest: '39.6', values: ['', '39.6'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'Ops', owner: 'Shumail', metric: 'Avg Shipping Cost / Order', target: '$14', variance: '', latest: '$14.54', values: ['$21.16', '$14.54'] },
-  { cadence: 'quarterly', brand: 'FLO', department: 'CS', owner: 'Hassan', metric: 'CS Tickets % of Orders', target: '<2%', variance: '', latest: '22.08%', values: ['15.26%', '22.08%'] },
+  ...catalogRows('daily', DAILY_KPI_CATALOG),
+  ...catalogRows('weekly', WEEKLY_KPI_CATALOG),
+  ...catalogRows('quarterly', QUARTERLY_KPI_CATALOG),
 ];
 
 function parseNum(value) {
@@ -386,6 +679,12 @@ function fmtTrendValue(v, row) {
   if (sample.includes('%')) return `${Number(v).toFixed(v < 10 ? 2 : 1)}%`;
   if (sample.toLowerCase().includes('x') || /MER|ROAS|LTV/i.test(row.metric)) return `${Number(v).toFixed(2)}x`;
   return fmtNum(v);
+}
+
+function monthLabel(ym) {
+  if (!/^\d{4}-\d{2}$/.test(String(ym || ''))) return ym || 'Latest';
+  const [y, m] = ym.split('-').map(Number);
+  return `${MONTHS_SHORT[m - 1]} ${y}`;
 }
 
 function StatusPill({ status }) {
@@ -497,7 +796,7 @@ function RawKpiTable({ rows, cadence, periods = [], onSelect, editMode, onRowEdi
     });
   }, [rows, searchTerm, ownerFilter]);
   const tableWidth = KPI_LABEL_COL_WIDTH + (Math.max(periods.length, 1) * PERIOD_COL_WIDTH);
-  const cadenceLabel = cadence === 'daily' ? 'Daily' : cadence === 'weekly' ? 'Weekly' : 'Quarterly';
+  const cadenceLabel = cadence === 'daily' ? 'Daily' : cadence === 'weekly' ? 'Weekly' : cadence === 'monthly' ? 'Monthly' : 'Quarterly';
   return (
     <ChartPanel
       title={`KPI matrix — ${cadenceLabel}`}
@@ -840,7 +1139,7 @@ function MtdPreview({ rows, periods }) {
   const latestDate = periods?.[0]?.label || '—';
   const keyRows = rows.filter(r => ['NOBL Blended MER', 'Gross Sales − Discounts', 'Meta CVR %', 'Avg Shipping Cost / Order', 'CS Tickets % of Orders'].includes(r.baseMetric || r.metric)).slice(0, 6);
   return (
-    <ChartPanel title="MTD preview" subtitle={`Current month through ${latestDate} · ${visibleDays} populated day${visibleDays === 1 ? '' : 's'}`} style={{ padding: 18 }}>
+    <ChartPanel title="Month preview" subtitle={`Selected month through ${latestDate} · ${visibleDays} populated day${visibleDays === 1 ? '' : 's'}`} style={{ padding: 18 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: 12 }}>
         {[
           ['Rows with data', `${rowsWithData}/${rows.length}`, 'var(--text)'],
@@ -922,6 +1221,7 @@ function ExecutiveSnapshot({ rows }) {
 
 export default function KpiPulsePage() {
   const [cadence, setCadence] = useState('daily');
+  const [selectedMonth, setSelectedMonth] = useState('');
   const [brands, setBrands] = useState(['ALL']);
   const [statuses, setStatuses] = useState(['ALL']);
   const [category, setCategory] = useState('ALL');
@@ -932,15 +1232,17 @@ export default function KpiPulsePage() {
 
   useEffect(() => {
     let alive = true;
-    getKpiPulse().then((d) => { if (alive) { setPulse(d); setLocalOverrides(d?.overrides || {}); } }).catch(() => { if (alive) setPulse(null); });
+    getKpiPulse({ month: selectedMonth }).then((d) => { if (alive) { setPulse(d); setLocalOverrides(d?.overrides || {}); } }).catch(() => { if (alive) setPulse(null); });
     return () => { alive = false; };
-  }, []);
+  }, [selectedMonth]);
 
   const cadenceData = pulse?.cadences?.[cadence] || null;
   const periods = useMemo(() => cadenceData?.periods || [], [cadenceData]);
 
   const normalizedBrands = useMemo(() => normalizeKpiBrands(brands), [brands]);
   const normalizedStatuses = useMemo(() => normalizeKpiStatuses(statuses), [statuses]);
+  const monthOptions = useMemo(() => (pulse?.availableMonths || []).map(m => ({ value: m, label: monthLabel(m) })), [pulse]);
+  const activeMonth = selectedMonth || pulse?.selectedMonth || monthOptions[0]?.value || '';
   const brandFilterSet = useMemo(() => new Set(normalizedBrands), [normalizedBrands]);
   const statusFilterSet = useMemo(() => new Set(normalizedStatuses.map(s => s.toLowerCase())), [normalizedStatuses]);
 
@@ -980,12 +1282,13 @@ export default function KpiPulsePage() {
   const handleRowEdit = (row, patch) => saveOverride(rowOverrideKey(row), patch);
   const handleCellEdit = (row, period, value) => saveOverride(cellOverrideKey(row, period), { value });
 
-  const selected = selectedMetric && rows.find(r => r.metric === selectedMetric.metric && r.brand === selectedMetric.brand)
-    ? rows.find(r => r.metric === selectedMetric.metric && r.brand === selectedMetric.brand)
+  const selected = selectedMetric && rows.find(r => r.metric === selectedMetric.metric && r.brand === selectedMetric.brand && r.department === selectedMetric.department)
+    ? rows.find(r => r.metric === selectedMetric.metric && r.brand === selectedMetric.brand && r.department === selectedMetric.department)
     : rows[0];
 
   const filterSummary = [
     KPI_CADENCE_OPTIONS.find(o => o.value === cadence)?.label || 'Daily',
+    ['daily', 'weekly'].includes(cadence) && activeMonth && monthLabel(activeMonth),
     !normalizedBrands.includes('ALL') && multiFilterLabel(normalizedBrands, KPI_BRAND_OPTIONS),
     category !== 'ALL' && KPI_CATEGORY_OPTIONS.find(o => o.value === category)?.label,
     !normalizedStatuses.includes('ALL') && multiFilterLabel(normalizedStatuses, KPI_STATUS_OPTIONS),
@@ -1011,8 +1314,8 @@ export default function KpiPulsePage() {
         <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ color: 'var(--text3)', fontSize: 12, lineHeight: 1.45, flex: '1 1 420px' }}>
             Leadership KPI matrix across NOBL and FLO. Metrics available in the database — revenue, blended &amp; geo MER,
-            AOV, Amazon share, and NOBL Air attach / activation / trial-to-paid — are computed live for daily, weekly, and
-            quarterly periods (and advance automatically each day). Metrics with no database source are shown blank.
+            AOV, Amazon share, and NOBL Air attach / activation / trial-to-paid — are computed live for daily, weekly,
+            and quarterly periods (and advance automatically each day). Metrics with no database source are shown blank.
           </div>
           {pulse?.asOf && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 20, padding: '3px 10px', whiteSpace: 'nowrap' }}>
@@ -1039,6 +1342,17 @@ export default function KpiPulsePage() {
             minWidth={150}
             compact
           />
+
+          {['daily', 'weekly'].includes(cadence) && monthOptions.length > 0 && (
+            <SingleFilterSelect
+              label="Month"
+              value={activeMonth}
+              onChange={setSelectedMonth}
+              options={monthOptions}
+              minWidth={150}
+              compact
+            />
+          )}
 
           <FilterMultiSelect
             label="Brand"

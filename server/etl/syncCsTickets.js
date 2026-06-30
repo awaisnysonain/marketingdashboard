@@ -155,6 +155,24 @@ function nodeHasPhone(node, searchPhone) {
   ].some((v) => phoneDigitAliases(v).some((a) => searchAliases.has(a)));
 }
 
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+async function fetchWithRetry(url, options, attempts = 3) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok || ![408, 425, 429, 500, 502, 503, 504].includes(res.status) || attempt === attempts) return res;
+      lastError = new Error(`HTTP ${res.status}`);
+    } catch (e) {
+      lastError = e;
+      if (attempt === attempts) throw e;
+    }
+    await sleep(750 * attempt);
+  }
+  throw lastError || new Error('fetch failed');
+}
+
 function regionFromCountryCode(cc) {
   const c = String(cc || '').toUpperCase();
   if (c === 'US') return 'us';
@@ -212,7 +230,7 @@ async function shopifyGraphql(storeKey, query) {
   const apiVersions = [...new Set([config.gqlApiVersion, config.apiVersion, SHOPIFY_GQL_FALLBACK_API_VERSION].filter(Boolean))];
   let lastError = null;
   for (const apiVersion of apiVersions) {
-    const res = await fetch(`https://${config.store}.myshopify.com/admin/api/${apiVersion}/graphql.json`, {
+    const res = await fetchWithRetry(`https://${config.store}.myshopify.com/admin/api/${apiVersion}/graphql.json`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Shopify-Access-Token': config.token },
       body: JSON.stringify({ query }),
@@ -651,7 +669,13 @@ async function runCsTickets(opts = {}) {
 
       const row = aggregateCounts(dbConfig.brand, day, tickets, closed);
       summary.push(row);
-      if (commit) await upsertRow(row, sourceError);
+      if (commit) {
+        // If Mongo is temporarily unreachable, do not replace a previously good
+        // row with an all-zero placeholder. Missing/error is safer than fake zeros.
+        const sourceFetchFailed = sourceError && !tickets.length && !closed.effective && !closed.attempted;
+        if (sourceFetchFailed) console.warn(`[CsTickets] skip zero/error upsert for ${dbConfig.brand} ${day}: ${sourceError}`);
+        else await upsertRow(row, sourceError);
+      }
     }
     if (commit) totalWritten += summary.filter((r) => r.brand === dbConfig.brand).length;
   }

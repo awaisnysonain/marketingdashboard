@@ -380,7 +380,7 @@ async function syncTWOrders(brand, startDate, endDate) {
     ORDER BY order_date DESC
   `;
 
-  const rows = await twSqlQuery(brand, sql);
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWOrders ${brand}: no rows`);
     return { rows: 0, errors };
@@ -462,7 +462,7 @@ async function syncTWSessions(brand, startDate, endDate) {
     ORDER BY session_date DESC
   `;
 
-  const rows = await twSqlQuery(brand, sql);
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWSessions ${brand}: no rows`);
     return { rows: 0, errors };
@@ -546,7 +546,7 @@ async function syncTWCustomers(brand) {
     ORDER BY total_spent DESC
   `;
 
-  const rows = await twSqlQuery(brand, sql);
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWCustomers ${brand}: no rows`);
     return { rows: 0, errors };
@@ -677,20 +677,20 @@ async function syncTWSegments(brand) {
 async function syncTWRefunds(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
-  const dr = chDateRange('refund_date', startDate, endDate);
+  const dr = chDateRange('event_date', startDate, endDate);
 
   const sql = `
     SELECT
-      refund_date                              AS date,
-      COUNT(DISTINCT refund_id)                AS refund_count,
-      SUM(refund_amount)                       AS refund_amount,
-      AVG(refund_amount)                       AS avg_refund_amount,
-      AVG(days_to_refund)                      AS avg_days_to_refund,
-      SUM(quantity_refunded)                   AS units_refunded
+      event_date                               AS date,
+      uniq(refund_id)                          AS refund_count,
+      abs(SUM(ifNull(total_refunded_price, ifNull(refunded_price, 0)))) AS refund_amount,
+      abs(AVG(ifNull(total_refunded_price, ifNull(refunded_price, 0)))) AS avg_refund_amount,
+      AVG(dateDiff('day', order_date, event_date)) AS avg_days_to_refund,
+      0                                        AS units_refunded
     FROM refunds_table
     WHERE ${dr}
-    GROUP BY refund_date
-    ORDER BY refund_date DESC
+    GROUP BY event_date
+    ORDER BY event_date DESC
   `;
 
   const rows = await twSqlQuery(brand, sql);
@@ -737,31 +737,31 @@ async function syncTWRefunds(brand, startDate, endDate) {
 async function syncTWEmailSms(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
-  const dr = chDateRange('date', startDate, endDate);
+  const dr = chDateRange('event_date', startDate, endDate);
 
   const sql = `
     SELECT
-      date,
-      platform,
-      channel,
-      campaign_name,
-      message_type,
-      SUM(sent)           AS sent,
-      SUM(delivered)      AS delivered,
-      SUM(opens)          AS opens,
-      SUM(unique_opens)   AS unique_opens,
-      SUM(clicks)         AS clicks,
-      SUM(unique_clicks)  AS unique_clicks,
-      SUM(unsubscribes)   AS unsubscribes,
-      SUM(conversions)    AS conversions,
-      SUM(revenue)        AS revenue
+      event_date AS date,
+      'email_sms' AS platform,
+      if(lower(concat_ws(' ', channel, channel_type, report_type)) LIKE '%sms%', 'sms', 'email') AS channel,
+      '' AS campaign_name,
+      ifNull(toString(report_type), 'campaign') AS message_type,
+      SUM(ifNull(sent, 0)) AS sent,
+      SUM(ifNull(delivered, 0)) AS delivered,
+      SUM(ifNull(opened, 0)) AS opens,
+      SUM(ifNull(opens_unique, 0)) AS unique_opens,
+      SUM(ifNull(clicks, 0)) AS clicks,
+      SUM(ifNull(clicks_unique, 0)) AS unique_clicks,
+      SUM(ifNull(unsubscribed, 0)) AS unsubscribes,
+      SUM(ifNull(conversions, 0)) AS conversions,
+      SUM(ifNull(conversion_value, 0)) AS revenue
     FROM email_sms_table
     WHERE ${dr}
-    GROUP BY date, platform, channel, campaign_name, message_type
-    ORDER BY date DESC, revenue DESC
+    GROUP BY event_date, channel, message_type
+    ORDER BY event_date DESC, revenue DESC
   `;
 
-  const rows = await twSqlQuery(brand, sql);
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWEmailSms ${brand}: no rows`);
     return { rows: 0, errors };

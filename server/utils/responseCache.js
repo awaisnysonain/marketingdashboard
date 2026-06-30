@@ -1,6 +1,9 @@
 const stores = new Map();
 const MAX_ENTRIES_PER_STORE = parseInt(process.env.RESPONSE_CACHE_MAX || '150', 10);
 const TTL_MS = parseInt(process.env.CACHE_TTL_SECONDS || '300', 10) * 1000;
+const STORE_TTL_MS = {
+  'kpi-pulse': parseInt(process.env.KPI_PULSE_CACHE_TTL_SECONDS || '1800', 10) * 1000,
+};
 
 function getStore(name) {
   if (!stores.has(name)) stores.set(name, new Map());
@@ -22,7 +25,7 @@ async function withResponseCache(storeName, cacheKey, dataVersion, compute) {
   const entry = store.get(cacheKey);
   const fresh = entry
     && entry.dataVersion === dataVersion
-    && Date.now() - entry.at < TTL_MS;
+    && Date.now() - entry.at < (STORE_TTL_MS[storeName] || TTL_MS);
   if (fresh) {
     return { body: entry.body, hit: true, store: storeName };
   }

@@ -210,12 +210,15 @@ export const getDataBounds = () =>
   ).then((x) => x.data);
 
 /** Leadership KPI matrix (daily/weekly/quarterly) computed from existing DB tables. */
-export const getKpiPulse = () =>
-  fetch(`${B}/api/analytics/kpi-pulse?ts=${Date.now()}`).then(async (r) => {
+export const getKpiPulse = ({ month } = {}) => {
+  const qs = new URLSearchParams({ ts: String(Date.now()) });
+  if (month) qs.set('month', month);
+  return fetch(`${B}/api/analytics/kpi-pulse?${qs.toString()}`).then(async (r) => {
     const d = await r.json();
     if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
     return d;
   });
+};
 
 export const saveKpiPulseOverride = (key, payload) =>
   fetch(`${B}/api/analytics/kpi-pulse/overrides`, {
