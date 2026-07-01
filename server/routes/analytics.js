@@ -109,7 +109,17 @@ function appendQuery(url, params = {}) {
   return u.toString();
 }
 
-function parseDauMauStickiness(payload) {
+function parseDauMauMetric(payload, brand) {
+  // FLO label is DAU / MAU stickiness. NOBL's legacy Daily Pulse label for the
+  // same internal series key is "MAU / Active Subs", so it intentionally uses a
+  // different numerator/denominator from the NOBL tag API.
+  if (brand === 'NOBL') {
+    const direct = findNumericDeep(payload, ['mauActiveSubscribersRatio', 'mau_active_subscribers_ratio', 'mauActiveSubsRatio']);
+    if (direct != null) return direct;
+    const mau = findNumericDeep(payload, ['mauCount', 'mau', 'monthlyActiveUsers', 'monthly_active_users']);
+    const activeSubs = findNumericDeep(payload, ['activeSubscribersAmongMau', 'active_subscribers_among_mau', 'activeSubscribers']);
+    return (mau != null && activeSubs > 0) ? mau / activeSubs : null;
+  }
   const direct = findNumericDeep(payload, ['stickiness', 'dauMau', 'dau_mau', 'dauMauRatio', 'dau_mau_ratio', 'ratio']);
   if (direct != null) return direct > 1 ? direct / 100 : direct;
   const dau = findNumericDeep(payload, ['dau', 'dauCount', 'dailyActiveUsers', 'daily_active_users', 'activeUsers24h', 'active_users_24h', 'activeUsers']);
@@ -117,7 +127,20 @@ function parseDauMauStickiness(payload) {
   return (dau != null && mau > 0) ? dau / mau : null;
 }
 
-async function fetchDauMauMetric(brand) {
+function parseSessionDensity(payload, brand) {
+  if (brand === 'NOBL') {
+    const sessions = findNumericDeep(payload, ['sessionsInMauWindowCount', 'sessions_in_mau_window_count', 'totalSessionCount']);
+    const mau = findNumericDeep(payload, ['mau', 'mauCount', 'monthlyActiveUsers', 'monthly_active_users']);
+    return (sessions != null && mau > 0) ? sessions / mau : null;
+  }
+  const sessions = findNumericDeep(payload, ['totalSessionCountDauDay', 'sessionsPerDauNumerator', 'sessions_in_dau_day', 'sessions']);
+  const dau = findNumericDeep(payload, ['dau', 'dauCount', 'dailyActiveUsers', 'daily_active_users']);
+  const direct = findNumericDeep(payload, ['sessionsPerDau', 'sessions_per_dau']);
+  if (direct != null) return direct;
+  return (sessions != null && dau > 0) ? sessions / dau : null;
+}
+
+async function fetchDauMauMetrics(brand) {
   const isNobl = brand === 'NOBL';
   const baseUrl = isNobl ? process.env.NOBL_TAG_DAU_MAU_URL : process.env.FLO_DAU_MAU_URL;
   const token = isNobl ? process.env.NOBL_TAG_DAU_MAU_SECRET : process.env.FLO_DAU_MAU_API_KEY;
@@ -129,7 +152,11 @@ async function fetchDauMauMetric(brand) {
     timeoutMs: 12000,
     attempts: 1,
   });
-  return parseDauMauStickiness(payload);
+  return {
+    dau_mau_stickiness: parseDauMauMetric(payload, brand),
+    sessions_per_mau: brand === 'NOBL' ? parseSessionDensity(payload, brand) : null,
+    sessions_per_dau: brand === 'FLO' ? parseSessionDensity(payload, brand) : null,
+  };
 }
 
 function envList(name) {
@@ -174,15 +201,15 @@ async function fetchKpiPulseLiveMetrics() {
   // DAU/MAU cloud functions are lightweight but can be picky about concurrent
   // calls/headers. Fetch them first and sequentially, then run PageSpeed in
   // parallel (PageSpeed is the slow source).
-  const floDau = await safe(fetchDauMauMetric('FLO'));
-  const noblDau = await safe(fetchDauMauMetric('NOBL'));
+  const floDau = await safe(fetchDauMauMetrics('FLO'));
+  const noblDau = await safe(fetchDauMauMetrics('NOBL'));
   const [noblPs, floPs] = await Promise.all([
     safe(fetchPageSpeedMetric('NOBL')),
     safe(fetchPageSpeedMetric('FLO')),
   ]);
   return {
-    NOBL: { dau_mau_stickiness: noblDau, pagespeed_pdp_aio: noblPs },
-    FLO:  { dau_mau_stickiness: floDau,  pagespeed_pdp_aio: floPs },
+    NOBL: { ...(noblDau || {}), pagespeed_pdp_aio: noblPs },
+    FLO:  { ...(floDau || {}),  pagespeed_pdp_aio: floPs },
   };
 }
 
@@ -2666,7 +2693,7 @@ router.get('/kpi-pulse', async (req, res) => {
   try {
     const version = await getDataVersion();
     const requestedMonth = /^\d{4}-\d{2}$/.test(String(req.query.month || '')) ? String(req.query.month) : null;
-    const { body } = await withResponseCache('kpi-pulse', `kpi-pulse:${requestedMonth || 'latest'}:live:${kpiLiveMetricsCache.ts || 0}`, version, async () => {
+    const { body } = await withResponseCache('kpi-pulse', `kpi-pulse:${requestedMonth || 'latest'}`, version, async () => {
       const year = new Date().getUTCFullYear();
       const start = `${year}-01-01`;
       const end = `${year}-12-31`;
@@ -3006,6 +3033,7 @@ router.get('/kpi-pulse', async (req, res) => {
         let klavNrev = 0, klavFrev = 0, klavNseen = false, klavFseen = false; // eslint-disable-line no-unused-vars
         let twEmailNrev = 0, twSmsNrev = 0, twEmailOnlyNrev = 0, twUnsubN = 0, twDeliveredN = 0, twEmailNseen = false;
         let twEmailFrev = 0, twSmsFrev = 0, twEmailOnlyFrev = 0, twUnsubF = 0, twDeliveredF = 0, twEmailFseen = false;
+        let twRefundNseen = false, twRefundFseen = false, twRefundNdenom = 0, twRefundFdenom = 0;
         // Air subs in window
         let airNew = 0, airCanc = 0;
         // FLO IAP subs (snapshot=last act, sum new/cs)
@@ -3019,8 +3047,8 @@ router.get('/kpi-pulse', async (req, res) => {
         const cbShopRegion = { n: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 }, f: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 } };
 
         for (const d of dates) {
-          const n = nMap[d]; if (n) { hasN = true; a.n.rev+=n.rev; a.n.gmd+=n.gmd; a.n.spend+=n.spend; a.n.orders+=n.orders; a.n.amazon+=n.amazon; a.n.tsales+=n.tsales; a.n.refund+=n.refund; }
-          const f = fMap[d]; if (f) { hasF = true; a.f.rev+=f.rev; a.f.gmd+=f.gmd; a.f.spend+=f.spend; a.f.orders+=f.orders; a.f.amazon+=f.amazon; a.f.tsales+=f.tsales; a.f.refund+=f.refund; }
+          const n = nMap[d]; if (n) { hasN = true; a.n.rev+=n.rev; a.n.gmd+=n.gmd; a.n.spend+=n.spend; a.n.orders+=n.orders; a.n.amazon+=n.amazon; a.n.tsales+=n.tsales; }
+          const f = fMap[d]; if (f) { hasF = true; a.f.rev+=f.rev; a.f.gmd+=f.gmd; a.f.spend+=f.spend; a.f.orders+=f.orders; a.f.amazon+=f.amazon; a.f.tsales+=f.tsales; }
           const sd = shopifyStatsByDay[d];
           if (sd?.NOBL) { shop.n.orders += sd.NOBL.orders; shop.n.revenue += sd.NOBL.revenue; shop.n.discounts += sd.NOBL.discounts; }
           if (sd?.FLO)  { shop.f.orders += sd.FLO.orders;  shop.f.revenue += sd.FLO.revenue;  shop.f.discounts += sd.FLO.discounts; }
@@ -3066,8 +3094,8 @@ router.get('/kpi-pulse', async (req, res) => {
 
           const ten = twEmailN[d]; if (ten) { twEmailNrev += ten.revenue; twSmsNrev += ten.sms; twEmailOnlyNrev += ten.email; twUnsubN += ten.unsubscribes; twDeliveredN += ten.delivered; twEmailNseen = true; }
           const tef = twEmailF[d]; if (tef) { twEmailFrev += tef.revenue; twSmsFrev += tef.sms; twEmailOnlyFrev += tef.email; twUnsubF += tef.unsubscribes; twDeliveredF += tef.delivered; twEmailFseen = true; }
-          const trn = twRefundN[d]; if (trn) a.n.refund += trn.refund;
-          const trf = twRefundF[d]; if (trf) a.f.refund += trf.refund;
+          const trn = twRefundN[d]; if (trn) { a.n.refund += trn.refund; twRefundNdenom += nMap[d]?.rev || 0; twRefundNseen = true; }
+          const trf = twRefundF[d]; if (trf) { a.f.refund += trf.refund; twRefundFdenom += fMap[d]?.rev || 0; twRefundFseen = true; }
 
           const as = airSubsByDay[d]; if (as) { airNew += as.new; airCanc += as.canc; }
           const fi = floIapSubsByDay[d]; if (fi) { floIapActs.push(fi.act); floIapNs += fi.ns; floIapCs += fi.cs; }
@@ -3149,7 +3177,7 @@ router.get('/kpi-pulse', async (req, res) => {
             test_spend_pct: hasTwAdsN ? div(tw.n.test, tw.n.s) : null,
             tof_spend_pct: hasTwAdsN ? div(Math.max(0, tw.n.s - tw.n.bof), tw.n.s) : null,
             tof_bof_spend_split: hasTwAdsN ? tofBofSplit(tw.n) : null,
-            refund_rate: div(a.n.refund, a.n.rev),
+            refund_rate: twRefundNseen ? div(a.n.refund, twRefundNdenom) : null,
             retention_rev_pct: twEmailNseen ? div(twEmailNrev, nSalesBase) : null,
             sms_sales_pct: twEmailNseen ? div(twSmsNrev, nSalesBase) : null,
             email_sales_pct: twEmailNseen ? div(twEmailOnlyNrev, nSalesBase) : null,
@@ -3197,7 +3225,7 @@ router.get('/kpi-pulse', async (req, res) => {
             test_spend_pct: hasTwAdsF ? div(tw.f.test, tw.f.s) : null,
             tof_spend_pct: hasTwAdsF ? div(Math.max(0, tw.f.s - tw.f.bof), tw.f.s) : null,
             tof_bof_spend_split: hasTwAdsF ? tofBofSplit(tw.f) : null,
-            refund_rate: div(a.f.refund, a.f.rev),
+            refund_rate: twRefundFseen ? div(a.f.refund, twRefundFdenom) : null,
             retention_rev_pct: twEmailFseen ? div(twEmailFrev, fSalesBase) : null,
             sms_sales_pct: twEmailFseen ? div(twSmsFrev, fSalesBase) : null,
             email_sales_pct: twEmailFseen ? div(twEmailOnlyFrev, fSalesBase) : null,
@@ -3222,17 +3250,17 @@ router.get('/kpi-pulse', async (req, res) => {
 
       const KN = [
         'mer','sales','aov','amazon_pct','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct',
-        'air_rev_pct','attach','ttp','activation','pagespeed_pdp_aio','dau_mau_stickiness',
+        'air_rev_pct','attach','ttp','activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
-        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','new_customer_cac','bundle_rev_pct','net_sub_adds',
+        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','new_customer_cac','bundle_rev_pct','net_sub_adds',
         'sos_taylor','sos_franz','sos_luke','sos_chris',
       ];
       const KF = [
-        'mer','sales','aov','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','pagespeed_pdp_aio','dau_mau_stickiness',
+        'mer','sales','aov','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_dau',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
-        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','returning_cust_rev_pct',
+        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','returning_cust_rev_pct',
         'sos_chris','portable_cac','studio_cac','home_cac','home_studio_cac',
       ];
       function buildCadence(defs) {
@@ -3248,11 +3276,12 @@ router.get('/kpi-pulse', async (req, res) => {
       }
 
       function applyLiveMetrics(cadenceData, liveMetrics) {
+        if (!liveMetrics || !cadenceData?.periods?.length) return cadenceData;
         // Live APIs are current snapshots, not historical series. Only stamp
-        // them onto the latest daily column; never onto past months/weeks/QTD.
-        if (cadenceData?.periods?.[0]?.key !== latest) return cadenceData;
+        // them onto the latest visible period (daily/latest week/current QTD),
+        // never onto older periods.
         for (const brand of ['NOBL', 'FLO']) {
-          for (const key of ['pagespeed_pdp_aio', 'dau_mau_stickiness']) {
+          for (const key of ['pagespeed_pdp_aio', 'dau_mau_stickiness', 'sessions_per_mau', 'sessions_per_dau']) {
             const v = liveMetrics?.[brand]?.[key];
             if (v == null || !Number.isFinite(Number(v)) || !cadenceData.series?.[brand]?.[key]) continue;
             cadenceData.series[brand][key] = cadenceData.periods.map((_, idx) => (idx === 0 ? Number(v) : null));
@@ -3304,7 +3333,7 @@ router.get('/kpi-pulse', async (req, res) => {
         },
         overrides,
       };
-    });
+    }, { staleWhileRevalidate: true });
     res.json(body);
   } catch (e) {
     console.error('[Analytics /kpi-pulse]', e.message);

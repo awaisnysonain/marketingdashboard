@@ -211,9 +211,10 @@ export const getDataBounds = () =>
 
 /** Leadership KPI matrix (daily/weekly/quarterly) computed from existing DB tables. */
 export const getKpiPulse = ({ month } = {}) => {
-  const qs = new URLSearchParams({ ts: String(Date.now()) });
+  const qs = new URLSearchParams();
   if (month) qs.set('month', month);
-  return fetch(`${B}/api/analytics/kpi-pulse?${qs.toString()}`).then(async (r) => {
+  const suffix = qs.toString() ? `?${qs.toString()}` : '';
+  return fetch(`${B}/api/analytics/kpi-pulse${suffix}`).then(async (r) => {
     const d = await r.json();
     if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
     return d;

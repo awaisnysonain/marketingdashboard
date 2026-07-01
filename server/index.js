@@ -1362,7 +1362,7 @@ app.use('/api/store', requireAppAuth, storeRouter);
 // Each run syncs through yesterday (PKT calendar date):
 //   1. Auto-cleanup any stuck "running" entries from previous failures
 //   2. Find missing days in the last 7d and include them in the range
-//   3. Run ALL 10 ETL tasks
+//   3. Run all daily ETL tasks used by dashboards/KPI Pulse
 //   4. Email muhammad.awais@nysonian.com on errors / stuck runs / missing data
 //   5. Full timeout protection (60-min hard cap on the whole run)
 //
@@ -1376,6 +1376,8 @@ const ALL_DAILY_TASKS = [
   'klaviyo',
   'tw_refresh',          // brand-level summary (TW Summary API)
   'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
+  'tw_refunds',          // TW refunds_table → tw_refunds_daily (KPI Pulse refund rate)
+  'tw_email_sms',        // TW email_sms_table → retention/email/SMS/unsub KPI rows
   'meta_ads',            // Meta Marketing API — per-brand ad spend (NOBL + FLO; TW fallback at read)
   'tw_ads',              // campaign/adset/ad performance from TW
   'tw_air_attribution',  // NOBL Air order-level attribution
@@ -1388,6 +1390,7 @@ const ALL_DAILY_TASKS = [
   'iap',                 // Apple App Store + Google Play IAP revenue → iap_daily (self-widens ~45d for late Play earnings)
   'ops_metrics',         // ERP shipments + UPS + unfulfilled → ops_metrics_daily (KPI Pulse Ops rows)
   'cs_tickets',          // crmdb + flodb Mongo → cs_tickets_daily (KPI Pulse CS rows)
+  'shopify_disputes',    // Shopify Payments disputes GraphQL/REST → chargeback KPI rows
 ];
 
 // Live/Snapshot page — lightweight hourly refresh (summary + channel + geo via tw_refresh)
@@ -1445,8 +1448,16 @@ if (!CRON_ENABLED) {
     // After a cron run, verify yesterday's data actually landed for both brands.
     const checks = [
       { table: 'tw_summary_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_summary_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'tw_geo_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_geo_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'tw_ads_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_ads_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'meta_ads_daily', sql: `SELECT brand, COUNT(*)::int n FROM meta_ads_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'tw_refunds_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_refunds_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'tw_email_sms_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_email_sms_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
       { table: 'shopify_orders_raw', sql: `SELECT brand, COUNT(*)::int n FROM shopify_orders_raw WHERE date_key = $1::date GROUP BY brand`, expect: 2 },
       { table: 'nobl_air_daily', sql: `SELECT 'na' AS brand, COUNT(*)::int n FROM nobl_air_daily WHERE date = $1::date`, expect: 1 },
+      { table: 'ops_metrics_daily', sql: `SELECT brand, COUNT(*)::int n FROM ops_metrics_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'cs_tickets_daily', sql: `SELECT brand, COUNT(*)::int n FROM cs_tickets_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'shopify_disputes_daily', sql: `SELECT brand, COUNT(*)::int n FROM shopify_disputes_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
     ];
     const issues = [];
     for (const c of checks) {

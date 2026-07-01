@@ -68,10 +68,59 @@ async function fetchStoreDisputes(store, start, end) {
   return out;
 }
 
+async function fetchStoreDisputesGraphql(store, start, end) {
+  const shop = normShop(store.shop);
+  const url = `https://${shop}/admin/api/2024-10/graphql.json`;
+  const query = `query($q:String!, $after:String) {
+    disputes(first: 100, after: $after, query: $q) {
+      pageInfo { hasNextPage endCursor }
+      edges { node {
+        id initiatedAt type status
+        amount { amount currencyCode }
+        order { id name shippingAddress { countryCodeV2 country } }
+      } }
+    }
+  }`;
+  const search = `initiated_at:>=${start} initiated_at:<=${end}`;
+  const out = [];
+  let after = null;
+  for (;;) {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'X-Shopify-Access-Token': store.token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables: { q: search, after } }),
+    });
+    const text = await res.text();
+    if (!res.ok) throw new Error(`${store.key} Shopify disputes GraphQL HTTP ${res.status}: ${text.slice(0, 300)}`);
+    const body = JSON.parse(text);
+    if (body.errors?.length) throw new Error(`${store.key} Shopify disputes GraphQL errors: ${JSON.stringify(body.errors).slice(0, 300)}`);
+    const conn = body.data?.disputes;
+    for (const edge of conn?.edges || []) {
+      const d = edge.node || {};
+      out.push({
+        id: d.id,
+        initiated_at: d.initiatedAt,
+        type: String(d.type || '').toLowerCase(),
+        status: d.status,
+        amount: d.amount?.amount,
+        currency: d.amount?.currencyCode,
+        order_id: d.order?.id,
+        order_name: d.order?.name,
+        _shippingCountry: d.order?.shippingAddress?.countryCodeV2 || d.order?.shippingAddress?.country,
+        _storeKey: store.key,
+        _fallbackRegion: store.fallbackRegion,
+      });
+    }
+    if (!conn?.pageInfo?.hasNextPage) break;
+    after = conn.pageInfo.endCursor;
+  }
+  return out;
+}
+
 async function loadOrderRegions(brand, disputes) {
   const ids = [...new Set(disputes.map(d => String(d.order_id || '')).filter(Boolean))];
   if (!ids.length) return new Map();
-  const gids = ids.map(id => `gid://shopify/Order/${id}`);
+  const gids = ids.map(id => id.startsWith('gid://') ? id : `gid://shopify/Order/${id}`);
   const out = new Map();
   for (let i = 0; i < gids.length; i += 500) {
     const chunk = gids.slice(i, i + 500);
@@ -79,9 +128,20 @@ async function loadOrderRegions(brand, disputes) {
       `SELECT order_id, shipping_country FROM shopify_orders_raw WHERE brand=$1 AND order_id = ANY($2::text[])`,
       [brand, chunk]
     );
-    for (const row of r.rows) out.set(String(row.order_id).replace('gid://shopify/Order/', ''), regionFromCountry(row.shipping_country));
+    for (const row of r.rows) {
+      const gid = String(row.order_id || '');
+      const numeric = gid.replace('gid://shopify/Order/', '');
+      const region = regionFromCountry(row.shipping_country);
+      out.set(gid, region);
+      out.set(numeric, region);
+    }
   }
   return out;
+}
+
+function disputeAmount(d) {
+  if (d?.amount && typeof d.amount === 'object') return Number(d.amount.amount || 0) || 0;
+  return Number(d?.amount || 0) || 0;
 }
 
 async function upsertBrandRows(brand, byDate) {
@@ -130,8 +190,15 @@ async function runShopifyDisputes(opts = {}) {
         disputes.push(...rows);
         console.log(`[ShopifyDisputes] ${store.key}: ${rows.length} dispute(s)`);
       } catch (e) {
-        errors.push(e.message);
         console.warn(`[ShopifyDisputes] ${e.message}`);
+        try {
+          const rows = await fetchStoreDisputesGraphql(store, start, end);
+          disputes.push(...rows);
+          console.log(`[ShopifyDisputes] ${store.key}: ${rows.length} dispute(s) via GraphQL fallback`);
+        } catch (gqlErr) {
+          errors.push(`${e.message}; GraphQL fallback failed: ${gqlErr.message}`);
+          console.warn(`[ShopifyDisputes] GraphQL fallback failed: ${gqlErr.message}`);
+        }
       }
     }
     const orderRegions = await loadOrderRegions(brand, disputes);
@@ -141,13 +208,15 @@ async function runShopifyDisputes(opts = {}) {
       if (!date || date < start || date > end) continue;
       if (!byDate.has(date)) byDate.set(date, { dispute_count: 0, chargeback_count: 0, US: 0, CA: 0, AU: 0, UK: 0, OTHER: 0, dispute_amount: 0, chargeback_amount: 0, source_error: errors.join('; ') });
       const row = byDate.get(date);
-      const amount = Number(d.amount || 0);
+      const amount = disputeAmount(d);
       row.dispute_count += 1;
       row.dispute_amount += amount;
       if (String(d.type || '').toLowerCase() === 'chargeback') {
         row.chargeback_count += 1;
         row.chargeback_amount += amount;
-        const region = orderRegions.get(String(d.order_id || '')) || regionFromCountry(null, d._fallbackRegion);
+        const region = d._shippingCountry
+          ? regionFromCountry(d._shippingCountry)
+          : (orderRegions.get(String(d.order_id || '')) || regionFromCountry(null, d._fallbackRegion));
         row[region] = (row[region] || 0) + 1;
       }
     }

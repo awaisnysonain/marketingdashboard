@@ -27,6 +27,7 @@ const {
   syncTWBenchmarks,
   syncTWOrderRevenue,
 } = require('./twFullSync');
+const { runShopifyDisputes } = require('./syncShopifyDisputes');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -723,6 +724,21 @@ async function runSync(options = {}) {
     }
   }
 
+  // ── Shopify Payments disputes/chargebacks → shopify_disputes_daily ───
+  if (tasks.includes('shopify_disputes')) {
+    const logId = await logStart(runId, 'ALL', 'shopify_disputes', startDate, endDate);
+    try {
+      const r = await runShopifyDisputes({ start: startDate, end: endDate, commit: true, brands });
+      await logFinish(logId, 'success', r.rows, (r.summaries || []).flatMap(s => s.errors || []).join('; ') || null);
+      results.push({ task: 'shopify_disputes', rows: r.rows, summaries: r.summaries });
+    } catch (e) {
+      const msg = `shopify_disputes ${startDate}-${endDate}: ${e.message}`;
+      console.error('[SyncEngine]', msg);
+      errors.push(msg);
+      await logFinish(logId, 'error', 0, e.message);
+    }
+  }
+
   // ── IAP sync (Apple App Store + Google Play → iap_daily) ────────────
   if (tasks.includes('iap')) {
     // Google earnings reports publish ~1 month late, so always re-sync a wider
@@ -747,6 +763,12 @@ async function runSync(options = {}) {
 
   const duration = Date.now() - t0;
   const totalRows = results.reduce((s, r) => s + (r.rows || 0), 0);
+  const KPI_PULSE_TASKS = new Set([
+    'tw_refresh', 'tw_geo', 'tw_ads', 'tw_order_revenue', 'tw_refunds', 'tw_email_sms',
+    'meta_ads', 'shopify_orders', 'nobl_air_aggregate', 'product_daily', 'ops_metrics',
+    'cs_tickets', 'shopify_disputes', 'iap', 'appstle_contracts',
+  ]);
+  if (tasks.some(t => KPI_PULSE_TASKS.has(t))) clearResponseCache('kpi-pulse');
   console.log(`[SyncEngine] ✓ Run ${runId} complete in ${(duration / 1000).toFixed(1)}s | ${totalRows} rows total | ${errors.length} errors`);
 
   return { runId, results, errors, duration, totalRows };

@@ -22,6 +22,18 @@ const TASK_CATALOG = {
     populates: ['tw_summary_daily.order_revenue', 'shopify_revenue', 'amazon_revenue'],
     impact: 'Headline Order Revenue and blended MER could be wrong/stale; the Shopify-vs-Amazon split will be missing.',
   },
+  tw_refunds: {
+    label: 'Triple Whale refund daily aggregate',
+    script: 'server/etl/twFullSync.js → syncTWRefunds()',
+    populates: ['tw_refunds_daily'],
+    impact: 'KPI Pulse Total Refund Rate will be blank/stale for affected day(s).',
+  },
+  tw_email_sms: {
+    label: 'Triple Whale Email/SMS revenue and unsubscribe metrics',
+    script: 'server/etl/twFullSync.js → syncTWEmailSms()',
+    populates: ['tw_email_sms_daily'],
+    impact: 'KPI Pulse Retention Rev %, SMS %, Email %, and Unsubscribe Rate will be blank/stale for affected day(s).',
+  },
   meta_ads: {
     label: 'Meta Marketing API ad spend (NOBL + FLO)',
     script: 'server/etl/metaAdsSync.js',
@@ -93,6 +105,12 @@ const TASK_CATALOG = {
     script: 'server/etl/syncCsTickets.js',
     populates: ['cs_tickets_daily'],
     impact: 'The KPI Pulse CS rows (CS Tickets % of Orders, region splits, effective closes) will be stale. Requires the two Mongo SSH tunnels (port 27018 → crmdb, port 27019 → flodb) to be active on the cron host.',
+  },
+  shopify_disputes: {
+    label: 'Shopify Payments disputes / chargeback rates',
+    script: 'server/etl/syncShopifyDisputes.js',
+    populates: ['shopify_disputes_daily'],
+    impact: 'KPI Pulse Total/Regional CB Rate rows will be blank/stale for affected day(s). Uses REST when scoped and GraphQL fallback for stores without REST dispute scope.',
   },
 };
 

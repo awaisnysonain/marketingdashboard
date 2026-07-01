@@ -187,6 +187,19 @@ function regionFromShopifyMatch(storeKey, countryCode) {
   return regionFromCountryCode(countryCode);
 }
 
+function storeKeyToRawStoreKeys(storeKey) {
+  return {
+    NOBL_SHOPIFY: ['NOBL_MAIN'],
+    NOBL_SHOPIFY_EU: ['NOBL_EU'],
+    NOBL_SHOPIFY_UK: ['NOBL_UK'],
+    FLO_SHOPIFY: ['FLO_MAIN', 'FLO_EU'],
+  }[storeKey] || [];
+}
+
+function brandFromStoreKeys(storeKeys) {
+  return storeKeys.some(k => String(k).startsWith('FLO')) ? 'FLO' : 'NOBL';
+}
+
 function toShopifyMatch(storeKey, node, matchMethod, searchValue) {
   if (!node) return null;
   const cc = node.shippingAddress?.countryCodeV2 || node.billingAddress?.countryCodeV2 || null;
@@ -195,6 +208,22 @@ function toShopifyMatch(storeKey, node, matchMethod, searchValue) {
     orderName: node.name, shopifyOrderId: node.id,
     orderCreatedAt: node.createdAt || null,
     country: node.shippingAddress?.country || node.billingAddress?.country || null,
+    countryCode: cc,
+    region: regionFromShopifyMatch(storeKey, cc),
+  };
+}
+
+function toDbShopifyMatch(storeKey, row, matchMethod, searchValue) {
+  if (!row) return null;
+  const cc = row.shipping_country || null;
+  return {
+    store: storeKey,
+    matchMethod,
+    searchValue,
+    orderName: row.order_name,
+    shopifyOrderId: row.order_id,
+    orderCreatedAt: row.created_at || null,
+    country: row.shipping_country || null,
     countryCode: cc,
     region: regionFromShopifyMatch(storeKey, cc),
   };
@@ -220,6 +249,10 @@ function mergeFirstMatch(...maps) {
 
 function isUnavailableShopifyStoreError(e) {
   return /Shopify HTTP (401|403|404)\b/.test(String(e?.message || e));
+}
+
+function isTransientShopifyStoreError(e) {
+  return /fetch failed|ECONN|ETIMEDOUT|timeout|aborted|Shopify HTTP (408|425|429|500|502|503|504)\b/i.test(String(e?.message || e));
 }
 
 // ── Shopify GraphQL helpers ──────────────────────────────────────────────────
@@ -250,10 +283,54 @@ async function shopifyGraphql(storeKey, query) {
 async function runStoreLookup(storeKey, label, fn, fallback) {
   try { return await fn(); }
   catch (e) {
-    if (!isUnavailableShopifyStoreError(e)) throw e;
+    if (!isUnavailableShopifyStoreError(e) && !isTransientShopifyStoreError(e)) throw e;
     console.warn(`[CsTickets] Skipping ${storeKey} ${label}: ${e.message}`);
     return fallback;
   }
+}
+
+async function lookupOrdersByNameFromDb(storeKey, orderNos) {
+  const results = new Map();
+  const unique = [...new Set(orderNos)].filter(Boolean);
+  const lookupNames = [...new Set(unique.flatMap(n => {
+    const s = String(n || '').trim();
+    return s.startsWith('#') ? [s, s.slice(1)] : [s, `#${s}`];
+  }))].filter(Boolean);
+  const rawStores = storeKeyToRawStoreKeys(storeKey);
+  if (!lookupNames.length || !rawStores.length) return results;
+  for (let i = 0; i < lookupNames.length; i += 500) {
+    const batch = lookupNames.slice(i, i + 500);
+    const r = await pgQuery(`
+      SELECT DISTINCT ON (order_name) order_name, order_id, created_at, shipping_country
+      FROM shopify_orders_raw
+      WHERE brand=$1 AND store_key = ANY($2::text[]) AND order_name = ANY($3::text[])
+      ORDER BY order_name, created_at DESC
+    `, [brandFromStoreKeys([storeKey]), rawStores, batch]);
+    for (const row of r.rows) {
+      const match = toDbShopifyMatch(storeKey, row, 'orderNoDb', row.order_name);
+      results.set(row.order_name, match);
+      results.set(String(row.order_name || '').replace(/^#/, ''), match);
+    }
+  }
+  return results;
+}
+
+async function lookupLastOrdersByEmailFromDb(storeKey, emails) {
+  const results = new Map();
+  const unique = [...new Set(emails.map(e => String(e || '').trim().toLowerCase()))].filter(Boolean);
+  const rawStores = storeKeyToRawStoreKeys(storeKey);
+  if (!unique.length || !rawStores.length) return results;
+  for (let i = 0; i < unique.length; i += 500) {
+    const batch = unique.slice(i, i + 500);
+    const r = await pgQuery(`
+      SELECT DISTINCT ON (lower(customer_email)) lower(customer_email) email_key, order_name, order_id, created_at, shipping_country
+      FROM shopify_orders_raw
+      WHERE brand=$1 AND store_key = ANY($2::text[]) AND lower(customer_email) = ANY($3::text[])
+      ORDER BY lower(customer_email), created_at DESC
+    `, [brandFromStoreKeys([storeKey]), rawStores, batch]);
+    for (const row of r.rows) results.set(row.email_key, toDbShopifyMatch(storeKey, row, 'emailLastOrderDb', row.email_key));
+  }
+  return results;
 }
 
 async function lookupOrdersByName(storeKey, orderNos) {
@@ -449,6 +526,9 @@ async function matchTicketsToShopify(tickets, storeKeys) {
   const orderMaps = [];
   let remainingOrderNos = orderNos;
   for (const sk of storeKeys) {
+    const db = await lookupOrdersByNameFromDb(sk, remainingOrderNos);
+    orderMaps.push(db);
+    remainingOrderNos = remainingOrderNos.filter((n) => !db.has(n));
     const m = await runStoreLookup(sk, 'order lookup', () => lookupOrdersByName(sk, remainingOrderNos), new Map());
     orderMaps.push(m);
     remainingOrderNos = remainingOrderNos.filter((n) => !m.has(n));
@@ -463,12 +543,15 @@ async function matchTicketsToShopify(tickets, storeKeys) {
   const emailLastMaps = [];
   let remainingEmails = [...new Set(afterOrder.filter((t) => !t.shopify).map((t) => t.customerEmail))].filter(Boolean);
   for (const sk of storeKeys) {
+    const db = await lookupLastOrdersByEmailFromDb(sk, remainingEmails);
+    emailLastMaps.push(db);
+    remainingEmails = remainingEmails.filter((e) => !db.has(String(e || '').trim().toLowerCase()));
     const m = await runStoreLookup(sk, 'email order lookup', () => lookupLastOrdersByEmail(sk, remainingEmails), new Map());
     emailLastMaps.push(m);
     remainingEmails = remainingEmails.filter((e) => !m.has(e));
   }
   const emailLast = mergeFirstMatch(...emailLastMaps);
-  let afterEmailLast = afterOrder.map((t) => t.shopify ? t : { ...t, shopify: emailLast.get(t.customerEmail) || null });
+  let afterEmailLast = afterOrder.map((t) => t.shopify ? t : { ...t, shopify: emailLast.get(t.customerEmail) || emailLast.get(String(t.customerEmail || '').trim().toLowerCase()) || null });
 
   // Stage 3: email-customer-default-address
   const emailCustMaps = [];

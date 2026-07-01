@@ -18,6 +18,24 @@ const STATUS_META = {
   gray:   { label: 'No target',  color: 'var(--text3)', bg: 'var(--bg3)', border: 'var(--border)' },
 };
 
+const KPI_PULSE_LOCAL_CACHE_PREFIX = 'kpiPulse:v2:';
+const kpiPulseLocalCacheKey = (month) => `${KPI_PULSE_LOCAL_CACHE_PREFIX}${month || 'latest'}`;
+function readKpiPulseLocalCache(month) {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(kpiPulseLocalCacheKey(month));
+    const data = raw ? JSON.parse(raw) : null;
+    return data?.cadences ? data : null;
+  } catch (_) { return null; }
+}
+function writeKpiPulseLocalCache(month, data) {
+  if (typeof window === 'undefined' || !data?.cadences) return;
+  try {
+    window.localStorage.setItem(kpiPulseLocalCacheKey(month), JSON.stringify(data));
+    if (data.selectedMonth) window.localStorage.setItem(kpiPulseLocalCacheKey(data.selectedMonth), JSON.stringify(data));
+  } catch (_) { /* localStorage may be unavailable/full; ignore */ }
+}
+
 /* ── Database-backed metrics ──────────────────────────────────────────
    Maps a KPI catalog metric name → the key returned by /api/analytics/kpi-pulse.
    Metrics NOT in this map have no database source and are shown BLANK.        */
@@ -74,6 +92,8 @@ const DB_KEY = {
   'DAU / MAU Stickiness': 'dau_mau_stickiness',
   'Nobl MAU / Active Subscribers': 'dau_mau_stickiness',
   'MAU / Active Subs (opened in 30d)': 'dau_mau_stickiness',
+  'Sessions per MAU': 'sessions_per_mau',
+  'Sessions per DAU': 'sessions_per_dau',
   // CS (cs_tickets_daily, via Mongo)
   'CS Tickets % of Orders': 'cs_tickets_pct',
   'CS Tickets as % of Orders': 'cs_tickets_pct', // FLO weekly label variant
@@ -118,6 +138,10 @@ const DB_KEY = {
   'Bundle % of NOBL Revenue': 'bundle_rev_pct',
   'Bundle % of Total NOBL Revenue': 'bundle_rev_pct',
   'Total Refund Rate': 'refund_rate',
+  'US Refund Rate': 'us_refund_rate',
+  'UK Refund Rate': 'uk_refund_rate',
+  'AUS Refund Rate': 'au_refund_rate',
+  'Canada Refund Rate': 'ca_refund_rate',
   // Air subs (NOBL only)
   'Net Subscriber Adds': 'net_sub_adds',
   'Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week': 'net_sub_adds',
@@ -160,7 +184,7 @@ const PCT_KEYS = new Set([
   'sos_taylor', 'sos_franz', 'sos_luke', 'sos_chris',
   'whitelisting_spend_pct', 'test_spend_pct', 'tof_spend_pct', 'retention_rev_pct', 'app_attach_pct', 'app_ttp',
   'bundle_rev_pct', 'us_sales_pct', 'ca_sales_pct', 'au_sales_pct', 'eu_sales_pct', 'uk_sales_pct',
-  'refund_rate', 'cs_closed_pct', 'app_rev_pct', 'app_activation', 'sms_sales_pct', 'email_sales_pct', 'unsubscribe_rate', 'dau_mau_stickiness',
+  'refund_rate', 'us_refund_rate', 'uk_refund_rate', 'au_refund_rate', 'ca_refund_rate', 'cs_closed_pct', 'app_rev_pct', 'app_activation', 'sms_sales_pct', 'email_sales_pct', 'unsubscribe_rate', 'dau_mau_stickiness',
 ]);
 const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer']);
 const MONEY_KEYS = new Set([
@@ -169,6 +193,7 @@ const MONEY_KEYS = new Set([
 ]);
 const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio']);
 const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days']);
+const DECIMAL_KEYS = new Set(['sessions_per_mau', 'sessions_per_dau']);
 
 // Keys only available for NOBL. (US MER works for both; Canada MER + Air metrics +
 // blended MER + Amazon + AOV are NOBL-only at the data layer. The strategist Share
@@ -202,6 +227,7 @@ function fmtMetricValue(key, v) {
   if (MONEY_KEYS.has(key)) return `$${(Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (INT_KEYS.has(key))   return Math.round(n).toLocaleString();
   if (DAY_KEYS.has(key))   return `${n.toFixed(2)}d`;
+  if (DECIMAL_KEYS.has(key)) return n.toFixed(2);
   return String(v);
 }
 
@@ -1241,7 +1267,24 @@ export default function KpiPulsePage() {
 
   useEffect(() => {
     let alive = true;
-    getKpiPulse({ month: selectedMonth }).then((d) => { if (alive) { setPulse(d); setLocalOverrides(d?.overrides || {}); } }).catch(() => { if (alive) setPulse(null); });
+    const cached = readKpiPulseLocalCache(selectedMonth);
+    if (cached) {
+      setPulse(cached);
+      setLocalOverrides(cached?.overrides || {});
+    } else {
+      setPulse(null);
+      setLocalOverrides({});
+    }
+    getKpiPulse({ month: selectedMonth })
+      .then((d) => {
+        if (!alive) return;
+        setPulse(d);
+        setLocalOverrides(d?.overrides || {});
+        writeKpiPulseLocalCache(selectedMonth, d);
+      })
+      .catch(() => {
+        if (alive && !cached) setPulse(null);
+      });
     return () => { alive = false; };
   }, [selectedMonth]);
 
