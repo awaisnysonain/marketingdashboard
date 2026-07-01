@@ -11,16 +11,22 @@ const POOL_OPTS = {
   user: process.env.DB_USER,
   password: process.env.DB_PASS,
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
-  max: 1,
-  idleTimeoutMillis: 5000,
+  // Keep this small, but >1. KPI Pulse and other dashboard reads should not
+  // fail just because a cron/ETL task is holding the single connection for a
+  // long batch. Override with DB_POOL_MAX / DB_SESSION_POOL_MAX if needed.
+  max: parseInt(process.env.DB_POOL_MAX || '4', 10),
+  idleTimeoutMillis: parseInt(process.env.DB_IDLE_TIMEOUT_MS || '10000', 10),
   allowExitOnIdle: true,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: parseInt(process.env.DB_CONNECTION_TIMEOUT_MS || '15000', 10),
   maxLifetimeSeconds: 600,
 };
 
-// Two pools × max 1 = at most 2 postgres backends (query + session), not 10.
 const pool = new Pool({ ...POOL_OPTS, application_name: 'marketingdashboard' });
-const sessionPool = new Pool({ ...POOL_OPTS, application_name: 'marketingdashboard-session' });
+const sessionPool = new Pool({
+  ...POOL_OPTS,
+  max: parseInt(process.env.DB_SESSION_POOL_MAX || '2', 10),
+  application_name: 'marketingdashboard-session',
+});
 
 for (const p of [pool, sessionPool]) {
   p.on('error', (err) => {
