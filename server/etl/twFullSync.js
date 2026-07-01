@@ -974,17 +974,17 @@ async function syncTWBenchmarks(brand) {
 async function syncTWOrderRevenue(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
-  const refundsDr = chDateRange('refund_date', startDate, endDate);
 
   const refundsSql = `
     SELECT
-      refund_date                                 AS date,
-      COUNT(DISTINCT refund_id)                   AS refund_count,
-      SUM(refund_amount)                          AS refund_amount
-    FROM refunds_table
-    WHERE ${refundsDr}
-    GROUP BY refund_date
-    ORDER BY refund_date
+      r.event_date AS date,
+      COUNT(*) AS refund_count,
+      abs(SUM(r.total_refunded_price)) AS refund_amount
+    FROM refunds_table AS r
+    WHERE r.platform = 'shopify'
+      AND r.event_date BETWEEN toDate('${startDate}') AND toDate('${endDate}')
+    GROUP BY r.event_date
+    ORDER BY r.event_date
   `;
 
   let dualRevMap = {};
@@ -1012,7 +1012,7 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
   // and reuse zero refunds for that window. This prevents hourly snapshot error
   // spam while preserving a hard failure for the core revenue queries above.
   try {
-    refundRows = await twSqlQuery(brand, refundsSql);
+    refundRows = await twSqlQuery(brand, refundsSql, { period: { startDate, endDate } });
   } catch (e) {
     console.warn(`[twFullSync] syncTWOrderRevenue refunds unavailable ${brand}: ${e.message}`);
     refundRows = [];
