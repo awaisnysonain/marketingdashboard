@@ -18,7 +18,7 @@ const STATUS_META = {
   gray:   { label: 'No target',  color: 'var(--text3)', bg: 'var(--bg3)', border: 'var(--border)' },
 };
 
-const KPI_PULSE_LOCAL_CACHE_PREFIX = 'kpiPulse:v2:';
+const KPI_PULSE_LOCAL_CACHE_PREFIX = 'kpiPulse:v3:';
 const kpiPulseLocalCacheKey = (month) => `${KPI_PULSE_LOCAL_CACHE_PREFIX}${month || 'latest'}`;
 function readKpiPulseLocalCache(month) {
   if (typeof window === 'undefined') return null;
