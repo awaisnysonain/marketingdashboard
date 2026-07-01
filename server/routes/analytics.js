@@ -2679,7 +2679,7 @@ router.get('/kpi-pulse', async (req, res) => {
       const bofCampaignAdsetRegex = `retarget|remarket|(^|[^a-z])bof[0-9]?([^a-z]|$)|bottom|warm|existing|past[ -]?purchaser|winback`;
 
       const emptyRows = () => ({ rows: [] });
-      const [noblSum, floSum, noblGeo, floGeo, air, ops, cs, meta, twAds, twFunnel, metaStrat, klav, twEmailSms, twRefunds, airSubs, floIapSubs, floIapRev, floReturning, shopifyStats, shopifyRegionStats, products, floAppstle, floAppstleTtp, noblBundle] = await pgQueryBatch([
+      const [noblSum, floSum, noblGeo, floGeo, air, ops, cs, disputes, meta, twAds, twFunnel, metaStrat, klav, twEmailSms, twRefunds, airSubs, floIapSubs, floIapRev, floReturning, shopifyStats, shopifyRegionStats, products, floAppstle, floAppstleTtp, noblBundle] = await pgQueryBatch([
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, COALESCE(order_revenue,total_revenue) gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales, refund_amount refund FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, COALESCE(order_revenue,total_revenue) gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales, refund_amount refund FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM nobl_brand_tw_geo_daily WHERE region != 'TOTAL' AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
@@ -2691,6 +2691,16 @@ router.get('/kpi-pulse', async (req, res) => {
         { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, orders_count oc, avg_shipping_cost_per_order asc_, orders_unfulfilled ouf, orders_unfulfilled_over_24h ouf24, avg_fulfillment_hours afh, avg_ship_to_door_hours asdh, ca_avg_ttf_days ca_ttf, au_avg_ttf_days au_ttf FROM ops_metrics_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
         // CS tickets per brand × date.
         { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, total_tickets tt, shopify_matched sm, us_tickets us, ca_tickets ca, au_tickets au, uk_tickets uk, effective_closed_tickets closed FROM cs_tickets_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
+        // Shopify Payments disputes/chargebacks per brand × date for CB Rate KPIs.
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d,
+                  SUM(chargeback_count) cb,
+                  SUM(us_chargeback_count) us_cb,
+                  SUM(ca_chargeback_count) ca_cb,
+                  SUM(au_chargeback_count) au_cb,
+                  SUM(uk_chargeback_count) uk_cb
+                FROM shopify_disputes_daily
+                WHERE date BETWEEN $1::date AND $2::date
+                GROUP BY brand, date`, params: [start, end], fallback: emptyRows },
         // Meta direct — requested source for Whitelisting Spend % of Meta Spend.
         { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d,
                   SUM(purchases) p,
@@ -2828,7 +2838,7 @@ router.get('/kpi-pulse', async (req, res) => {
       ]);
 
       const nMap = {}, fMap = {}, ngeo = {}, fgeo = {}, aMap = {};
-      const opsN = {}, opsF = {}, csN = {}, csF = {}, metaN = {}, metaF = {}, twAdsN = {}, twAdsF = {}, klavN = {}, klavF = {}, twEmailN = {}, twEmailF = {}, twRefundN = {}, twRefundF = {};
+      const opsN = {}, opsF = {}, csN = {}, csF = {}, cbN = {}, cbF = {}, metaN = {}, metaF = {}, twAdsN = {}, twAdsF = {}, klavN = {}, klavF = {}, twEmailN = {}, twEmailF = {}, twRefundN = {}, twRefundF = {};
       const airSubsByDay = {}; // d → {new, canc}
       const floIapSubsByDay = {}; // d → {act, ns, cs}
       const floIapRevByDay = {}; // d → app revenue
@@ -2854,6 +2864,10 @@ router.get('/kpi-pulse', async (req, res) => {
       for (const r of cs.rows) {
         const dest = r.brand === 'NOBL' ? csN : (r.brand === 'FLO' ? csF : null);
         if (dest) dest[r.d] = { tt: num(r.tt), sm: num(r.sm), us: num(r.us), ca: num(r.ca), au: num(r.au), uk: num(r.uk), closed: num(r.closed) };
+      }
+      for (const r of disputes.rows) {
+        const dest = r.brand === 'NOBL' ? cbN : (r.brand === 'FLO' ? cbF : null);
+        if (dest) dest[r.d] = { cb: num(r.cb), us: num(r.us_cb), ca: num(r.ca_cb), au: num(r.au_cb), uk: num(r.uk_cb) };
       }
       for (const r of meta.rows) {
         const dest = r.brand === 'NOBL' ? metaN : (r.brand === 'FLO' ? metaF : null);
@@ -2931,7 +2945,7 @@ router.get('/kpi-pulse', async (req, res) => {
       const cutoff = process.env.KPI_PULSE_CUTOFF_DATE || (() => { const [y, m, d] = todayET.split('-').map(Number); const dt = new Date(Date.UTC(y, m - 1, d)); dt.setUTCDate(dt.getUTCDate() - 1); return dt.toISOString().slice(0, 10); })();
       const allDates = Array.from(new Set([
         ...Object.keys(nMap), ...Object.keys(fMap), ...Object.keys(ngeo), ...Object.keys(fgeo), ...Object.keys(aMap),
-        ...Object.keys(opsN), ...Object.keys(opsF), ...Object.keys(csN), ...Object.keys(csF),
+        ...Object.keys(opsN), ...Object.keys(opsF), ...Object.keys(csN), ...Object.keys(csF), ...Object.keys(cbN), ...Object.keys(cbF),
         ...Object.keys(metaN), ...Object.keys(metaF), ...Object.keys(twAdsN), ...Object.keys(twAdsF),
         ...Object.keys(floIapSubsByDay), ...Object.keys(floIapRevByDay),
         ...Object.keys(floReturnByDay), ...Object.keys(shopifyStatsByDay), ...Object.keys(shopifyRegionOrdersByDay), ...Object.keys(twRefundN), ...Object.keys(twRefundF), ...Object.keys(productByDay),
@@ -2968,6 +2982,9 @@ router.get('/kpi-pulse', async (req, res) => {
         let csNtotal = 0, csFtotal = 0, csNseen = false, csFseen = false;
         let csNus = 0, csNca = 0, csNau = 0, csNuk = 0, csNclosed = 0;
         let csFus = 0, csFca = 0, csFau = 0, csFuk = 0, csFclosed = 0;
+        let cbNtotal = 0, cbFtotal = 0, cbNseen = false, cbFseen = false;
+        let cbNus = 0, cbNca = 0, cbNau = 0, cbNuk = 0;
+        let cbFus = 0, cbFca = 0, cbFau = 0, cbFuk = 0;
         // Meta aggregates
         const m = { n:{p:0,lc:0,c:0,s:0,whitelist:0,test:0,bof:0}, f:{p:0,lc:0,c:0,s:0,whitelist:0,test:0,bof:0} };
         let hasMetaN = false, hasMetaF = false;
@@ -2999,6 +3016,7 @@ router.get('/kpi-pulse', async (req, res) => {
         let noblBundleRev = 0, noblProductRev = 0;
         const shop = { n: { orders: 0, revenue: 0, discounts: 0 }, f: { orders: 0, revenue: 0, discounts: 0 } };
         const shopRegion = { n: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 }, f: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 } };
+        const cbShopRegion = { n: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 }, f: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 } };
 
         for (const d of dates) {
           const n = nMap[d]; if (n) { hasN = true; a.n.rev+=n.rev; a.n.gmd+=n.gmd; a.n.spend+=n.spend; a.n.orders+=n.orders; a.n.amazon+=n.amazon; a.n.tsales+=n.tsales; a.n.refund+=n.refund; }
@@ -3007,6 +3025,8 @@ router.get('/kpi-pulse', async (req, res) => {
           if (sd?.NOBL) { shop.n.orders += sd.NOBL.orders; shop.n.revenue += sd.NOBL.revenue; shop.n.discounts += sd.NOBL.discounts; }
           if (sd?.FLO)  { shop.f.orders += sd.FLO.orders;  shop.f.revenue += sd.FLO.revenue;  shop.f.discounts += sd.FLO.discounts; }
           const srd = shopifyRegionOrdersByDay[d];
+          if (srd?.NOBL) { for (const k of Object.keys(cbShopRegion.n)) cbShopRegion.n[k] += srd.NOBL[k] || 0; }
+          if (srd?.FLO)  { for (const k of Object.keys(cbShopRegion.f)) cbShopRegion.f[k] += srd.FLO[k] || 0; }
           addGeo(a.nGeo, ngeo[d]);
           addGeo(a.fGeo, fgeo[d]);
           const ai = aMap[d]; if (ai){a.air.to+=ai.to;a.air.ao+=ai.ao;a.air.conv+=ai.conv;a.air.mat+=ai.mat;a.air.arev+=ai.arev;}
@@ -3016,6 +3036,8 @@ router.get('/kpi-pulse', async (req, res) => {
 
           const cn = csN[d]; if (cn) { csNtotal += cn.tt; csNus += cn.us; csNca += cn.ca; csNau += cn.au; csNuk += cn.uk; csNclosed += cn.closed; csNseen = true; if (cn.sm > 0 && srd?.NOBL) { for (const k of Object.keys(shopRegion.n)) shopRegion.n[k] += srd.NOBL[k] || 0; } }
           const cf_ = csF[d]; if (cf_) { csFtotal += cf_.tt; csFus += cf_.us; csFca += cf_.ca; csFau += cf_.au; csFuk += cf_.uk; csFclosed += cf_.closed; csFseen = true; if (cf_.sm > 0 && srd?.FLO) { for (const k of Object.keys(shopRegion.f)) shopRegion.f[k] += srd.FLO[k] || 0; } }
+          const cbn = cbN[d]; if (cbn) { cbNtotal += cbn.cb; cbNus += cbn.us; cbNca += cbn.ca; cbNau += cbn.au; cbNuk += cbn.uk; cbNseen = true; }
+          const cbf = cbF[d]; if (cbf) { cbFtotal += cbf.cb; cbFus += cbf.us; cbFca += cbf.ca; cbFau += cbf.au; cbFuk += cbf.uk; cbFseen = true; }
 
           const mn = metaN[d]; if (mn) { hasMetaN = true; m.n.p += mn.p; m.n.lc += mn.lc; m.n.c += mn.c; m.n.s += mn.s; m.n.whitelist += mn.whitelist; m.n.test += mn.test; m.n.bof += mn.bof; }
           const mf = metaF[d]; if (mf) { hasMetaF = true; m.f.p += mf.p; m.f.lc += mf.lc; m.f.c += mf.c; m.f.s += mf.s; m.f.whitelist += mf.whitelist; m.f.test += mf.test; m.f.bof += mf.bof; }
@@ -3117,6 +3139,11 @@ router.get('/kpi-pulse', async (req, res) => {
             uk_cs_tickets_pct: (csNseen && shopRegion.n.UK > 0) ? csNuk / shopRegion.n.UK : null,
             cs_closed_count: csNseen ? csNclosed : null,
             cs_closed_pct: (csNseen && nOrderDenom > 0) ? csNclosed / nOrderDenom : null,
+            cb_rate: (cbNseen && nOrderDenom > 0) ? cbNtotal / nOrderDenom : null,
+            us_cb_rate: (cbNseen && cbShopRegion.n.US > 0) ? cbNus / cbShopRegion.n.US : null,
+            ca_cb_rate: (cbNseen && cbShopRegion.n.CA > 0) ? cbNca / cbShopRegion.n.CA : null,
+            au_cb_rate: (cbNseen && cbShopRegion.n.AU > 0) ? cbNau / cbShopRegion.n.AU : null,
+            uk_cb_rate: (cbNseen && cbShopRegion.n.UK > 0) ? cbNuk / cbShopRegion.n.UK : null,
             meta_cvr: hasTwAdsN ? metaCvr(tw.n) : null,
             whitelisting_spend_pct: hasMetaN ? div(m.n.whitelist, m.n.s) : null,
             test_spend_pct: hasTwAdsN ? div(tw.n.test, tw.n.s) : null,
@@ -3160,6 +3187,11 @@ router.get('/kpi-pulse', async (req, res) => {
             uk_cs_tickets_pct: (csFseen && shopRegion.f.UK > 0) ? csFuk / shopRegion.f.UK : null,
             cs_closed_count: csFseen ? csFclosed : null,
             cs_closed_pct: (csFseen && fOrderDenom > 0) ? csFclosed / fOrderDenom : null,
+            cb_rate: (cbFseen && fOrderDenom > 0) ? cbFtotal / fOrderDenom : null,
+            us_cb_rate: (cbFseen && cbShopRegion.f.US > 0) ? cbFus / cbShopRegion.f.US : null,
+            ca_cb_rate: (cbFseen && cbShopRegion.f.CA > 0) ? cbFca / cbShopRegion.f.CA : null,
+            au_cb_rate: (cbFseen && cbShopRegion.f.AU > 0) ? cbFau / cbShopRegion.f.AU : null,
+            uk_cb_rate: (cbFseen && cbShopRegion.f.UK > 0) ? cbFuk / cbShopRegion.f.UK : null,
             meta_cvr: hasTwAdsF ? metaCvr(tw.f) : null,
             whitelisting_spend_pct: hasMetaF ? div(m.f.whitelist, m.f.s) : null,
             test_spend_pct: hasTwAdsF ? div(tw.f.test, tw.f.s) : null,
@@ -3192,14 +3224,14 @@ router.get('/kpi-pulse', async (req, res) => {
         'mer','sales','aov','amazon_pct','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct',
         'air_rev_pct','attach','ttp','activation','pagespeed_pdp_aio','dau_mau_stickiness',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','orders_unfulfilled_24h',
-        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct',
+        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
         'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','new_customer_cac','bundle_rev_pct','net_sub_adds',
         'sos_taylor','sos_franz','sos_luke','sos_chris',
       ];
       const KF = [
         'mer','sales','aov','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','pagespeed_pdp_aio','dau_mau_stickiness',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','orders_unfulfilled_24h',
-        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct',
+        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
         'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','returning_cust_rev_pct',
         'sos_chris','portable_cac','studio_cac','home_cac','home_studio_cac',
       ];

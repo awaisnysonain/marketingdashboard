@@ -94,6 +94,13 @@ const DB_KEY = {
   'Canada CS Tickets # amount': 'ca_cs_tickets_count',
   '# of tickets closed effective': 'cs_closed_count',
   'Ratio= # of tickets closed effective / total orders for that day': 'cs_closed_pct',
+  'Total CB Rate': 'cb_rate',
+  'CB Rate': 'cb_rate',
+  'US CB Rate': 'us_cb_rate',
+  'UK CB Rate': 'uk_cb_rate',
+  'Uk CB Rate': 'uk_cb_rate',
+  'AUS CB Rate': 'au_cb_rate',
+  'Canada CB Rate': 'ca_cb_rate',
   // Paid Media derivations
   'Meta CVR %': 'meta_cvr',
   'Whitelisting Spend % of Meta Spend': 'whitelisting_spend_pct',
@@ -148,7 +155,8 @@ const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct
 
 const PCT_KEYS = new Set([
   'amazon_pct', 'air_rev_pct', 'attach', 'activation', 'ttp',
-  'cs_tickets_pct', 'us_cs_tickets_pct', 'uk_cs_tickets_pct', 'au_cs_tickets_pct', 'ca_cs_tickets_pct', 'meta_cvr', 'monthly_churn', 'returning_cust_rev_pct',
+  'cs_tickets_pct', 'us_cs_tickets_pct', 'uk_cs_tickets_pct', 'au_cs_tickets_pct', 'ca_cs_tickets_pct',
+  'cb_rate', 'us_cb_rate', 'uk_cb_rate', 'au_cb_rate', 'ca_cb_rate', 'meta_cvr', 'monthly_churn', 'returning_cust_rev_pct',
   'sos_taylor', 'sos_franz', 'sos_luke', 'sos_chris',
   'whitelisting_spend_pct', 'test_spend_pct', 'tof_spend_pct', 'retention_rev_pct', 'app_attach_pct', 'app_ttp',
   'bundle_rev_pct', 'us_sales_pct', 'ca_sales_pct', 'au_sales_pct', 'eu_sales_pct', 'uk_sales_pct',
@@ -214,6 +222,7 @@ function isLowerIsBetter(target, key) {
   // semantically lower is still better.
   return new Set([
     'cs_tickets_pct', 'cs_tickets_count', 'orders_unfulfilled', 'orders_unfulfilled_24h', 'monthly_churn',
+    'cb_rate', 'us_cb_rate', 'uk_cb_rate', 'au_cb_rate', 'ca_cb_rate',
     'avg_shipping_cost', 'avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days',
     'new_customer_cac', 'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac', 'refund_rate',
   ]).has(key);
