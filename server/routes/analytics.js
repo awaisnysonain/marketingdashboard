@@ -2706,7 +2706,7 @@ router.get('/kpi-pulse', async (req, res) => {
       const bofCampaignAdsetRegex = `retarget|remarket|(^|[^a-z])bof[0-9]?([^a-z]|$)|bottom|warm|existing|past[ -]?purchaser|winback`;
 
       const emptyRows = () => ({ rows: [] });
-      const [noblSum, floSum, noblGeo, floGeo, air, ops, cs, disputes, meta, twAds, twFunnel, metaStrat, klav, twEmailSms, twRefunds, airSubs, floIapSubs, floIapRev, floReturning, shopifyStats, shopifyRegionStats, products, floAppstle, floAppstleTtp, noblBundle] = await pgQueryBatch([
+      const [noblSum, floSum, noblGeo, floGeo, air, ops, cs, disputes, meta, twAds, twFunnel, metaStrat, klav, twEmailSms, twRefunds, airSubs, floIapSubs, floIapRev, floReturning, shopifyStats, shopifyRegionStats, products, floAppstle, floAppstleTtp, noblBundle, floProductSales] = await pgQueryBatch([
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, COALESCE(order_revenue,total_revenue) gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales, refund_amount refund FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, COALESCE(order_revenue,total_revenue) gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales, refund_amount refund FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM nobl_brand_tw_geo_daily WHERE region != 'TOTAL' AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
@@ -2715,7 +2715,10 @@ router.get('/kpi-pulse', async (req, res) => {
         // Ops (per brand × date): for "Avg Shipping Cost / Order" + "Orders Unfulfilled".
         // We store the AVG per day; for weekly/quarterly we re-average ACROSS days
         // (cost) and take MAX (the snapshot count) so the rollup is sensible.
-        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, orders_count oc, avg_shipping_cost_per_order asc_, orders_unfulfilled ouf, orders_unfulfilled_over_24h ouf24, avg_fulfillment_hours afh, avg_ship_to_door_hours asdh, ca_avg_ttf_days ca_ttf, au_avg_ttf_days au_ttf FROM ops_metrics_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, orders_count oc, avg_shipping_cost_per_order asc_, orders_unfulfilled ouf, orders_unfulfilled_over_24h ouf24,
+                  COALESCE(ca_orders_unfulfilled, 0) ca_ouf, COALESCE(au_orders_unfulfilled, 0) au_ouf,
+                  avg_fulfillment_hours afh, avg_ship_to_door_hours asdh, ca_avg_ttf_days ca_ttf, au_avg_ttf_days au_ttf
+                FROM ops_metrics_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
         // CS tickets per brand × date.
         { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, total_tickets tt, shopify_matched sm, us_tickets us, ca_tickets ca, au_tickets au, uk_tickets uk, effective_closed_tickets closed FROM cs_tickets_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
         // Shopify Payments disputes/chargebacks per brand × date for CB Rate KPIs.
@@ -2809,7 +2812,13 @@ router.get('/kpi-pulse', async (req, res) => {
                 FROM tw_email_sms_daily
                 WHERE date BETWEEN $1::date AND $2::date
                 GROUP BY brand, date`, params: [start, end], fallback: emptyRows },
-        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, SUM(refund_amount) refund_amount FROM tw_refunds_daily WHERE date BETWEEN $1::date AND $2::date GROUP BY brand, date`, params: [start, end], fallback: emptyRows },
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d,
+                  SUM(refund_amount) refund_amount,
+                  SUM(COALESCE(us_refund_amount,0)) us_refund_amount,
+                  SUM(COALESCE(ca_refund_amount,0)) ca_refund_amount,
+                  SUM(COALESCE(au_refund_amount,0)) au_refund_amount,
+                  SUM(COALESCE(uk_refund_amount,0)) uk_refund_amount
+                FROM tw_refunds_daily WHERE date BETWEEN $1::date AND $2::date GROUP BY brand, date`, params: [start, end], fallback: emptyRows },
         // NOBL Air subscriber state for "Net Subscriber Adds": new = created in window,
         // cancelled = cancelled_on in window. Net = new - cancelled.
         { sql: `SELECT TO_CHAR(created_at::date,'YYYY-MM-DD') d, 'new'::text kind FROM nobl_air_subscribers WHERE created_at::date BETWEEN $1::date AND $2::date UNION ALL SELECT TO_CHAR(cancelled_on::date,'YYYY-MM-DD') d, 'canc'::text kind FROM nobl_air_subscribers WHERE cancelled_on IS NOT NULL AND cancelled_on::date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
@@ -2862,6 +2871,10 @@ router.get('/kpi-pulse', async (req, res) => {
                 FROM shopify_product_daily
                 WHERE brand='NOBL' AND date BETWEEN $1::date AND $2::date
                 GROUP BY date`, params: [start, end], fallback: emptyRows },
+        { sql: `SELECT TO_CHAR(date,'YYYY-MM-DD') d, sku_prefix, product_title, SUM(net_revenue) net_revenue
+                FROM shopify_product_daily
+                WHERE brand='FLO' AND date BETWEEN $1::date AND $2::date
+                GROUP BY date, sku_prefix, product_title`, params: [start, end], fallback: emptyRows },
       ]);
 
       const nMap = {}, fMap = {}, ngeo = {}, fgeo = {}, aMap = {};
@@ -2875,6 +2888,7 @@ router.get('/kpi-pulse', async (req, res) => {
       const productByDay = {}; // d → brand → product_line → {spend, orders}
       const floAppByDay = {}; // d → {app_units,mature,converted}; app_units by signup date, TTP by maturity date
       const noblBundleByDay = {}; // d → {bundle_rev,total_product_rev}
+      const floHardwareByDay = {}; // d → {appSubRev, portableRev, homeStudioRev}
       for (const r of noblSum.rows) nMap[r.d] = { rev: num(r.rev), gmd: num(r.gmd), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales), refund: num(r.refund) };
       for (const r of floSum.rows)  fMap[r.d] = { rev: num(r.rev), gmd: num(r.gmd), spend: num(r.spend), orders: num(r.orders), amazon: num(r.amazon), tsales: num(r.tsales), refund: num(r.refund) };
       for (const r of noblGeo.rows) { (ngeo[r.d] = ngeo[r.d] || {})[r.region] = { rev: num(r.rev), spend: num(r.spend) }; }
@@ -2883,7 +2897,7 @@ router.get('/kpi-pulse', async (req, res) => {
       for (const r of ops.rows) {
         const dest = r.brand === 'NOBL' ? opsN : (r.brand === 'FLO' ? opsF : null);
         if (dest) dest[r.d] = {
-          oc: num(r.oc), asc: r.asc_ == null ? null : num(r.asc_), ouf: num(r.ouf), ouf24: num(r.ouf24),
+          oc: num(r.oc), asc: r.asc_ == null ? null : num(r.asc_), ouf: num(r.ouf), ouf24: num(r.ouf24), ca_ouf: num(r.ca_ouf), au_ouf: num(r.au_ouf),
           afh: r.afh == null ? null : num(r.afh), asdh: r.asdh == null ? null : num(r.asdh),
           ca_ttf: r.ca_ttf == null ? null : num(r.ca_ttf), au_ttf: r.au_ttf == null ? null : num(r.au_ttf),
         };
@@ -2935,7 +2949,7 @@ router.get('/kpi-pulse', async (req, res) => {
       }
       for (const r of twRefunds.rows) {
         const dest = r.brand === 'NOBL' ? twRefundN : (r.brand === 'FLO' ? twRefundF : null);
-        if (dest) dest[r.d] = { refund: num(r.refund_amount) };
+        if (dest) dest[r.d] = { refund: num(r.refund_amount), us: num(r.us_refund_amount), ca: num(r.ca_refund_amount), au: num(r.au_refund_amount), uk: num(r.uk_refund_amount) };
       }
       for (const r of airSubs.rows) {
         const bucket = (airSubsByDay[r.d] = airSubsByDay[r.d] || { new: 0, canc: 0 });
@@ -2964,6 +2978,21 @@ router.get('/kpi-pulse', async (req, res) => {
         bucket.converted += num(r.converted);
       }
       for (const r of noblBundle.rows) noblBundleByDay[r.d] = { bundle_rev: num(r.bundle_rev), total_product_rev: num(r.total_product_rev) };
+      const floProductBucket = (sku, title) => {
+        const s = `${sku || ''} ${title || ''}`.toLowerCase();
+        if (/app|subscription|unlimited flo access/.test(s)) return 'app';
+        if (/portable|flor1|refpi/.test(s)) return 'portable';
+        if (/home reformer|homerb|studio reformer|woodenrb|metal/.test(s)) return 'homeStudio';
+        return null;
+      };
+      for (const r of floProductSales.rows) {
+        const bucket = floProductBucket(r.sku_prefix, r.product_title);
+        if (!bucket) continue;
+        const row = (floHardwareByDay[r.d] = floHardwareByDay[r.d] || { appSubRev: 0, portableRev: 0, homeStudioRev: 0 });
+        if (bucket === 'app') row.appSubRev += num(r.net_revenue);
+        else if (bucket === 'portable') row.portableRev += num(r.net_revenue);
+        else if (bucket === 'homeStudio') row.homeStudioRev += num(r.net_revenue);
+      }
 
       // Cap at yesterday in the reporting timezone so current-day partial rows
       // (especially TW live summary rows) do not drive the visible matrix date.
@@ -2976,7 +3005,7 @@ router.get('/kpi-pulse', async (req, res) => {
         ...Object.keys(metaN), ...Object.keys(metaF), ...Object.keys(twAdsN), ...Object.keys(twAdsF),
         ...Object.keys(floIapSubsByDay), ...Object.keys(floIapRevByDay),
         ...Object.keys(floReturnByDay), ...Object.keys(shopifyStatsByDay), ...Object.keys(shopifyRegionOrdersByDay), ...Object.keys(twRefundN), ...Object.keys(twRefundF), ...Object.keys(productByDay),
-        ...Object.keys(noblBundleByDay),
+        ...Object.keys(noblBundleByDay), ...Object.keys(floHardwareByDay),
       ])).filter(d => d <= cutoff).sort();
       const latest = allDates[allDates.length - 1] || cutoff;
       const div = (x, y) => (y > 0 ? x / y : null);
@@ -3003,7 +3032,7 @@ router.get('/kpi-pulse', async (req, res) => {
         const a = { n:{rev:0,gmd:0,spend:0,orders:0,amazon:0,tsales:0,refund:0}, f:{rev:0,gmd:0,spend:0,orders:0,amazon:0,tsales:0,refund:0}, nGeo: emptyGeo(), fGeo: emptyGeo(), air:{to:0,ao:0,conv:0,mat:0,arev:0} };
         let hasN = false, hasF = false;
         // Ops aggregates
-        const opsNcost = [], opsFcost = [], opsNuf = [], opsFuf = [], opsNuf24 = [], opsFuf24 = [];
+        const opsNcost = [], opsFcost = [], opsNuf = [], opsFuf = [], opsNuf24 = [], opsFuf24 = [], opsNcaUf = [], opsFcaUf = [], opsNauUf = [], opsFauUf = [];
         const opsNfulfillDays = [], opsFfulfillDays = [], opsNshipDays = [], opsFshipDays = [], opsNcaTtf = [], opsFcaTtf = [], opsNauTtf = [], opsFauTtf = [];
         // CS aggregates
         let csNtotal = 0, csFtotal = 0, csNseen = false, csFseen = false;
@@ -3034,6 +3063,7 @@ router.get('/kpi-pulse', async (req, res) => {
         let twEmailNrev = 0, twSmsNrev = 0, twEmailOnlyNrev = 0, twUnsubN = 0, twDeliveredN = 0, twEmailNseen = false;
         let twEmailFrev = 0, twSmsFrev = 0, twEmailOnlyFrev = 0, twUnsubF = 0, twDeliveredF = 0, twEmailFseen = false;
         let twRefundNseen = false, twRefundFseen = false, twRefundNdenom = 0, twRefundFdenom = 0;
+        const twRefundNreg = { US: 0, CA: 0, AU: 0, UK: 0 }, twRefundFreg = { US: 0, CA: 0, AU: 0, UK: 0 };
         // Air subs in window
         let airNew = 0, airCanc = 0;
         // FLO IAP subs (snapshot=last act, sum new/cs)
@@ -3042,6 +3072,7 @@ router.get('/kpi-pulse', async (req, res) => {
         // FLO returning
         let floRetTotal = 0, floRetReturning = 0;
         let noblBundleRev = 0, noblProductRev = 0;
+        let floAppSubRev = 0, floPortableRev = 0, floHomeStudioRev = 0;
         const shop = { n: { orders: 0, revenue: 0, discounts: 0 }, f: { orders: 0, revenue: 0, discounts: 0 } };
         const shopRegion = { n: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 }, f: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 } };
         const cbShopRegion = { n: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 }, f: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 } };
@@ -3059,8 +3090,8 @@ router.get('/kpi-pulse', async (req, res) => {
           addGeo(a.fGeo, fgeo[d]);
           const ai = aMap[d]; if (ai){a.air.to+=ai.to;a.air.ao+=ai.ao;a.air.conv+=ai.conv;a.air.mat+=ai.mat;a.air.arev+=ai.arev;}
 
-          const on = opsN[d]; if (on) { opsNcost.push(on.asc); opsNuf.push(on.ouf); opsNuf24.push(on.ouf24); opsNfulfillDays.push(on.afh == null ? null : on.afh / 24); opsNshipDays.push(on.asdh == null ? null : on.asdh / 24); opsNcaTtf.push(on.ca_ttf); opsNauTtf.push(on.au_ttf); }
-          const of_ = opsF[d]; if (of_) { opsFcost.push(of_.asc); opsFuf.push(of_.ouf); opsFuf24.push(of_.ouf24); opsFfulfillDays.push(of_.afh == null ? null : of_.afh / 24); opsFshipDays.push(of_.asdh == null ? null : of_.asdh / 24); opsFcaTtf.push(of_.ca_ttf); opsFauTtf.push(of_.au_ttf); }
+          const on = opsN[d]; if (on) { opsNcost.push(on.asc); opsNuf.push(on.ouf); opsNuf24.push(on.ouf24); opsNcaUf.push(on.ca_ouf); opsNauUf.push(on.au_ouf); opsNfulfillDays.push(on.afh == null ? null : on.afh / 24); opsNshipDays.push(on.asdh == null ? null : on.asdh / 24); opsNcaTtf.push(on.ca_ttf); opsNauTtf.push(on.au_ttf); }
+          const of_ = opsF[d]; if (of_) { opsFcost.push(of_.asc); opsFuf.push(of_.ouf); opsFuf24.push(of_.ouf24); opsFcaUf.push(of_.ca_ouf); opsFauUf.push(of_.au_ouf); opsFfulfillDays.push(of_.afh == null ? null : of_.afh / 24); opsFshipDays.push(of_.asdh == null ? null : of_.asdh / 24); opsFcaTtf.push(of_.ca_ttf); opsFauTtf.push(of_.au_ttf); }
 
           const cn = csN[d]; if (cn) { csNtotal += cn.tt; csNus += cn.us; csNca += cn.ca; csNau += cn.au; csNuk += cn.uk; csNclosed += cn.closed; csNseen = true; if (cn.sm > 0 && srd?.NOBL) { for (const k of Object.keys(shopRegion.n)) shopRegion.n[k] += srd.NOBL[k] || 0; } }
           const cf_ = csF[d]; if (cf_) { csFtotal += cf_.tt; csFus += cf_.us; csFca += cf_.ca; csFau += cf_.au; csFuk += cf_.uk; csFclosed += cf_.closed; csFseen = true; if (cf_.sm > 0 && srd?.FLO) { for (const k of Object.keys(shopRegion.f)) shopRegion.f[k] += srd.FLO[k] || 0; } }
@@ -3094,8 +3125,8 @@ router.get('/kpi-pulse', async (req, res) => {
 
           const ten = twEmailN[d]; if (ten) { twEmailNrev += ten.revenue; twSmsNrev += ten.sms; twEmailOnlyNrev += ten.email; twUnsubN += ten.unsubscribes; twDeliveredN += ten.delivered; twEmailNseen = true; }
           const tef = twEmailF[d]; if (tef) { twEmailFrev += tef.revenue; twSmsFrev += tef.sms; twEmailOnlyFrev += tef.email; twUnsubF += tef.unsubscribes; twDeliveredF += tef.delivered; twEmailFseen = true; }
-          const trn = twRefundN[d]; if (trn) { a.n.refund += trn.refund; twRefundNdenom += nMap[d]?.rev || 0; twRefundNseen = true; }
-          const trf = twRefundF[d]; if (trf) { a.f.refund += trf.refund; twRefundFdenom += fMap[d]?.rev || 0; twRefundFseen = true; }
+          const trn = twRefundN[d]; if (trn) { a.n.refund += trn.refund; twRefundNdenom += nMap[d]?.rev || 0; twRefundNreg.US += trn.us; twRefundNreg.CA += trn.ca; twRefundNreg.AU += trn.au; twRefundNreg.UK += trn.uk; twRefundNseen = true; }
+          const trf = twRefundF[d]; if (trf) { a.f.refund += trf.refund; twRefundFdenom += fMap[d]?.rev || 0; twRefundFreg.US += trf.us; twRefundFreg.CA += trf.ca; twRefundFreg.AU += trf.au; twRefundFreg.UK += trf.uk; twRefundFseen = true; }
 
           const as = airSubsByDay[d]; if (as) { airNew += as.new; airCanc += as.canc; }
           const fi = floIapSubsByDay[d]; if (fi) { floIapActs.push(fi.act); floIapNs += fi.ns; floIapCs += fi.cs; }
@@ -3103,6 +3134,7 @@ router.get('/kpi-pulse', async (req, res) => {
           const fa = floAppByDay[d]; if (fa) { floAppUnits += fa.app_units; floAppMature += fa.mature; floAppConverted += fa.converted; }
           const fr = floReturnByDay[d]; if (fr) { floRetTotal += fr.total_rev; floRetReturning += fr.returning_rev; }
           const nb = noblBundleByDay[d]; if (nb) { noblBundleRev += nb.bundle_rev; noblProductRev += nb.total_product_rev; }
+          const fh = floHardwareByDay[d]; if (fh) { floAppSubRev += fh.appSubRev; floPortableRev += fh.portableRev; floHomeStudioRev += fh.homeStudioRev; }
           const fp = productByDay[d]?.FLO;
           if (fp) {
             // Product fallback for FLO CAC when Chris-coded Meta ads are not product-tagged.
@@ -3126,11 +3158,17 @@ router.get('/kpi-pulse', async (req, res) => {
           const tof = Math.max(0, sum.s - bof);
           return `${((tof / sum.s) * 100).toFixed(2)}% / ${((bof / sum.s) * 100).toFixed(2)}%`;
         };
+        const pctSplit = (a, b) => {
+          const total = a + b;
+          if (total <= 0) return null;
+          return `${((a / total) * 100).toFixed(2)}% / ${((b / total) * 100).toFixed(2)}%`;
+        };
 
         // FLO IAP "active" is a snapshot → take last non-null day in window.
         const floIapAct = lastNonNull(floIapActs);
         // Churn = cancellations in period / active at end of period.
         const floChurn = (floIapAct && floIapAct > 0) ? floIapCs / floIapAct : null;
+        const floAppLifetimeMonths = floChurn && floChurn > 0 ? 1 / floChurn : null;
         const nSalesBase = a.n.rev;
         const fSalesBase = a.f.rev;
         const nOrderDenom = a.n.orders || shop.n.orders;
@@ -3154,6 +3192,8 @@ router.get('/kpi-pulse', async (req, res) => {
             ca_ttf_days: avgOf(opsNcaTtf),
             au_ttf_days: avgOf(opsNauTtf),
             orders_unfulfilled: maxOf(opsNuf),
+            ca_orders_unfulfilled: maxOf(opsNcaUf),
+            au_orders_unfulfilled: maxOf(opsNauUf),
             orders_unfulfilled_24h: maxOf(opsNuf24),
             cs_tickets_pct: (csNseen && nOrderDenom > 0) ? csNtotal / nOrderDenom : null,
             cs_tickets_count: csNseen ? csNtotal : null,
@@ -3178,6 +3218,10 @@ router.get('/kpi-pulse', async (req, res) => {
             tof_spend_pct: hasTwAdsN ? div(Math.max(0, tw.n.s - tw.n.bof), tw.n.s) : null,
             tof_bof_spend_split: hasTwAdsN ? tofBofSplit(tw.n) : null,
             refund_rate: twRefundNseen ? div(a.n.refund, twRefundNdenom) : null,
+            us_refund_rate: twRefundNseen ? div(twRefundNreg.US, nGeoVals.US.rev) : null,
+            ca_refund_rate: twRefundNseen ? div(twRefundNreg.CA, nGeoVals.CA.rev) : null,
+            au_refund_rate: twRefundNseen ? div(twRefundNreg.AU, nGeoVals.AU.rev) : null,
+            uk_refund_rate: twRefundNseen ? div(twRefundNreg.UK, nGeoVals.UK.rev) : null,
             retention_rev_pct: twEmailNseen ? div(twEmailNrev, nSalesBase) : null,
             sms_sales_pct: twEmailNseen ? div(twSmsNrev, nSalesBase) : null,
             email_sales_pct: twEmailNseen ? div(twEmailOnlyNrev, nSalesBase) : null,
@@ -3202,6 +3246,8 @@ router.get('/kpi-pulse', async (req, res) => {
             ca_ttf_days: avgOf(opsFcaTtf),
             au_ttf_days: avgOf(opsFauTtf),
             orders_unfulfilled: maxOf(opsFuf),
+            ca_orders_unfulfilled: maxOf(opsFcaUf),
+            au_orders_unfulfilled: maxOf(opsFauUf),
             orders_unfulfilled_24h: maxOf(opsFuf24),
             cs_tickets_pct: (csFseen && fOrderDenom > 0) ? csFtotal / fOrderDenom : null,
             cs_tickets_count: csFseen ? csFtotal : null,
@@ -3226,6 +3272,10 @@ router.get('/kpi-pulse', async (req, res) => {
             tof_spend_pct: hasTwAdsF ? div(Math.max(0, tw.f.s - tw.f.bof), tw.f.s) : null,
             tof_bof_spend_split: hasTwAdsF ? tofBofSplit(tw.f) : null,
             refund_rate: twRefundFseen ? div(a.f.refund, twRefundFdenom) : null,
+            us_refund_rate: twRefundFseen ? div(twRefundFreg.US, fGeoVals.US.rev) : null,
+            ca_refund_rate: twRefundFseen ? div(twRefundFreg.CA, fGeoVals.CA.rev) : null,
+            au_refund_rate: twRefundFseen ? div(twRefundFreg.AU, fGeoVals.AU.rev) : null,
+            uk_refund_rate: twRefundFseen ? div(twRefundFreg.UK, fGeoVals.UK.rev) : null,
             retention_rev_pct: twEmailFseen ? div(twEmailFrev, fSalesBase) : null,
             sms_sales_pct: twEmailFseen ? div(twSmsFrev, fSalesBase) : null,
             email_sales_pct: twEmailFseen ? div(twEmailOnlyFrev, fSalesBase) : null,
@@ -3236,6 +3286,9 @@ router.get('/kpi-pulse', async (req, res) => {
             app_activation: (floAppAttach != null && floAppTtp != null) ? floAppAttach * floAppTtp : null,
             app_net_sub_adds: floIapNs - floIapCs,
             monthly_churn: floChurn,
+            app_lifetime_months: floAppLifetimeMonths,
+            flo_sub_hardware_split: pctSplit(floAppSubRev, floPortableRev + floHomeStudioRev),
+            hardware_mix_sales: pctSplit(floPortableRev, floHomeStudioRev),
             returning_cust_rev_pct: floRetTotal > 0 ? floRetReturning / floRetTotal : null,
             // FLO Chris Share of Spend — Chris-tagged spend / FLO total spend.
             sos_chris: hasMetaF ? div(stratFlo.chris, m.f.s) : null,
@@ -3251,16 +3304,16 @@ router.get('/kpi-pulse', async (req, res) => {
       const KN = [
         'mer','sales','aov','amazon_pct','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct',
         'air_rev_pct','attach','ttp','activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau',
-        'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','orders_unfulfilled_24h',
+        'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
         'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','new_customer_cac','bundle_rev_pct','net_sub_adds',
         'sos_taylor','sos_franz','sos_luke','sos_chris',
       ];
       const KF = [
         'mer','sales','aov','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_dau',
-        'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','orders_unfulfilled_24h',
+        'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
-        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','returning_cust_rev_pct',
+        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','app_lifetime_months','flo_sub_hardware_split','hardware_mix_sales','returning_cust_rev_pct',
         'sos_chris','portable_cac','studio_cac','home_cac','home_studio_cac',
       ];
       function buildCadence(defs) {

@@ -165,6 +165,14 @@ async function fetchUnfulfilledCountsFromErp(start, end) {
         )                                               AS unfulfilled,
         COUNT(*) FILTER (WHERE
           lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
+          AND upper(coalesce(lo.ship_country, '')) IN ('CA','CANADA')
+        )                                               AS ca_unfulfilled,
+        COUNT(*) FILTER (WHERE
+          lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
+          AND upper(coalesce(lo.ship_country, '')) IN ('AU','AUS','AUSTRALIA')
+        )                                               AS au_unfulfilled,
+        COUNT(*) FILTER (WHERE
+          lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
           AND NOW() - lo.created_at >= INTERVAL '24 hours'
         )                                               AS unfulfilled_over_24h
      FROM store.shiphero_live_orders lo
@@ -182,10 +190,17 @@ async function fetchUnfulfilledCountsFromErp(start, end) {
     if (!brand) continue;
     m.set(`${brand}|${row.date}`, {
       unfulfilled: Number(row.unfulfilled) || 0,
+      ca_unfulfilled: Number(row.ca_unfulfilled) || 0,
+      au_unfulfilled: Number(row.au_unfulfilled) || 0,
       unfulfilled_over_24h: Number(row.unfulfilled_over_24h) || 0,
     });
   }
   return m;
+}
+
+async function ensureOpsMetricColumns() {
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS ca_orders_unfulfilled INT DEFAULT 0`);
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS au_orders_unfulfilled INT DEFAULT 0`);
 }
 
 // ── UPS Tracking API (mirrors fetch_one_tracking + fetch_all_trackings) ─────
@@ -468,7 +483,7 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
       if (ttdAvg != null) { orderShipToDoorHours.push(ttdAvg); ordersWithDelivery += 1; }
     }
 
-    const unfMap = unfulfilledMap.get(key) || { unfulfilled: 0, unfulfilled_over_24h: 0 };
+    const unfMap = unfulfilledMap.get(key) || { unfulfilled: 0, ca_unfulfilled: 0, au_unfulfilled: 0, unfulfilled_over_24h: 0 };
     const ttf = shopifyCountryTtf.get(brand) || { CA: { avg: null, count: 0 }, AU: { avg: null, count: 0 } };
 
     rows.push({
@@ -478,6 +493,8 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
       orders_count: bucket.ordersByKey.size,
       orders_with_ups_delivery: ordersWithDelivery,
       orders_unfulfilled: unfMap.unfulfilled,
+      ca_orders_unfulfilled: unfMap.ca_unfulfilled,
+      au_orders_unfulfilled: unfMap.au_unfulfilled,
       orders_unfulfilled_over_24h: unfMap.unfulfilled_over_24h,
       avg_fulfillment_hours: round2(avg(orderFulfillmentHours)),
       avg_ship_to_door_hours: round2(avg(orderShipToDoorHours)),
@@ -500,6 +517,8 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
       brand, date,
       shipments_count: 0, orders_count: 0, orders_with_ups_delivery: 0,
       orders_unfulfilled: unf.unfulfilled,
+      ca_orders_unfulfilled: unf.ca_unfulfilled || 0,
+      au_orders_unfulfilled: unf.au_unfulfilled || 0,
       orders_unfulfilled_over_24h: unf.unfulfilled_over_24h,
       avg_fulfillment_hours: null, avg_ship_to_door_hours: null, avg_shipping_cost_per_order: null,
       ca_avg_ttf_days: round4(ttf.CA.avg), ca_orders_count: ttf.CA.count,
@@ -514,23 +533,26 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
 
 async function upsertRows(rows, statusCounts) {
   if (!rows.length) return { written: 0 };
+  await ensureOpsMetricColumns();
   let written = 0;
   for (const r of rows) {
     await pgQuery(
       `INSERT INTO ops_metrics_daily
         (brand, date,
          shipments_count, orders_count, orders_with_ups_delivery,
-         orders_unfulfilled, orders_unfulfilled_over_24h,
-         avg_fulfillment_hours, avg_ship_to_door_hours, avg_shipping_cost_per_order,
-         ca_avg_ttf_days, ca_orders_count, au_avg_ttf_days, au_orders_count,
-         ups_status_counts, source, computed_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15::jsonb,$16,NOW(),NOW())
+          orders_unfulfilled, ca_orders_unfulfilled, au_orders_unfulfilled, orders_unfulfilled_over_24h,
+          avg_fulfillment_hours, avg_ship_to_door_hours, avg_shipping_cost_per_order,
+          ca_avg_ttf_days, ca_orders_count, au_avg_ttf_days, au_orders_count,
+          ups_status_counts, source, computed_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,NOW(),NOW())
        ON CONFLICT (brand, date) DO UPDATE SET
          shipments_count             = EXCLUDED.shipments_count,
          orders_count                = EXCLUDED.orders_count,
          orders_with_ups_delivery    = EXCLUDED.orders_with_ups_delivery,
-         orders_unfulfilled          = EXCLUDED.orders_unfulfilled,
-         orders_unfulfilled_over_24h = EXCLUDED.orders_unfulfilled_over_24h,
+          orders_unfulfilled          = EXCLUDED.orders_unfulfilled,
+          ca_orders_unfulfilled       = EXCLUDED.ca_orders_unfulfilled,
+          au_orders_unfulfilled       = EXCLUDED.au_orders_unfulfilled,
+          orders_unfulfilled_over_24h = EXCLUDED.orders_unfulfilled_over_24h,
          avg_fulfillment_hours       = EXCLUDED.avg_fulfillment_hours,
          avg_ship_to_door_hours      = EXCLUDED.avg_ship_to_door_hours,
          avg_shipping_cost_per_order = EXCLUDED.avg_shipping_cost_per_order,
@@ -544,7 +566,7 @@ async function upsertRows(rows, statusCounts) {
       [
         r.brand, r.date,
         r.shipments_count, r.orders_count, r.orders_with_ups_delivery,
-        r.orders_unfulfilled, r.orders_unfulfilled_over_24h,
+        r.orders_unfulfilled, r.ca_orders_unfulfilled || 0, r.au_orders_unfulfilled || 0, r.orders_unfulfilled_over_24h,
         r.avg_fulfillment_hours, r.avg_ship_to_door_hours, r.avg_shipping_cost_per_order,
         r.ca_avg_ttf_days, r.ca_orders_count, r.au_avg_ttf_days, r.au_orders_count,
         JSON.stringify(statusCounts || {}), 'erp_maindb',

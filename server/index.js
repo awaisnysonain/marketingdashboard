@@ -420,6 +420,10 @@ async function initPostgresTables() {
         date               DATE        NOT NULL,
         refund_count       INT         DEFAULT 0,
         refund_amount      NUMERIC(14,4) DEFAULT 0,
+        us_refund_amount   NUMERIC(14,4) DEFAULT 0,
+        ca_refund_amount   NUMERIC(14,4) DEFAULT 0,
+        au_refund_amount   NUMERIC(14,4) DEFAULT 0,
+        uk_refund_amount   NUMERIC(14,4) DEFAULT 0,
         avg_refund_amount  NUMERIC(14,4),
         avg_days_to_refund NUMERIC(8,2),
         units_refunded     INT         DEFAULT 0,
@@ -428,7 +432,14 @@ async function initPostgresTables() {
         UNIQUE (brand, date)
       )
     `);
+    await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS us_refund_amount NUMERIC(14,4) DEFAULT 0`);
+    await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS ca_refund_amount NUMERIC(14,4) DEFAULT 0`);
+    await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS au_refund_amount NUMERIC(14,4) DEFAULT 0`);
+    await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS uk_refund_amount NUMERIC(14,4) DEFAULT 0`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_refunds_brand_date ON tw_refunds_daily (brand, date DESC)`);
+
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS ca_orders_unfulfilled INT DEFAULT 0`).catch(() => {});
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS au_orders_unfulfilled INT DEFAULT 0`).catch(() => {});
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_email_sms_daily (

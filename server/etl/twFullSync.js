@@ -33,6 +33,22 @@ function toDateStr(d) {
   return String(d).slice(0, 10);
 }
 
+function regionFromCountry(cc) {
+  const c = String(cc || '').toUpperCase().replace(/[^A-Z]/g, '');
+  if (['US', 'USA', 'UNITEDSTATES', 'UNITEDSTATESOFAMERICA'].includes(c)) return 'US';
+  if (['CA', 'CANADA'].includes(c)) return 'CA';
+  if (['AU', 'AUS', 'AUSTRALIA'].includes(c)) return 'AU';
+  if (['GB', 'UK', 'UNITEDKINGDOM'].includes(c)) return 'UK';
+  return 'OTHER';
+}
+
+async function ensureRefundRegionColumns() {
+  await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS us_refund_amount NUMERIC(14,4) DEFAULT 0`);
+  await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS ca_refund_amount NUMERIC(14,4) DEFAULT 0`);
+  await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS au_refund_amount NUMERIC(14,4) DEFAULT 0`);
+  await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS uk_refund_amount NUMERIC(14,4) DEFAULT 0`);
+}
+
 function addDays(dateStr, n) {
   const d = new Date(dateStr + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
@@ -677,6 +693,7 @@ async function syncTWSegments(brand) {
 async function syncTWRefunds(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
+  await ensureRefundRegionColumns();
 
   const sql = `
     SELECT
@@ -695,6 +712,38 @@ async function syncTWRefunds(brand, startDate, endDate) {
   `;
 
   const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
+  const detailSql = `
+    SELECT
+      r.event_date AS date,
+      toString(r.order_id) AS order_id,
+      abs(SUM(r.total_refunded_price)) AS refund_amount
+    FROM refunds_table AS r
+    WHERE r.platform = 'shopify'
+      AND r.event_date BETWEEN toDate('${startDate}') AND toDate('${endDate}')
+    GROUP BY r.event_date, r.order_id
+  `;
+  const detailRows = await twSqlQuery(brand, detailSql, { period: { startDate, endDate } });
+  const orderIds = [...new Set(detailRows.map(r => String(r.order_id || '').replace(/\.0$/, '')).filter(Boolean))];
+  const regionByOrderId = new Map();
+  for (let i = 0; i < orderIds.length; i += 500) {
+    const chunk = orderIds.slice(i, i + 500);
+    const q = await pgQuery(
+      `SELECT replace(order_id, 'gid://shopify/Order/', '') AS order_id, shipping_country
+         FROM shopify_orders_raw
+        WHERE brand=$1 AND replace(order_id, 'gid://shopify/Order/', '') = ANY($2::text[])`,
+      [brand, chunk]
+    );
+    for (const row of q.rows) regionByOrderId.set(String(row.order_id), regionFromCountry(row.shipping_country));
+  }
+  const regionalByDate = new Map();
+  for (const r of detailRows) {
+    const date = toDateStr(r.date);
+    const bucket = regionalByDate.get(date) || { US: 0, CA: 0, AU: 0, UK: 0 };
+    const region = regionByOrderId.get(String(r.order_id || '').replace(/\.0$/, ''));
+    const amount = parseFloat(r.refund_amount || 0) || 0;
+    if (region && bucket[region] != null) bucket[region] += amount;
+    regionalByDate.set(date, bucket);
+  }
   if (!rows.length) {
     console.log(`[twFullSync] syncTWRefunds ${brand}: no rows`);
     return { rows: 0, errors };
@@ -702,17 +751,23 @@ async function syncTWRefunds(brand, startDate, endDate) {
 
   for (const r of rows) {
     const date = toDateStr(r.date);
+    const regional = regionalByDate.get(date) || { US: 0, CA: 0, AU: 0, UK: 0 };
     try {
       await pgRun(`
         INSERT INTO tw_refunds_daily
-          (brand, date, refund_count, refund_amount, avg_refund_amount, avg_days_to_refund, units_refunded)
-        VALUES ($1,$2,$3,$4,$5,$6,$7)
+          (brand, date, refund_count, refund_amount, avg_refund_amount, avg_days_to_refund, units_refunded,
+           us_refund_amount, ca_refund_amount, au_refund_amount, uk_refund_amount)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
         ON CONFLICT (brand, date) DO UPDATE SET
           refund_count       = EXCLUDED.refund_count,
           refund_amount      = EXCLUDED.refund_amount,
           avg_refund_amount  = EXCLUDED.avg_refund_amount,
           avg_days_to_refund = EXCLUDED.avg_days_to_refund,
           units_refunded     = EXCLUDED.units_refunded,
+          us_refund_amount   = EXCLUDED.us_refund_amount,
+          ca_refund_amount   = EXCLUDED.ca_refund_amount,
+          au_refund_amount   = EXCLUDED.au_refund_amount,
+          uk_refund_amount   = EXCLUDED.uk_refund_amount,
           updated_at         = NOW()
       `, [
         brand, date,
@@ -721,6 +776,10 @@ async function syncTWRefunds(brand, startDate, endDate) {
         r.avg_refund_amount  ? parseFloat(r.avg_refund_amount)  : null,
         r.avg_days_to_refund ? parseFloat(r.avg_days_to_refund) : null,
         parseInt(r.units_refunded  || 0),
+        regional.US || 0,
+        regional.CA || 0,
+        regional.AU || 0,
+        regional.UK || 0,
       ]);
       written++;
     } catch (e) {
@@ -748,7 +807,7 @@ async function syncTWEmailSms(brand, startDate, endDate) {
       '' AS campaign_name,
       ifNull(toString(report_type), 'campaign') AS message_type,
       SUM(ifNull(sent, 0)) AS sent,
-      SUM(ifNull(delivered, 0)) AS delivered,
+      SUM(ifNull(if(delivered = 0, received, delivered), 0)) AS delivered,
       SUM(ifNull(opened, 0)) AS opens,
       SUM(ifNull(opens_unique, 0)) AS unique_opens,
       SUM(ifNull(clicks, 0)) AS clicks,
@@ -787,6 +846,7 @@ async function syncTWEmailSms(brand, startDate, endDate) {
           unique_opens  = EXCLUDED.unique_opens,
           clicks        = EXCLUDED.clicks,
           unique_clicks = EXCLUDED.unique_clicks,
+          unsubscribes  = EXCLUDED.unsubscribes,
           conversions   = EXCLUDED.conversions,
           revenue       = EXCLUDED.revenue,
           open_rate     = EXCLUDED.open_rate,

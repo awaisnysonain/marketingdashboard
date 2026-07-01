@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS ops_metrics_daily (
   orders_with_ups_delivery       INT           DEFAULT 0,
   -- unfulfilled counts (snapshot at run time, by created_at::date)
   orders_unfulfilled             INT           DEFAULT 0,
+  ca_orders_unfulfilled          INT           DEFAULT 0,
+  au_orders_unfulfilled          INT           DEFAULT 0,
   orders_unfulfilled_over_24h    INT           DEFAULT 0,
   -- averages (NULL when no data)
   avg_fulfillment_hours          NUMERIC(10,2),

@@ -77,6 +77,8 @@ const DB_KEY = {
   'Orders Partially Unfulfilled': 'orders_unfulfilled',
   'Total orders partially unfulfilled': 'orders_unfulfilled',
   'Orders partially unfulfilled': 'orders_unfulfilled',
+  'CANADA Partially Unfulfilled Orders #': 'ca_orders_unfulfilled',
+  'AUSTRALIA Partially Unfulfilled Orders #': 'au_orders_unfulfilled',
   'Orders Unfulfilled >24hrs': 'orders_unfulfilled_24h',
   'Unfulfilled Orders': 'orders_unfulfilled',
   'unfulfilled orders': 'orders_unfulfilled',
@@ -153,6 +155,9 @@ const DB_KEY = {
   'App Net New Subs / Week — new paid subs minus cancellations same week': 'app_net_sub_adds',
   'Monthly Churn Rate': 'monthly_churn',
   'Monthly Churn Rate — cancelled this month / active subs at month start': 'monthly_churn',
+  'App Lifetime Value (months)': 'app_lifetime_months',
+  'Flo sub vs hardware % split': 'flo_sub_hardware_split',
+  'Hardware Mix Sales (Portable vs Home/Studio %)': 'hardware_mix_sales',
   'Returning Customer Revenue %': 'returning_cust_rev_pct',
   'Returning Customer Revenue as % of Gross Sales − Discounts': 'returning_cust_rev_pct',
   // Strategist Share of Spend (NOBL ad_name code: 002TC/002FA/002LK/002CA)
@@ -191,9 +196,11 @@ const MONEY_KEYS = new Set([
   'sales', 'aov', 'avg_shipping_cost', 'new_customer_cac',
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
 ]);
-const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio']);
+const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio']);
 const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days']);
 const DECIMAL_KEYS = new Set(['sessions_per_mau', 'sessions_per_dau']);
+const MONTH_KEYS = new Set(['app_lifetime_months']);
+const STRING_KEYS = new Set(['tof_bof_spend_split', 'flo_sub_hardware_split', 'hardware_mix_sales']);
 
 // Keys only available for NOBL. (US MER works for both; Canada MER + Air metrics +
 // blended MER + Amazon + AOV are NOBL-only at the data layer. The strategist Share
@@ -206,7 +213,7 @@ const NOBL_ONLY_KEYS = new Set([
 // Keys only available for FLO.
 const FLO_ONLY_KEYS = new Set([
   'monthly_churn', 'returning_cust_rev_pct', 'app_attach_pct', 'app_ttp', 'app_rev_pct', 'app_net_sub_adds', 'app_activation',
-  'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
+  'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac', 'app_lifetime_months', 'flo_sub_hardware_split', 'hardware_mix_sales',
 ]);
 
 function dbKeyFor(brand, metric) {
@@ -219,7 +226,7 @@ function dbKeyFor(brand, metric) {
 }
 
 function fmtMetricValue(key, v) {
-  if (key === 'tof_bof_spend_split') return v == null || v === '' ? null : String(v);
+  if (STRING_KEYS.has(key)) return v == null || v === '' ? null : String(v);
   if (v == null || !Number.isFinite(Number(v))) return null;
   const n = Number(v);
   if (RATIO_KEYS.has(key)) return `${n.toFixed(2)}x`;
@@ -228,6 +235,7 @@ function fmtMetricValue(key, v) {
   if (INT_KEYS.has(key))   return Math.round(n).toLocaleString();
   if (DAY_KEYS.has(key))   return `${n.toFixed(2)}d`;
   if (DECIMAL_KEYS.has(key)) return n.toFixed(2);
+  if (MONTH_KEYS.has(key)) return `${n.toFixed(2)} months`;
   return String(v);
 }
 
