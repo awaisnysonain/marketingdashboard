@@ -677,23 +677,24 @@ async function syncTWSegments(brand) {
 async function syncTWRefunds(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
-  const dr = chDateRange('event_date', startDate, endDate);
 
   const sql = `
     SELECT
-      event_date                               AS date,
-      uniq(refund_id)                          AS refund_count,
-      abs(SUM(ifNull(total_refunded_price, ifNull(refunded_price, 0)))) AS refund_amount,
-      abs(AVG(ifNull(total_refunded_price, ifNull(refunded_price, 0)))) AS avg_refund_amount,
-      AVG(dateDiff('day', order_date, event_date)) AS avg_days_to_refund,
-      0                                        AS units_refunded
-    FROM refunds_table
-    WHERE ${dr}
-    GROUP BY event_date
-    ORDER BY event_date DESC
+      r.event_date AS date,
+      COUNT(*) AS refund_transactions,
+      uniq(r.order_id) AS refunded_orders,
+      abs(SUM(r.total_refunded_price)) AS refund_amount,
+      abs(SUM(r.total_refunded_price)) / NULLIF(COUNT(*), 0) AS avg_refund_amount,
+      0 AS avg_days_to_refund,
+      0 AS units_refunded
+    FROM refunds_table AS r
+    WHERE r.platform = 'shopify'
+      AND r.event_date BETWEEN toDate('${startDate}') AND toDate('${endDate}')
+    GROUP BY r.event_date
+    ORDER BY r.event_date DESC
   `;
 
-  const rows = await twSqlQuery(brand, sql);
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
   if (!rows.length) {
     console.log(`[twFullSync] syncTWRefunds ${brand}: no rows`);
     return { rows: 0, errors };
@@ -715,7 +716,7 @@ async function syncTWRefunds(brand, startDate, endDate) {
           updated_at         = NOW()
       `, [
         brand, date,
-        parseInt(r.refund_count    || 0),
+        parseInt(r.refund_transactions || r.refunded_orders || 0),
         parseFloat(r.refund_amount || 0),
         r.avg_refund_amount  ? parseFloat(r.avg_refund_amount)  : null,
         r.avg_days_to_refund ? parseFloat(r.avg_days_to_refund) : null,
