@@ -42,6 +42,15 @@ function regionFromCountry(cc) {
   return 'OTHER';
 }
 
+function boundedRate(num, denom) {
+  if (!denom || denom <= 0) return null;
+  const rate = num / denom;
+  // TW occasionally returns cumulative/impossible unique counts in email_sms_table.
+  // Avoid NUMERIC overflow and do not store nonsensical >100% rates.
+  if (!Number.isFinite(rate) || rate < 0 || rate > 1) return null;
+  return parseFloat(rate.toFixed(4));
+}
+
 async function ensureRefundRegionColumns() {
   await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS us_refund_amount NUMERIC(14,4) DEFAULT 0`);
   await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS ca_refund_amount NUMERIC(14,4) DEFAULT 0`);
@@ -867,8 +876,8 @@ async function syncTWEmailSms(brand, startDate, endDate) {
         parseInt(r.unsubscribes  || 0),
         parseInt(r.conversions   || 0),
         parseFloat(r.revenue     || 0),
-        delivered > 0 ? parseFloat((uniqueOpens  / delivered).toFixed(4)) : null,
-        delivered > 0 ? parseFloat((uniqueClicks / delivered).toFixed(4)) : null,
+        boundedRate(uniqueOpens, delivered),
+        boundedRate(uniqueClicks, delivered),
       ]);
       written++;
     } catch (e) {
