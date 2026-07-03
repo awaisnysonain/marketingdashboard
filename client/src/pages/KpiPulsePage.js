@@ -18,7 +18,7 @@ const STATUS_META = {
   gray:   { label: 'No target',  color: 'var(--text3)', bg: 'var(--bg3)', border: 'var(--border)' },
 };
 
-const KPI_PULSE_LOCAL_CACHE_PREFIX = 'kpiPulse:v5:';
+const KPI_PULSE_LOCAL_CACHE_PREFIX = 'kpiPulse:v6:';
 const kpiPulseLocalCacheKey = (month) => `${KPI_PULSE_LOCAL_CACHE_PREFIX}${month || 'latest'}`;
 function hasUsableKpiPulseData(data) {
   if (!data?.cadences) return false;
@@ -1338,17 +1338,26 @@ export default function KpiPulsePage() {
     const series = cadenceData?.series;
     const len = periods.length;
     const built = KPI_ROWS.filter(r => r.cadence === cadence).map(r => {
+      const baseMetric = r.metric;
       const key = dbKeyFor(r.brand, r.metric);
       const raw = key ? series?.[r.brand]?.[key] : null;
+      const hasVisibleOverride = periods.some((period) => {
+        const patch = localOverrides[cellOverrideKey({ ...r, baseMetric }, period)];
+        return patch && patch.value != null && patch.value !== '' && patch.value !== '—';
+      });
       let values; let latest; let variance; let dbBacked = false;
       if (Array.isArray(raw)) {
         const hasAnySourceValue = raw.some(v => v != null && v !== '' && Number.isFinite(Number(v)) || (typeof v === 'string' && v.trim() !== ''));
-        if (!hasAnySourceValue) return null;
-        dbBacked = true;
+        if (!hasAnySourceValue && !hasVisibleOverride) return null;
+        dbBacked = hasAnySourceValue;
         values = raw.map(v => fmtMetricValue(key, v) ?? '—');
         const firstNonNull = raw.find(v => v != null);
         latest = firstNonNull != null ? fmtMetricValue(key, firstNonNull) : '—';
         variance = firstNonNull != null ? varianceFor(key, firstNonNull, r.target) : '';
+      } else if (hasVisibleOverride) {
+        values = Array.from({ length: len }, () => '—');
+        latest = '—';
+        variance = '';
       } else {
         return null;
       }
