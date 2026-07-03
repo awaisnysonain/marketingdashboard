@@ -3301,7 +3301,12 @@ router.get('/kpi-pulse', async (req, res) => {
         const floIapAct = lastNonNull(floIapActs);
         // Churn = cancellations in period / active at end of period.
         const floChurn = (floIapAct && floIapAct > 0) ? floIapCs / floIapAct : null;
-        const floAppLifetimeMonths = floChurn && floChurn > 0 ? 1 / floChurn : null;
+        // The KPI Sheet's "App Lifetime Value (months)" is not inverse churn
+        // and not app age. It is a separate app/subscription lifetime metric
+        // (~2.5–3.1 months historically). We do not currently receive that
+        // metric from Apple/Google reports, so leave it null unless an explicit
+        // verified source/override provides it. Never fabricate it from churn.
+        const floAppLifetimeMonths = null;
         const nSalesBase = a.n.rev;
         const fSalesBase = a.f.rev;
         const nOrderDenom = a.n.orders || shop.n.orders;
