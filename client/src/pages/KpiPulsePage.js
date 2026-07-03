@@ -363,6 +363,17 @@ function applyOverrides(row, periods, overrides = {}) {
   return next;
 }
 
+function hasDisplayValue(v) {
+  if (v == null || v === '' || v === '—') return false;
+  const text = String(v).trim();
+  if (!text || text === '—') return false;
+  // Rows that only contain explicit zeros and have no target are usually source
+  // coverage artifacts (for example regional CB rows with no events/denominator),
+  // not meaningful KPI data. Keep non-zero values and text/split values.
+  const n = Number(text.replace(/[$,%x,]/g, '').replace(/\s*months?$/i, ''));
+  return !Number.isFinite(n) || Math.abs(n) > 1e-12;
+}
+
 function SingleFilterSelect({ label, value, onChange, options, minWidth = 150, compact = true }) {
   const [open, setOpen] = useState(false);
   const selected = options.find(opt => opt.value === value) || options[0];
@@ -1363,7 +1374,9 @@ export default function KpiPulsePage() {
       }
       const status = dbBacked && variance ? statusFor({ variance }) : 'gray';
       const base = { ...r, id: `${r.cadence}:${r.brand}:${r.metric}`, baseMetric: r.metric, category: categoryFor(r), values, latest, variance, status, dbBacked };
-      return applyOverrides(base, periods, localOverrides);
+      const withOverrides = applyOverrides(base, periods, localOverrides);
+      if (!(withOverrides.values || []).some(hasDisplayValue)) return null;
+      return withOverrides;
     }).filter(Boolean);
     return built
       .filter(r => normalizedBrands.includes('ALL') || brandFilterSet.has(r.brand))
