@@ -160,14 +160,16 @@ export function isDateField(header){
 // Heavy read endpoints are cached client-side (sessionStorage, keyed by the
 // NOBL Air data version) so re-visits and date/tab switches return instantly.
 // The cache busts automatically when new data lands (version changes after a sync).
-export const getOverview = (start, end) =>
-  cachedAnalyticsFetch(`overview:${start}:${end}`,
-    () => fetch(`${B}/api/analytics/overview?start=${start}&end=${end}`).then(async r => {
+export const getOverview = (start, end, region = 'ALL') => {
+  const regionParam = Array.isArray(region) ? region.join(',') : (region || 'ALL');
+  return cachedAnalyticsFetch(`overview:${start}:${end}:${regionParam}`,
+    () => fetch(`${B}/api/analytics/overview?start=${start}&end=${end}&region=${encodeURIComponent(regionParam)}`).then(async r => {
       const d = await r.json();
       if (!r.ok) throw new Error(d?.error || `Request failed (${r.status})`);
       return d;
     }),
   ).then(x => x.data);
+};
 export const getNoblTopline = (start, end) =>
   cachedAnalyticsFetch(`nobl-topline:${start}:${end}`,
     () => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(async r => {

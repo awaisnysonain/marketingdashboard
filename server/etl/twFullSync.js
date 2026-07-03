@@ -58,6 +58,14 @@ async function ensureRefundRegionColumns() {
   await pgRun(`ALTER TABLE tw_refunds_daily ADD COLUMN IF NOT EXISTS uk_refund_amount NUMERIC(14,4) DEFAULT 0`);
 }
 
+async function ensureSessionTrafficColumns() {
+  await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS dau BIGINT DEFAULT 0`);
+  await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS mau BIGINT DEFAULT 0`);
+  await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS legacy_sessions BIGINT DEFAULT 0`);
+  await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS visit_sessions BIGINT DEFAULT 0`);
+  await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS dau_mau_pct NUMERIC(10,6)`);
+}
+
 function addDays(dateStr, n) {
   const d = new Date(dateStr + 'T00:00:00Z');
   d.setUTCDate(d.getUTCDate() + n);
@@ -108,7 +116,8 @@ function normalizeRegion(country) {
     'CA': 'CA', 'CAN': 'CA', 'CANADA': 'CA',
     'AU': 'AUS', 'AUS': 'AUS', 'AUSTRALIA': 'AUS',
     'AE': 'DUBAI', 'UAE': 'DUBAI', 'UNITED ARAB EMIRATES': 'DUBAI',
-    'GB': 'EU', 'DE': 'EU', 'FR': 'EU', 'NL': 'EU', 'ES': 'EU',
+    'GB': 'UK', 'UK': 'UK', 'UNITED KINGDOM': 'UK',
+    'DE': 'EU', 'FR': 'EU', 'NL': 'EU', 'ES': 'EU',
     'IT': 'EU', 'SE': 'EU', 'NO': 'EU', 'DK': 'EU', 'FI': 'EU',
     'PT': 'EU', 'BE': 'EU', 'AT': 'EU', 'CH': 'EU', 'IE': 'EU',
     'PL': 'EU', 'CZ': 'EU', 'HU': 'EU', 'RO': 'EU', 'EU': 'EU',
@@ -465,29 +474,73 @@ async function syncTWOrders(brand, startDate, endDate) {
 async function syncTWSessions(brand, startDate, endDate) {
   const errors = [];
   let written = 0;
-  const dr = chDateRange('session_date', startDate, endDate);
+  await ensureSessionTrafficColumns();
 
-  const sql = `
+  const endExclusive = addDays(endDate, 1);
+  const trafficSql = `
+    WITH daily AS (
+      SELECT
+        toStartOfDay(st.event_date) AS event_date,
+        uniq(st.triple_id) AS dau,
+        uniq(st.session_id) AS legacy_sessions,
+        uniq(st.visit_session_id) AS visit_sessions
+      FROM sessions_table AS st
+      WHERE st.event_date >= toDate('${startDate}')
+        AND st.event_date < toDate('${endExclusive}')
+      GROUP BY event_date
+    ),
+    monthly AS (
+      SELECT
+        toStartOfMonth(st.event_date) AS month,
+        uniq(st.triple_id) AS mau
+      FROM sessions_table AS st
+      WHERE st.event_date >= toStartOfMonth(toDate('${startDate}'))
+        AND st.event_date < toDate('${endExclusive}')
+      GROUP BY month
+    )
     SELECT
-      session_date                                                          AS date,
-      COUNT(*)                                                              AS total_sessions,
-      SUM(CASE WHEN is_new_visitor = true THEN 1 ELSE 0 END)               AS new_sessions,
-      SUM(CASE WHEN is_new_visitor = false THEN 1 ELSE 0 END)              AS returning_sessions,
-      SUM(CASE WHEN bounced = true THEN 1 ELSE 0 END)                      AS bounced_sessions,
-      SUM(CASE WHEN converted = true THEN 1 ELSE 0 END)                    AS converted_sessions,
-      AVG(duration_seconds)                                                 AS avg_duration_seconds,
-      SUM(revenue)                                                          AS revenue,
-      SUM(CASE WHEN device_type = 'mobile'  THEN 1 ELSE 0 END)             AS device_mobile,
-      SUM(CASE WHEN device_type = 'desktop' THEN 1 ELSE 0 END)             AS device_desktop,
-      SUM(CASE WHEN device_type = 'tablet'  THEN 1 ELSE 0 END)             AS device_tablet,
-      SUM(pageviews)                                                        AS total_pageviews
-    FROM sessions_table
-    WHERE ${dr}
-    GROUP BY session_date
-    ORDER BY session_date DESC
+      d.event_date AS date,
+      d.dau AS dau,
+      m.mau AS mau,
+      d.legacy_sessions AS legacy_sessions,
+      d.visit_sessions AS visit_sessions,
+      d.visit_sessions AS total_sessions,
+      d.dau / NULLIF(m.mau, 0) AS dau_mau_pct
+    FROM daily AS d
+    LEFT JOIN monthly AS m ON toStartOfMonth(d.event_date) = m.month
+    ORDER BY d.event_date DESC
   `;
 
-  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
+  let rows = [];
+  try {
+    rows = await twSqlQuery(brand, trafficSql, { period: { startDate, endDate } });
+  } catch (e) {
+    // Older TW workspaces exposed session_date/device columns but not the Pixel
+    // triple_id fields. Keep that path as a safe fallback instead of failing the
+    // whole daily cron.
+    console.warn(`[twFullSync] syncTWSessions ${brand}: Pixel traffic query failed, falling back to legacy session_date query: ${e.message}`);
+    const dr = chDateRange('session_date', startDate, endDate);
+    const legacySql = `
+      SELECT
+        session_date                                                          AS date,
+        COUNT(*)                                                              AS total_sessions,
+        SUM(CASE WHEN is_new_visitor = true THEN 1 ELSE 0 END)               AS new_sessions,
+        SUM(CASE WHEN is_new_visitor = false THEN 1 ELSE 0 END)              AS returning_sessions,
+        SUM(CASE WHEN bounced = true THEN 1 ELSE 0 END)                      AS bounced_sessions,
+        SUM(CASE WHEN converted = true THEN 1 ELSE 0 END)                    AS converted_sessions,
+        AVG(duration_seconds)                                                 AS avg_duration_seconds,
+        SUM(revenue)                                                          AS revenue,
+        SUM(CASE WHEN device_type = 'mobile'  THEN 1 ELSE 0 END)             AS device_mobile,
+        SUM(CASE WHEN device_type = 'desktop' THEN 1 ELSE 0 END)             AS device_desktop,
+        SUM(CASE WHEN device_type = 'tablet'  THEN 1 ELSE 0 END)             AS device_tablet,
+        SUM(pageviews)                                                        AS total_pageviews
+      FROM sessions_table
+      WHERE ${dr}
+      GROUP BY session_date
+      ORDER BY session_date DESC
+    `;
+    rows = await twSqlQuery(brand, legacySql, { period: { startDate, endDate } });
+  }
   if (!rows.length) {
     console.log(`[twFullSync] syncTWSessions ${brand}: no rows`);
     return { rows: 0, errors };
@@ -495,7 +548,9 @@ async function syncTWSessions(brand, startDate, endDate) {
 
   for (const r of rows) {
     const date  = toDateStr(r.date);
-    const total = parseInt(r.total_sessions || 0);
+    const visitSessions = parseInt(r.visit_sessions || 0);
+    const legacySessions = parseInt(r.legacy_sessions || 0);
+    const total = parseInt(r.total_sessions || visitSessions || legacySessions || 0);
     const converted = parseInt(r.converted_sessions || 0);
     const bounced   = parseInt(r.bounced_sessions   || 0);
     try {
@@ -503,8 +558,9 @@ async function syncTWSessions(brand, startDate, endDate) {
         INSERT INTO tw_sessions_daily
           (brand, date, total_sessions, new_sessions, returning_sessions,
            bounced_sessions, bounce_rate, converted_sessions, conversion_rate,
-           avg_duration_seconds, revenue, device_mobile, device_desktop, device_tablet, total_pageviews)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           avg_duration_seconds, revenue, device_mobile, device_desktop, device_tablet, total_pageviews,
+           dau, mau, legacy_sessions, visit_sessions, dau_mau_pct)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
         ON CONFLICT (brand, date) DO UPDATE SET
           total_sessions    = EXCLUDED.total_sessions,
           new_sessions      = EXCLUDED.new_sessions,
@@ -519,6 +575,11 @@ async function syncTWSessions(brand, startDate, endDate) {
           device_desktop    = EXCLUDED.device_desktop,
           device_tablet     = EXCLUDED.device_tablet,
           total_pageviews   = EXCLUDED.total_pageviews,
+          dau               = EXCLUDED.dau,
+          mau               = EXCLUDED.mau,
+          legacy_sessions   = EXCLUDED.legacy_sessions,
+          visit_sessions    = EXCLUDED.visit_sessions,
+          dau_mau_pct       = EXCLUDED.dau_mau_pct,
           updated_at        = NOW()
       `, [
         brand, date,
@@ -535,6 +596,11 @@ async function syncTWSessions(brand, startDate, endDate) {
         parseInt(r.device_desktop || 0),
         parseInt(r.device_tablet  || 0),
         parseInt(r.total_pageviews || 0),
+        parseInt(r.dau || 0),
+        parseInt(r.mau || 0),
+        legacySessions,
+        visitSessions,
+        r.dau_mau_pct == null ? null : parseFloat(r.dau_mau_pct),
       ]);
       written++;
     } catch (e) {

@@ -426,7 +426,7 @@ const THRESHOLDS = [
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function LivePage() {
-  const { brandsApi, filterByChannels, filterByRegions } = useDashboardFilters();
+  const { brandsApi, filterByChannels, filterByRegions, isAllRegions } = useDashboardFilters();
   const brand = brandsApi.live;
   const [dateMode, setDateMode] = useState('latest');
   const [customDate, setCustomDate] = useState('');
@@ -543,7 +543,7 @@ export default function LivePage() {
     return () => clearInterval(hourlyRef.current);
   }, [loadLive, loadTrend]);
 
-  const sum = live?.summary;
+  const rawSum = live?.summary;
   const channels = useMemo(
     () => filterByChannels(
       [...(live?.channels || [])].sort((a, b) => (b.revenue || 0) - (a.revenue || 0)),
@@ -552,6 +552,23 @@ export default function LivePage() {
     [live?.channels, filterByChannels],
   );
   const geo = filterByRegions(live?.geo || [], 'region');
+  const sum = useMemo(() => {
+    if (isAllRegions || !rawSum) return rawSum;
+    const totals = geo.reduce((acc, r) => {
+      acc.order_revenue += Number(r.revenue || r.revenue_actual) || 0;
+      acc.total_revenue += Number(r.revenue || r.revenue_actual) || 0;
+      acc.total_spend += Number(r.spend || r.spend_actual) || 0;
+      return acc;
+    }, { order_revenue: 0, total_revenue: 0, total_spend: 0 });
+    totals.mer = totals.total_spend > 0 ? totals.order_revenue / totals.total_spend : null;
+    totals.mer_status = 'gray';
+    totals.total_orders = null;
+    totals.new_customer_orders = null;
+    totals.returning_orders = null;
+    totals.new_customer_rate = null;
+    totals.aov = null;
+    return { ...rawSum, ...totals };
+  }, [rawSum, geo, isAllRegions]);
   const trendArr = trend?.trend || [];
   const euContrib = live?.eu_contribution || null;
 
@@ -706,35 +723,35 @@ export default function LivePage() {
                 </div>
                 <KpiCard
                   label={L.orders}
-                  value={fmtNum(sum.total_orders)}
+                  value={isAllRegions ? fmtNum(sum.total_orders) : '—'}
                   fullValue={String(sum.total_orders || '')}
                   tooltip={TIP.orders}
                   commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('total_orders'), targetLabel: 'Total Orders' }}
                 />
                 <KpiCard
                   label="New customers"
-                  value={fmtNum(sum.new_customer_orders)}
+                  value={isAllRegions ? fmtNum(sum.new_customer_orders) : '—'}
                   fullValue={String(sum.new_customer_orders || '')}
                   tooltip={TIP.ncOrders}
                   commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customers'), targetLabel: 'New Customers' }}
                 />
                 <KpiCard
                   label="Repeat customers"
-                  value={fmtNum(sum.returning_orders)}
+                  value={isAllRegions ? fmtNum(sum.returning_orders) : '—'}
                   fullValue={String(sum.returning_orders || '')}
                   tooltip={TIP.orders}
                   commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('returning_orders'), targetLabel: 'Repeat Customers' }}
                 />
                 <KpiCard
                   label="New customer %"
-                  value={fmtPct(sum.new_customer_rate)}
+                  value={isAllRegions ? fmtPct(sum.new_customer_rate) : '—'}
                   copyValue={sum.new_customer_rate != null ? String(sum.new_customer_rate) : undefined}
                   tooltip={TIP.nvp}
                   commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('new_customer_rate'), targetLabel: 'New Customer %' }}
                 />
                 <KpiCard
                   label={L.aov}
-                  value={fmt$(sum.aov)}
+                  value={isAllRegions ? fmt$(sum.aov) : '—'}
                   fullValue={String(sum.aov || '')}
                   tooltip={TIP.aov}
                   commentTarget={{ targetType: 'kpi', targetKey: commentTargetKey('aov'), targetLabel: L.aov }}

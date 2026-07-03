@@ -46,7 +46,7 @@ const { pgQuery } = require('../db/postgres');
 const ERP_BRAND_NAMES = ['Flo Pilates', 'Nobl Travel'];
 const TO_DASHBOARD_BRAND = { 'Flo Pilates': 'FLO', 'Nobl Travel': 'NOBL' };
 
-// Brand → Shopify stores to ask for CA/AU TTF. Reuses the dashboard's existing
+// Brand → Shopify stores to ask for regional TTF. Reuses the dashboard's existing
 // admin tokens (NOBL main+EU+UK; FLO main+EU). Pass-through API version matches
 // the dashboard's other Shopify ETL.
 const SHOPIFY_STORES_FOR_BRAND = {
@@ -61,7 +61,13 @@ const SHOPIFY_STORES_FOR_BRAND = {
   ],
 };
 
-const REGION_COUNTRIES = { CA: 'Canada', AU: 'Australia' };
+const REGION_COUNTRIES = { US: 'United States', CA: 'Canada', AU: 'Australia', UK: 'United Kingdom' };
+function normalizeTtfCountry(cc) {
+  const c = String(cc || '').toUpperCase().trim();
+  if (['GB', 'UK'].includes(c)) return 'UK';
+  if (['US', 'CA', 'AU'].includes(c)) return c;
+  return null;
+}
 
 // UPS concurrency / retry — slightly more conservative than the Python script
 // (Python uses 250 in-flight; we cap at 100 to be polite to UPS's rate limiter
@@ -165,6 +171,10 @@ async function fetchUnfulfilledCountsFromErp(start, end) {
         )                                               AS unfulfilled,
         COUNT(*) FILTER (WHERE
           lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
+          AND upper(coalesce(lo.ship_country, '')) IN ('US','USA','UNITED STATES','UNITED STATES OF AMERICA')
+        )                                               AS us_unfulfilled,
+        COUNT(*) FILTER (WHERE
+          lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
           AND upper(coalesce(lo.ship_country, '')) IN ('CA','CANADA')
         )                                               AS ca_unfulfilled,
         COUNT(*) FILTER (WHERE
@@ -173,8 +183,22 @@ async function fetchUnfulfilledCountsFromErp(start, end) {
         )                                               AS au_unfulfilled,
         COUNT(*) FILTER (WHERE
           lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
+          AND upper(coalesce(lo.ship_country, '')) IN ('GB','UK','UNITED KINGDOM')
+        )                                               AS uk_unfulfilled,
+        COUNT(*) FILTER (WHERE
+          lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
           AND NOW() - lo.created_at >= INTERVAL '24 hours'
-        )                                               AS unfulfilled_over_24h
+        )                                               AS unfulfilled_over_24h,
+        COUNT(*) FILTER (WHERE
+          lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
+          AND upper(coalesce(lo.ship_country, '')) IN ('US','USA','UNITED STATES','UNITED STATES OF AMERICA')
+          AND NOW() - lo.created_at >= INTERVAL '24 hours'
+        )                                               AS us_unfulfilled_over_24h,
+        COUNT(*) FILTER (WHERE
+          lower(coalesce(lo.fulfillment_status, '')) NOT IN ('fulfilled','canceled','cancelled')
+          AND upper(coalesce(lo.ship_country, '')) IN ('GB','UK','UNITED KINGDOM')
+          AND NOW() - lo.created_at >= INTERVAL '24 hours'
+        )                                               AS uk_unfulfilled_over_24h
      FROM store.shiphero_live_orders lo
      JOIN public.shiphero_brand_ids b
        ON b.account_uuid = lo.account_id
@@ -190,9 +214,13 @@ async function fetchUnfulfilledCountsFromErp(start, end) {
     if (!brand) continue;
     m.set(`${brand}|${row.date}`, {
       unfulfilled: Number(row.unfulfilled) || 0,
+      us_unfulfilled: Number(row.us_unfulfilled) || 0,
       ca_unfulfilled: Number(row.ca_unfulfilled) || 0,
       au_unfulfilled: Number(row.au_unfulfilled) || 0,
+      uk_unfulfilled: Number(row.uk_unfulfilled) || 0,
       unfulfilled_over_24h: Number(row.unfulfilled_over_24h) || 0,
+      us_unfulfilled_over_24h: Number(row.us_unfulfilled_over_24h) || 0,
+      uk_unfulfilled_over_24h: Number(row.uk_unfulfilled_over_24h) || 0,
     });
   }
   return m;
@@ -201,6 +229,12 @@ async function fetchUnfulfilledCountsFromErp(start, end) {
 async function ensureOpsMetricColumns() {
   await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS ca_orders_unfulfilled INT DEFAULT 0`);
   await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS au_orders_unfulfilled INT DEFAULT 0`);
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS us_orders_unfulfilled INT DEFAULT 0`);
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_orders_unfulfilled INT DEFAULT 0`);
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS us_orders_unfulfilled_over_24h INT DEFAULT 0`);
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_orders_unfulfilled_over_24h INT DEFAULT 0`);
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_avg_ttf_days NUMERIC(10,4)`);
+  await pgQuery(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_orders_count INT DEFAULT 0`);
 }
 
 // ── UPS Tracking API (mirrors fetch_one_tracking + fetch_all_trackings) ─────
@@ -383,8 +417,8 @@ function calculateShopifyCountryTtf(start, end, ordersByStoreByBrand) {
     for (const [, orders] of storesMap) {
       for (const order of orders) {
         const shipping = order.shippingAddress || {};
-        const cc = shipping.countryCodeV2 || '';
-        if (!REGION_COUNTRIES[cc]) continue;
+        const cc = normalizeTtfCountry(shipping.countryCodeV2 || '');
+        if (!cc || !REGION_COUNTRIES[cc]) continue;
         const orderCreatedAt = new Date(order.createdAt);
         for (const ful of order.fulfillments || []) {
           if (ful.status && ful.status !== 'SUCCESS') continue;
@@ -407,9 +441,14 @@ function calculateShopifyCountryTtf(start, end, ordersByStoreByBrand) {
   }
 
   // For each (brand, country): average per-order day-counts, then average those.
-  const result = new Map(); // brand → {CA: {avg, count}, AU: {avg, count}}
+  const result = new Map(); // brand → country-code → {avg, count}
   for (const brand of ['NOBL', 'FLO']) {
-    result.set(brand, { CA: { avg: null, count: 0 }, AU: { avg: null, count: 0 } });
+    result.set(brand, {
+      US: { avg: null, count: 0 },
+      CA: { avg: null, count: 0 },
+      AU: { avg: null, count: 0 },
+      UK: { avg: null, count: 0 },
+    });
     const byCountry = byBrandCountryOrder.get(brand);
     if (!byCountry) continue;
     for (const cc of Object.keys(REGION_COUNTRIES)) {
@@ -483,8 +522,8 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
       if (ttdAvg != null) { orderShipToDoorHours.push(ttdAvg); ordersWithDelivery += 1; }
     }
 
-    const unfMap = unfulfilledMap.get(key) || { unfulfilled: 0, ca_unfulfilled: 0, au_unfulfilled: 0, unfulfilled_over_24h: 0 };
-    const ttf = shopifyCountryTtf.get(brand) || { CA: { avg: null, count: 0 }, AU: { avg: null, count: 0 } };
+    const unfMap = unfulfilledMap.get(key) || { unfulfilled: 0, us_unfulfilled: 0, ca_unfulfilled: 0, au_unfulfilled: 0, uk_unfulfilled: 0, unfulfilled_over_24h: 0, us_unfulfilled_over_24h: 0, uk_unfulfilled_over_24h: 0 };
+    const ttf = shopifyCountryTtf.get(brand) || { US: { avg: null, count: 0 }, CA: { avg: null, count: 0 }, AU: { avg: null, count: 0 }, UK: { avg: null, count: 0 } };
 
     rows.push({
       brand,
@@ -493,9 +532,13 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
       orders_count: bucket.ordersByKey.size,
       orders_with_ups_delivery: ordersWithDelivery,
       orders_unfulfilled: unfMap.unfulfilled,
+      us_orders_unfulfilled: unfMap.us_unfulfilled,
       ca_orders_unfulfilled: unfMap.ca_unfulfilled,
       au_orders_unfulfilled: unfMap.au_unfulfilled,
+      uk_orders_unfulfilled: unfMap.uk_unfulfilled,
       orders_unfulfilled_over_24h: unfMap.unfulfilled_over_24h,
+      us_orders_unfulfilled_over_24h: unfMap.us_unfulfilled_over_24h,
+      uk_orders_unfulfilled_over_24h: unfMap.uk_unfulfilled_over_24h,
       avg_fulfillment_hours: round2(avg(orderFulfillmentHours)),
       avg_ship_to_door_hours: round2(avg(orderShipToDoorHours)),
       avg_shipping_cost_per_order: round2(avg(orderShippingCosts)),
@@ -503,6 +546,8 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
       ca_orders_count: ttf.CA.count,
       au_avg_ttf_days: round4(ttf.AU.avg),
       au_orders_count: ttf.AU.count,
+      uk_avg_ttf_days: round4(ttf.UK.avg),
+      uk_orders_count: ttf.UK.count,
     });
   }
 
@@ -512,17 +557,22 @@ function calculateOpsMetrics({ start, end, shipmentRows, costByTracking, deliver
   for (const [key, unf] of unfulfilledMap) {
     if (byBrandDate.has(key)) continue;
     const [brand, date] = key.split('|');
-    const ttf = shopifyCountryTtf.get(brand) || { CA: { avg: null, count: 0 }, AU: { avg: null, count: 0 } };
+    const ttf = shopifyCountryTtf.get(brand) || { US: { avg: null, count: 0 }, CA: { avg: null, count: 0 }, AU: { avg: null, count: 0 }, UK: { avg: null, count: 0 } };
     rows.push({
       brand, date,
       shipments_count: 0, orders_count: 0, orders_with_ups_delivery: 0,
       orders_unfulfilled: unf.unfulfilled,
+      us_orders_unfulfilled: unf.us_unfulfilled || 0,
       ca_orders_unfulfilled: unf.ca_unfulfilled || 0,
       au_orders_unfulfilled: unf.au_unfulfilled || 0,
+      uk_orders_unfulfilled: unf.uk_unfulfilled || 0,
       orders_unfulfilled_over_24h: unf.unfulfilled_over_24h,
+      us_orders_unfulfilled_over_24h: unf.us_unfulfilled_over_24h || 0,
+      uk_orders_unfulfilled_over_24h: unf.uk_unfulfilled_over_24h || 0,
       avg_fulfillment_hours: null, avg_ship_to_door_hours: null, avg_shipping_cost_per_order: null,
       ca_avg_ttf_days: round4(ttf.CA.avg), ca_orders_count: ttf.CA.count,
       au_avg_ttf_days: round4(ttf.AU.avg), au_orders_count: ttf.AU.count,
+      uk_avg_ttf_days: round4(ttf.UK.avg), uk_orders_count: ttf.UK.count,
     });
   }
 
@@ -540,19 +590,24 @@ async function upsertRows(rows, statusCounts) {
       `INSERT INTO ops_metrics_daily
         (brand, date,
          shipments_count, orders_count, orders_with_ups_delivery,
-          orders_unfulfilled, ca_orders_unfulfilled, au_orders_unfulfilled, orders_unfulfilled_over_24h,
-          avg_fulfillment_hours, avg_ship_to_door_hours, avg_shipping_cost_per_order,
-          ca_avg_ttf_days, ca_orders_count, au_avg_ttf_days, au_orders_count,
-          ups_status_counts, source, computed_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17::jsonb,$18,NOW(),NOW())
+           orders_unfulfilled, us_orders_unfulfilled, ca_orders_unfulfilled, au_orders_unfulfilled, uk_orders_unfulfilled,
+           orders_unfulfilled_over_24h, us_orders_unfulfilled_over_24h, uk_orders_unfulfilled_over_24h,
+           avg_fulfillment_hours, avg_ship_to_door_hours, avg_shipping_cost_per_order,
+           ca_avg_ttf_days, ca_orders_count, au_avg_ttf_days, au_orders_count, uk_avg_ttf_days, uk_orders_count,
+           ups_status_counts, source, computed_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24,NOW(),NOW())
        ON CONFLICT (brand, date) DO UPDATE SET
          shipments_count             = EXCLUDED.shipments_count,
          orders_count                = EXCLUDED.orders_count,
          orders_with_ups_delivery    = EXCLUDED.orders_with_ups_delivery,
           orders_unfulfilled          = EXCLUDED.orders_unfulfilled,
+          us_orders_unfulfilled       = EXCLUDED.us_orders_unfulfilled,
           ca_orders_unfulfilled       = EXCLUDED.ca_orders_unfulfilled,
           au_orders_unfulfilled       = EXCLUDED.au_orders_unfulfilled,
+          uk_orders_unfulfilled       = EXCLUDED.uk_orders_unfulfilled,
           orders_unfulfilled_over_24h = EXCLUDED.orders_unfulfilled_over_24h,
+          us_orders_unfulfilled_over_24h = EXCLUDED.us_orders_unfulfilled_over_24h,
+          uk_orders_unfulfilled_over_24h = EXCLUDED.uk_orders_unfulfilled_over_24h,
          avg_fulfillment_hours       = EXCLUDED.avg_fulfillment_hours,
          avg_ship_to_door_hours      = EXCLUDED.avg_ship_to_door_hours,
          avg_shipping_cost_per_order = EXCLUDED.avg_shipping_cost_per_order,
@@ -560,15 +615,18 @@ async function upsertRows(rows, statusCounts) {
          ca_orders_count             = EXCLUDED.ca_orders_count,
          au_avg_ttf_days             = EXCLUDED.au_avg_ttf_days,
          au_orders_count             = EXCLUDED.au_orders_count,
+          uk_avg_ttf_days             = EXCLUDED.uk_avg_ttf_days,
+          uk_orders_count             = EXCLUDED.uk_orders_count,
          ups_status_counts           = EXCLUDED.ups_status_counts,
          source                      = EXCLUDED.source,
          updated_at                  = NOW()`,
       [
         r.brand, r.date,
         r.shipments_count, r.orders_count, r.orders_with_ups_delivery,
-        r.orders_unfulfilled, r.ca_orders_unfulfilled || 0, r.au_orders_unfulfilled || 0, r.orders_unfulfilled_over_24h,
+        r.orders_unfulfilled, r.us_orders_unfulfilled || 0, r.ca_orders_unfulfilled || 0, r.au_orders_unfulfilled || 0, r.uk_orders_unfulfilled || 0,
+        r.orders_unfulfilled_over_24h, r.us_orders_unfulfilled_over_24h || 0, r.uk_orders_unfulfilled_over_24h || 0,
         r.avg_fulfillment_hours, r.avg_ship_to_door_hours, r.avg_shipping_cost_per_order,
-        r.ca_avg_ttf_days, r.ca_orders_count, r.au_avg_ttf_days, r.au_orders_count,
+        r.ca_avg_ttf_days, r.ca_orders_count, r.au_avg_ttf_days, r.au_orders_count, r.uk_avg_ttf_days, r.uk_orders_count,
         JSON.stringify(statusCounts || {}), 'erp_maindb',
       ]
     );

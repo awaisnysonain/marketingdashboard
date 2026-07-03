@@ -28,25 +28,27 @@ const CHANNEL_COLORS = {
 const BRANDS = ['Both', 'NOBL', 'FLO'];
 
 export default function ChannelsPage({ showToast }) {
-  const { dateRange, brands, brandsApi, filterByChannels } = useDashboardFilters();
+  const { dateRange, brands, brandsApi, regionsParam, isAllRegions, filterByChannels } = useDashboardFilters();
   const [rawRows, setRawRows] = useState([]);
+  const [regionScoped, setRegionScoped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const load = useCallback(async () => {
     setLoading(true); setError(null);
     try {
-      const data = await getChannels(dateRange.start, dateRange.end, brandsApi.channels);
+      const data = await getChannels(dateRange.start, dateRange.end, brandsApi.channels, isAllRegions ? '' : regionsParam);
       setRawRows(data.rows || []);
+      setRegionScoped(!!data.region_scoped);
     } catch(e) { setError(e.message); }
     finally { setLoading(false); }
-  }, [dateRange, brandsApi.channels]);
+  }, [dateRange, brandsApi.channels, regionsParam, isAllRegions]);
 
   useEffect(() => { load(); }, [load]);
 
   const rows = useMemo(() => {
     const byBrand = filterByBrands(rawRows, 'brand', brands);
-    return filterByChannels(byBrand, 'channel');
-  }, [rawRows, brands, filterByChannels]);
+    return regionScoped ? byBrand : filterByChannels(byBrand, 'channel');
+  }, [rawRows, brands, filterByChannels, regionScoped]);
 
   // Aggregate KPIs by channel
   const channelAgg = {};
@@ -98,8 +100,14 @@ export default function ChannelsPage({ showToast }) {
     <div className="page-stack">
       {loading ? <Skeleton /> : error ? <ErrorMsg msg={error} onRetry={load} /> : (
         <>
+          {regionScoped && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 10, background: 'var(--warn-dim)', border: '1px solid rgba(176,125,24,.28)', color: 'var(--text2)', fontSize: 12, lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>🌍</span>
+              <span>Showing region-level spend/revenue totals because channel-by-region grain is not available. Switch Region to <strong style={{ color: 'var(--text)' }}>All regions</strong> for platform channel splits.</span>
+            </div>
+          )}
           <div className="section">
-            <div className="section__title">BY CHANNEL</div>
+            <div className="section__title">{regionScoped ? 'BY REGION' : 'BY CHANNEL'}</div>
             <div className="page-kpi-grid">
               {channelKpis.slice(0, 6).map(ch => (
                 <KpiCard
@@ -143,7 +151,7 @@ export default function ChannelsPage({ showToast }) {
             <PaginatedSheetTable
               headers={CH_HEADERS}
               rows={sheetRows}
-              resetDeps={[dateRange.start, dateRange.end]}
+              resetDeps={[dateRange.start, dateRange.end, brands.join(','), regionsParam, regionScoped]}
               defaultSortField={L.date}
               defaultSortDir="desc"
               searchable={true}

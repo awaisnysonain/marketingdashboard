@@ -30,9 +30,13 @@ CREATE TABLE IF NOT EXISTS ops_metrics_daily (
   orders_with_ups_delivery       INT           DEFAULT 0,
   -- unfulfilled counts (snapshot at run time, by created_at::date)
   orders_unfulfilled             INT           DEFAULT 0,
+  us_orders_unfulfilled          INT           DEFAULT 0,
   ca_orders_unfulfilled          INT           DEFAULT 0,
   au_orders_unfulfilled          INT           DEFAULT 0,
+  uk_orders_unfulfilled          INT           DEFAULT 0,
   orders_unfulfilled_over_24h    INT           DEFAULT 0,
+  us_orders_unfulfilled_over_24h INT           DEFAULT 0,
+  uk_orders_unfulfilled_over_24h INT           DEFAULT 0,
   -- averages (NULL when no data)
   avg_fulfillment_hours          NUMERIC(10,2),
   avg_ship_to_door_hours         NUMERIC(10,2),
@@ -42,6 +46,8 @@ CREATE TABLE IF NOT EXISTS ops_metrics_daily (
   ca_orders_count                INT           DEFAULT 0,
   au_avg_ttf_days                NUMERIC(10,4),
   au_orders_count                INT           DEFAULT 0,
+  uk_avg_ttf_days                NUMERIC(10,4),
+  uk_orders_count                INT           DEFAULT 0,
   -- diagnostics
   ups_status_counts              JSONB         DEFAULT '{}'::jsonb,
   source                         TEXT          DEFAULT 'erp_maindb',

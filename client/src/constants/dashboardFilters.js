@@ -140,12 +140,28 @@ const GEO_REGION_ALIASES = {
   // UK is a first-class NOBL region (new Shopify store wdwzan-tc.myshopify.com).
   UK: 'UK', GB: 'UK', 'UNITED KINGDOM': 'UK', 'GREAT BRITAIN': 'UK',
   EU: 'EU', DE: 'EU', FR: 'EU',
-  INTL: 'INTL', INTERNATIONAL: 'INTL',
+  INTL: 'INTL', INTERNATIONAL: 'INTL', OTHER: 'INTL', ROW: 'INTL',
 };
 
 export function canonicalGeoRegion(value) {
   const u = String(value || '').toUpperCase().trim();
   return GEO_REGION_ALIASES[u] || u;
+}
+
+const CHANNEL_ALIASES = {
+  META: 'META', FACEBOOK: 'META', FACEBOOK_ADS: 'META', 'FACEBOOK-ADS': 'META', INSTAGRAM: 'META',
+  GOOGLE: 'GOOGLE', GOOGLE_ADS: 'GOOGLE', 'GOOGLE-ADS': 'GOOGLE', ADWORDS: 'GOOGLE',
+  TIKTOK: 'TIKTOK', TIKTOK_ADS: 'TIKTOK', 'TIKTOK-ADS': 'TIKTOK',
+  SNAPCHAT: 'SNAPCHAT', SNAP: 'SNAPCHAT',
+  PINTEREST: 'PINTEREST',
+  APPLOVIN: 'APPLOVIN', APP_LOVIN: 'APPLOVIN', 'APP-LOVIN': 'APPLOVIN',
+  BING: 'BING', MICROSOFT: 'BING', MICROSOFT_ADS: 'BING',
+  X: 'X', TWITTER: 'X',
+};
+
+export function canonicalChannel(value) {
+  const u = String(value || '').toUpperCase().trim().replace(/\s+/g, '_');
+  return CHANNEL_ALIASES[u] || u;
 }
 
 /** NOBL Air subscriber region buckets (EU is a TW geo code, not an Air bucket; UK is). */
@@ -171,7 +187,7 @@ export function filterByChannels(rows, channelField, selected) {
   const s = normalizeChannels(selected);
   if (s.length === 1 && s[0] === 'ALL') return rows;
   const set = new Set(s);
-  return (rows || []).filter(r => set.has(String(r[channelField] || '').toUpperCase()));
+  return (rows || []).filter(r => set.has(canonicalChannel(r[channelField])));
 }
 
 /** Client-side region row filter (geo tables). */

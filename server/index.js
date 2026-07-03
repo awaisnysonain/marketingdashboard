@@ -358,11 +358,21 @@ async function initPostgresTables() {
         device_desktop       BIGINT      DEFAULT 0,
         device_tablet        BIGINT      DEFAULT 0,
         total_pageviews      BIGINT      DEFAULT 0,
+        dau                  BIGINT      DEFAULT 0,
+        mau                  BIGINT      DEFAULT 0,
+        legacy_sessions      BIGINT      DEFAULT 0,
+        visit_sessions       BIGINT      DEFAULT 0,
+        dau_mau_pct          NUMERIC(10,6),
         created_at           TIMESTAMPTZ DEFAULT NOW(),
         updated_at           TIMESTAMPTZ DEFAULT NOW(),
         UNIQUE (brand, date)
       )
     `);
+    await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS dau BIGINT DEFAULT 0`);
+    await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS mau BIGINT DEFAULT 0`);
+    await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS legacy_sessions BIGINT DEFAULT 0`);
+    await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS visit_sessions BIGINT DEFAULT 0`);
+    await pgRun(`ALTER TABLE tw_sessions_daily ADD COLUMN IF NOT EXISTS dau_mau_pct NUMERIC(10,6)`);
     await pgRun(`CREATE INDEX IF NOT EXISTS idx_tw_sessions_brand_date ON tw_sessions_daily (brand, date DESC)`);
 
     await pgRun(`
@@ -440,6 +450,12 @@ async function initPostgresTables() {
 
     await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS ca_orders_unfulfilled INT DEFAULT 0`).catch(() => {});
     await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS au_orders_unfulfilled INT DEFAULT 0`).catch(() => {});
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS us_orders_unfulfilled INT DEFAULT 0`).catch(() => {});
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_orders_unfulfilled INT DEFAULT 0`).catch(() => {});
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS us_orders_unfulfilled_over_24h INT DEFAULT 0`).catch(() => {});
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_orders_unfulfilled_over_24h INT DEFAULT 0`).catch(() => {});
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_avg_ttf_days NUMERIC(10,4)`).catch(() => {});
+    await pgRun(`ALTER TABLE ops_metrics_daily ADD COLUMN IF NOT EXISTS uk_orders_count INT DEFAULT 0`).catch(() => {});
 
     await pgRun(`
       CREATE TABLE IF NOT EXISTS tw_email_sms_daily (
@@ -1386,6 +1402,7 @@ app.use('/api/store', requireAppAuth, storeRouter);
 const ALL_DAILY_TASKS = [
   'klaviyo',
   'tw_refresh',          // brand-level summary (TW Summary API)
+  'tw_sessions',         // Triple Pixel sessions_table → DAU/MAU/sessions KPI rows
   'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
   'tw_refunds',          // TW refunds_table → tw_refunds_daily (KPI Pulse refund rate)
   'tw_email_sms',        // TW email_sms_table → retention/email/SMS/unsub KPI rows
@@ -1460,6 +1477,7 @@ if (!CRON_ENABLED) {
     const checks = [
       { table: 'tw_summary_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_summary_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
       { table: 'tw_geo_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_geo_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      { table: 'tw_sessions_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_sessions_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
       { table: 'tw_ads_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_ads_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
       { table: 'meta_ads_daily', sql: `SELECT brand, COUNT(*)::int n FROM meta_ads_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
       { table: 'tw_refunds_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_refunds_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },

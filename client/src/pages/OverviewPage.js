@@ -224,7 +224,7 @@ function computeTotals(rows) {
 
 export default function OverviewPage({ showToast }) {
   const {
-    dateRange, brands, regions, isAllBrands, brandsApi,
+    dateRange, brands, regions, isAllBrands, isAllRegions, brandsApi, regionsParam,
   } = useDashboardFilters();
 
   const [data, setData] = useState(null);
@@ -246,10 +246,10 @@ export default function OverviewPage({ showToast }) {
     const prior = priorRangeFor(start, end);
     try {
       const fetches = [
-        getOverview(start, end),
+        getOverview(start, end, regionsParam),
         getSyncStatus().catch(() => null),
         getSubscriptions(start, end, brandsApi.subs).catch(() => null),
-        getOverview(prior.start, prior.end).catch(() => null),
+        getOverview(prior.start, prior.end, regionsParam).catch(() => null),
       ];
       if (showNobl) {
         fetches.push(getNoblAirPerformanceBundle(start, end).catch(() => null));
@@ -262,7 +262,7 @@ export default function OverviewPage({ showToast }) {
       setAirBundle(bundle || null);
     } catch (e) { setError(e.message); }
     finally { setLoading(false); }
-  }, [dateRange, brandsApi.subs, showNobl]);
+  }, [dateRange, brandsApi.subs, showNobl, regionsParam]);
 
   const airData = useMemo(
     () => (airBundle ? resolveAirPerfFromBundle(airBundle, regions, 14, 0) : null),
@@ -323,12 +323,14 @@ export default function OverviewPage({ showToast }) {
     revenue: pctDelta(totals.total_revenue, prevTotals.total_revenue),
     spend:   pctDelta(totals.total_spend, prevTotals.total_spend),
     mer:     pctDelta(totals.blended_mer, prevTotals.blended_mer),
-    orders:  pctDelta((totals.nobl_orders || 0) + (totals.flo_orders || 0), (prevTotals.nobl_orders || 0) + (prevTotals.flo_orders || 0)),
-  }), [totals, prevTotals]);
+    orders:  isAllRegions ? pctDelta((totals.nobl_orders || 0) + (totals.flo_orders || 0), (prevTotals.nobl_orders || 0) + (prevTotals.flo_orders || 0)) : null,
+  }), [totals, prevTotals, isAllRegions]);
 
   const subsSummary = subsData?.summary || {};
   const airTotals = airData?.totals || {};
   const tableRows = chartRows.map(toTableRow);
+  const totalOrdersValue = isAllRegions ? fmtNum((totals.nobl_orders || 0) + (totals.flo_orders || 0)) : '—';
+  const totalNewCustomersValue = isAllRegions ? fmtNum((totals.nobl_nc_orders || 0) + (totals.flo_nc_orders || 0)) : '—';
 
   // Daily forecast scoped to the selected brand(s) → combined red/green vs plan.
   const fcBrand = (isAllBrands || brands.length > 1)
@@ -412,7 +414,7 @@ export default function OverviewPage({ showToast }) {
               <div className="ov-hero__tiles">
                 <Tile label={L.blendedMer} value={fmtRatio(totals.blended_mer || 0)} pct={deltas.mer} fcPct={fcPeriod?.merPct} />
                 <Tile label="Total ad spend" value={fmt$(totals.total_spend || 0)} pct={deltas.spend} invert fcPct={fcPeriod?.spPct} />
-                <Tile label="Total orders" value={fmtNum((totals.nobl_orders || 0) + (totals.flo_orders || 0))} pct={deltas.orders} />
+                <Tile label="Total orders" value={totalOrdersValue} pct={deltas.orders} />
               </div>
             </div>
           </div>
@@ -450,8 +452,8 @@ export default function OverviewPage({ showToast }) {
                     forecast={fcPeriod?.forecastSpend != null ? fmt$(fcPeriod.forecastSpend) : null} variancePct={fcPeriod?.spPct} invertSpend />
                   <ScRow label={L.blendedMer} showNobl={showNobl} showFlo={showFlo} nobl={fmtRatio(totals.nobl_mer || 0)} flo={fmtRatio(totals.flo_mer || 0)} comb={fmtRatio(totals.blended_mer || 0)}
                     forecast={fcPeriod?.forecastMer != null ? fmtRatio(fcPeriod.forecastMer) : null} variancePct={fcPeriod?.merPct} />
-                  <ScRow label="Orders" showNobl={showNobl} showFlo={showFlo} nobl={fmtNum(totals.nobl_orders || 0)} flo={fmtNum(totals.flo_orders || 0)} comb={fmtNum((totals.nobl_orders || 0) + (totals.flo_orders || 0))} />
-                  <ScRow label="New customers" showNobl={showNobl} showFlo={showFlo} nobl={fmtNum(totals.nobl_nc_orders || 0)} flo={fmtNum(totals.flo_nc_orders || 0)} comb={fmtNum((totals.nobl_nc_orders || 0) + (totals.flo_nc_orders || 0))} />
+                  <ScRow label="Orders" showNobl={showNobl} showFlo={showFlo} nobl={isAllRegions ? fmtNum(totals.nobl_orders || 0) : '—'} flo={isAllRegions ? fmtNum(totals.flo_orders || 0) : '—'} comb={totalOrdersValue} />
+                  <ScRow label="New customers" showNobl={showNobl} showFlo={showFlo} nobl={isAllRegions ? fmtNum(totals.nobl_nc_orders || 0) : '—'} flo={isAllRegions ? fmtNum(totals.flo_nc_orders || 0) : '—'} comb={totalNewCustomersValue} />
                 </tbody>
               </table>
             </div>

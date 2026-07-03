@@ -96,6 +96,34 @@ export default function StoreFLOPage({ showToast }) {
   const subStats = data?.subs_stats || {};
   const email    = data?.email    || [];
 
+  const summaryForDisplay = useMemo(() => {
+    if (isAllRegions) return summary;
+    const byDate = {};
+    for (const r of geo) {
+      if (!byDate[r.date]) {
+        byDate[r.date] = {
+          date: r.date,
+          order_revenue: 0,
+          total_revenue: 0,
+          revenue: 0,
+          total_spend: 0,
+          total_orders: null,
+          new_customer_orders: null,
+          returning_customer_orders: null,
+        };
+      }
+      const rev = Number(r.revenue || r.revenue_actual) || 0;
+      const spend = Number(r.spend || r.spend_actual) || 0;
+      byDate[r.date].order_revenue += rev;
+      byDate[r.date].total_revenue += rev;
+      byDate[r.date].revenue += rev;
+      byDate[r.date].total_spend += spend;
+    }
+    return Object.values(byDate)
+      .map(r => ({ ...r, mer: mer(r.order_revenue, r.total_spend), aov: null, nvp_pct: null, rc_pct: null }))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  }, [summary, geo, isAllRegions]);
+
   const subTotals = useMemo(() => subDaily.reduce((a, r) => ({
     total:       a.total       + (Number(r.sub_revenue_actual) || 0),
     rebill:      a.rebill      + (Number(r.rebill_revenue)     || 0),
@@ -210,7 +238,7 @@ export default function StoreFLOPage({ showToast }) {
             ))}
           </div>
 
-          {tab === 'overview'      && <OverviewTab      summary={summary} totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} cellStatus={cellStatus} />}
+          {tab === 'overview'      && <OverviewTab      summary={summaryForDisplay} totals={totals} totalMer={totalMer} totalAov={totalAov} nvpPct={nvpPct} cellStatus={cellStatus} />}
           {tab === 'channels'      && <ChannelsTab      channels={channels} chAgg={chAgg} cellStatus={cellStatus} />}
           {tab === 'regions'       && <RegionsTab       geo={geo} geoAgg={geoAgg} cellStatus={cellStatus} />}
           {tab === 'products'      && <ProductsTab      products={products} prodAgg={prodAgg} cellStatus={cellStatus} />}

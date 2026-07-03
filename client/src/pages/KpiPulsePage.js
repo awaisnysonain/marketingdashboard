@@ -18,18 +18,22 @@ const STATUS_META = {
   gray:   { label: 'No target',  color: 'var(--text3)', bg: 'var(--bg3)', border: 'var(--border)' },
 };
 
-const KPI_PULSE_LOCAL_CACHE_PREFIX = 'kpiPulse:v3:';
+const KPI_PULSE_LOCAL_CACHE_PREFIX = 'kpiPulse:v5:';
 const kpiPulseLocalCacheKey = (month) => `${KPI_PULSE_LOCAL_CACHE_PREFIX}${month || 'latest'}`;
+function hasUsableKpiPulseData(data) {
+  if (!data?.cadences) return false;
+  return Object.values(data.cadences).some(c => Array.isArray(c?.periods) && c.periods.length > 0);
+}
 function readKpiPulseLocalCache(month) {
   if (typeof window === 'undefined') return null;
   try {
     const raw = window.localStorage.getItem(kpiPulseLocalCacheKey(month));
     const data = raw ? JSON.parse(raw) : null;
-    return data?.cadences ? data : null;
+    return hasUsableKpiPulseData(data) ? data : null;
   } catch (_) { return null; }
 }
 function writeKpiPulseLocalCache(month, data) {
-  if (typeof window === 'undefined' || !data?.cadences) return;
+  if (typeof window === 'undefined' || !hasUsableKpiPulseData(data)) return;
   try {
     window.localStorage.setItem(kpiPulseLocalCacheKey(month), JSON.stringify(data));
     if (data.selectedMonth) window.localStorage.setItem(kpiPulseLocalCacheKey(data.selectedMonth), JSON.stringify(data));
@@ -77,13 +81,20 @@ const DB_KEY = {
   'Orders Partially Unfulfilled': 'orders_unfulfilled',
   'Total orders partially unfulfilled': 'orders_unfulfilled',
   'Orders partially unfulfilled': 'orders_unfulfilled',
+  'US Orders partially unfulfilled': 'us_orders_unfulfilled',
+  'UK orders partially unfulfilled': 'uk_orders_unfulfilled',
+  'US unfulfilled orders': 'us_orders_unfulfilled',
+  'UK unfulfilled orders': 'uk_orders_unfulfilled',
   'CANADA Partially Unfulfilled Orders #': 'ca_orders_unfulfilled',
   'AUSTRALIA Partially Unfulfilled Orders #': 'au_orders_unfulfilled',
   'Orders Unfulfilled >24hrs': 'orders_unfulfilled_24h',
+  'US Orders Unfulfilled >24hrs': 'us_orders_unfulfilled_24h',
+  'UK Orders Unfulfilled >24hrs': 'uk_orders_unfulfilled_24h',
   'Unfulfilled Orders': 'orders_unfulfilled',
   'unfulfilled orders': 'orders_unfulfilled',
   'Time to Fulfillment': 'avg_fulfillment_days',
   'US Time to Fulfillment': 'avg_fulfillment_days',
+  'UK Time to Fulfillment': 'uk_ttf_days',
   'Avg shipping time length (from shipped to customer door)': 'avg_ship_to_door_days',
   'CA Time to Fulfillment': 'ca_ttf_days',
   'AUS Time to Fulfillment': 'au_ttf_days',
@@ -139,6 +150,10 @@ const DB_KEY = {
   'Blended nCPA': 'new_customer_cac',
   'Bundle % of NOBL Revenue': 'bundle_rev_pct',
   'Bundle % of Total NOBL Revenue': 'bundle_rev_pct',
+  'Site Conversion Rate': 'site_cvr',
+  'Discounts as % of Gross Sales − Discounts': 'discounts_pct',
+  'Returning vs New Customer Split (as visitors)': 'returning_new_customer_split',
+  'Email — Flow vs Campaign Split': 'email_flow_campaign_split',
   'Total Refund Rate': 'refund_rate',
   'US Refund Rate': 'us_refund_rate',
   'UK Refund Rate': 'uk_refund_rate',
@@ -147,6 +162,10 @@ const DB_KEY = {
   // Air subs (NOBL only)
   'Net Subscriber Adds': 'net_sub_adds',
   'Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week': 'net_sub_adds',
+  'International Activation Rate': 'intl_activation',
+  'AUS Activation Rate %': 'au_activation',
+  'CA Activation Rate %': 'ca_activation',
+  'UK Activation Rate%': 'uk_activation',
   // FLO IAP
   'App Rev as % of Gross Sales − Discounts': 'app_rev_pct',
   'App Attach %': 'app_attach_pct',
@@ -166,6 +185,10 @@ const DB_KEY = {
   'Share of Spend TOF — Luke':   'sos_luke',
   'Share of Spend — Chris TOF':  'sos_chris',
   'Share of Spend TOF — Chris':  'sos_chris',
+  'Ads launched in test-video-all combine for a 0.95 ROAS — Taylor': 'test_video_roas_taylor',
+  'Ads launched in test-video-all combine for a 0.95 ROAS — Franz': 'test_video_roas_franz',
+  'Ads launched in test-video-all combine for a 0.95 ROAS — Luke': 'test_video_roas_luke',
+  'Ads launched in test-video-all combine for a 0.95 ROAS — Chris': 'test_video_roas_chris',
   // FLO Chris Share of Spend + product-bucket CAC (Chris is the FLO strategist)
   'Share of Spend — Chris':      'sos_chris',
   'Portable Reformer CAC':       'portable_cac',
@@ -190,17 +213,18 @@ const PCT_KEYS = new Set([
   'whitelisting_spend_pct', 'test_spend_pct', 'tof_spend_pct', 'retention_rev_pct', 'app_attach_pct', 'app_ttp',
   'bundle_rev_pct', 'us_sales_pct', 'ca_sales_pct', 'au_sales_pct', 'eu_sales_pct', 'uk_sales_pct',
   'refund_rate', 'us_refund_rate', 'uk_refund_rate', 'au_refund_rate', 'ca_refund_rate', 'cs_closed_pct', 'app_rev_pct', 'app_activation', 'sms_sales_pct', 'email_sales_pct', 'unsubscribe_rate', 'dau_mau_stickiness',
+  'site_cvr', 'discounts_pct', 'intl_activation', 'au_activation', 'ca_activation', 'uk_activation',
 ]);
-const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer']);
+const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer', 'test_video_roas_taylor', 'test_video_roas_franz', 'test_video_roas_luke', 'test_video_roas_chris']);
 const MONEY_KEYS = new Set([
   'sales', 'aov', 'avg_shipping_cost', 'new_customer_cac',
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
 ]);
-const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio']);
-const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days']);
+const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'us_orders_unfulfilled', 'uk_orders_unfulfilled', 'us_orders_unfulfilled_24h', 'uk_orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio']);
+const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days', 'uk_ttf_days']);
 const DECIMAL_KEYS = new Set(['sessions_per_mau', 'sessions_per_dau']);
 const MONTH_KEYS = new Set(['app_lifetime_months']);
-const STRING_KEYS = new Set(['tof_bof_spend_split', 'flo_sub_hardware_split', 'hardware_mix_sales']);
+const STRING_KEYS = new Set(['tof_bof_spend_split', 'flo_sub_hardware_split', 'hardware_mix_sales', 'email_flow_campaign_split', 'returning_new_customer_split']);
 
 // Keys only available for NOBL. (US MER works for both; Canada MER + Air metrics +
 // blended MER + Amazon + AOV are NOBL-only at the data layer. The strategist Share
@@ -212,7 +236,7 @@ const NOBL_ONLY_KEYS = new Set([
 ]);
 // Keys only available for FLO.
 const FLO_ONLY_KEYS = new Set([
-  'monthly_churn', 'returning_cust_rev_pct', 'app_attach_pct', 'app_ttp', 'app_rev_pct', 'app_net_sub_adds', 'app_activation',
+  'monthly_churn', 'app_attach_pct', 'app_ttp', 'app_rev_pct', 'app_net_sub_adds', 'app_activation',
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac', 'app_lifetime_months', 'flo_sub_hardware_split', 'hardware_mix_sales',
 ]);
 
@@ -1286,9 +1310,13 @@ export default function KpiPulsePage() {
     getKpiPulse({ month: selectedMonth })
       .then((d) => {
         if (!alive) return;
-        setPulse(d);
-        setLocalOverrides(d?.overrides || {});
-        writeKpiPulseLocalCache(selectedMonth, d);
+        if (hasUsableKpiPulseData(d)) {
+          setPulse(d);
+          setLocalOverrides(d?.overrides || {});
+          writeKpiPulseLocalCache(selectedMonth, d);
+        } else {
+          setPulse(prev => prev || null);
+        }
       })
       .catch(() => {
         if (alive && !cached) setPulse(null);
@@ -1314,20 +1342,20 @@ export default function KpiPulsePage() {
       const raw = key ? series?.[r.brand]?.[key] : null;
       let values; let latest; let variance; let dbBacked = false;
       if (Array.isArray(raw)) {
+        const hasAnySourceValue = raw.some(v => v != null && v !== '' && Number.isFinite(Number(v)) || (typeof v === 'string' && v.trim() !== ''));
+        if (!hasAnySourceValue) return null;
         dbBacked = true;
         values = raw.map(v => fmtMetricValue(key, v) ?? '—');
         const firstNonNull = raw.find(v => v != null);
         latest = firstNonNull != null ? fmtMetricValue(key, firstNonNull) : '—';
         variance = firstNonNull != null ? varianceFor(key, firstNonNull, r.target) : '';
       } else {
-        values = Array.from({ length: len }, () => '—');
-        latest = '—';
-        variance = '';
+        return null;
       }
       const status = dbBacked && variance ? statusFor({ variance }) : 'gray';
       const base = { ...r, id: `${r.cadence}:${r.brand}:${r.metric}`, baseMetric: r.metric, category: categoryFor(r), values, latest, variance, status, dbBacked };
       return applyOverrides(base, periods, localOverrides);
-    });
+    }).filter(Boolean);
     return built
       .filter(r => normalizedBrands.includes('ALL') || brandFilterSet.has(r.brand))
       .filter(r => category === 'ALL' || r.category === category)
@@ -1373,9 +1401,9 @@ export default function KpiPulsePage() {
       <PageIntro>
         <div style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
           <div style={{ color: 'var(--text3)', fontSize: 12, lineHeight: 1.45, flex: '1 1 420px' }}>
-            Leadership KPI matrix across NOBL and FLO. Metrics available in the database — revenue, blended &amp; geo MER,
-            AOV, Amazon share, and NOBL Air attach / activation / trial-to-paid — are computed live for daily, weekly,
-            and quarterly periods (and advance automatically each day). Metrics with no database source are shown blank.
+            Leadership KPI matrix across NOBL and FLO. Only source-backed KPIs with at least one value in the selected
+            cadence/month are shown; rows without a connected API/database source, or rows that are completely blank,
+            are removed automatically.
           </div>
           {pulse?.asOf && (
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text2)', background: 'var(--bg3)', border: '1px solid var(--border)', borderRadius: 20, padding: '3px 10px', whiteSpace: 'nowrap' }}>

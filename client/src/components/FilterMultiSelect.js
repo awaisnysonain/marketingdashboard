@@ -21,22 +21,27 @@ export default function FilterMultiSelect({
     if (open) setDraft(normalize(value));
   }, [open, value, normalize]);
 
+  function commit(next) {
+    const normalized = normalize(next);
+    setDraft(normalized);
+    onChange(normalized);
+  }
+
   function toggle(v) {
     const vv = String(v).toUpperCase();
     if (vv === 'ALL') {
-      setDraft(['ALL']);
+      commit(['ALL']);
       return;
     }
+    let next;
     if (draft.includes('ALL')) {
-      setDraft([vv]);
-      return;
-    }
-    if (draft.includes(vv)) {
-      const next = draft.filter(x => x !== vv);
-      setDraft(next.length ? next : ['ALL']);
+      next = [vv];
+    } else if (draft.includes(vv)) {
+      next = draft.filter(x => x !== vv);
     } else {
-      setDraft([...draft, vv]);
+      next = [...draft, vv];
     }
+    commit(next.length ? next : ['ALL']);
   }
 
   const display = multiFilterLabel(selected, options);
@@ -77,15 +82,15 @@ export default function FilterMultiSelect({
                 );
               })}
               <div className="filter-multi-select__actions">
-                <button type="button" className="filter-multi-select__reset" onClick={() => setDraft(['ALL'])}>
+                <button type="button" className="filter-multi-select__reset" onClick={() => commit(['ALL'])}>
                   Reset
                 </button>
                 <button
                   type="button"
                   className="filter-multi-select__apply"
-                  onClick={() => { onChange(normalize(draft)); setOpen(false); }}
+                  onClick={() => { commit(draft); setOpen(false); }}
                 >
-                  Apply
+                  Done
                 </button>
               </div>
             </div>

@@ -17,7 +17,7 @@ const HIDDEN = { brand: false, region: false, channel: false, date: false };
 const RULES = [
   // path matcher (prefix) → which filters apply
   [(p) => p === '/' || p.startsWith('/overview'),        { brand: true,  region: true,  channel: false, date: true }],
-  [(p) => p.startsWith('/channels'),                     { brand: true,  region: false, channel: true,  date: true }],
+  [(p) => p.startsWith('/channels'),                     { brand: true,  region: true,  channel: true,  date: true }],
   [(p) => p.startsWith('/meta-ads'),                     { brand: true,  region: false, channel: false, date: true }],
   [(p) => p.startsWith('/subscriptions'),                { brand: true,  region: false, channel: false, date: true }],
   // Live has its own "latest / pick a date" control, so the global date range is hidden there.

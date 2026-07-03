@@ -16,6 +16,12 @@ const TASK_CATALOG = {
     populates: ['tw_summary_daily', 'tw_geo_daily', 'tw_channel_daily'],
     impact: 'Core revenue, ad spend, MER, regional (incl. UK) and channel breakdowns will be STALE or MISSING on Overview, NOBL/FLO Topline, Channels, and Live. This is the most important task.',
   },
+  tw_sessions: {
+    label: 'Triple Pixel traffic sessions',
+    script: 'server/etl/twFullSync.js → syncTWSessions()',
+    populates: ['tw_sessions_daily'],
+    impact: 'KPI Pulse DAU/MAU stickiness and Sessions per MAU/DAU will be blank/stale for affected day(s).',
+  },
   tw_order_revenue: {
     label: 'Canonical order-revenue split (Shopify + Amazon)',
     script: 'server/etl/twFullSync.js (order revenue)',

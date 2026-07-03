@@ -145,11 +145,15 @@ export default function FloToplinePage() {
       channelByDateCh[`${r.date}|${r.channel}`] = r;
       channelRev[r.channel] = (channelRev[r.channel] || 0) + (Number(r.revenue_1d) || 0);
     }
-    const rgSet = new Set(), geoByDateRg = {}, regionRev = {};
+    const rgSet = new Set(), geoByDateRg = {}, regionRev = {}, regionalSummaryByDate = {};
     for (const r of geoData) {
       rgSet.add(r.region);
       geoByDateRg[`${r.date}|${r.region}`] = r;
       regionRev[r.region] = (regionRev[r.region] || 0) + (Number(r.revenue_actual || r.revenue) || 0);
+      if (!regionalSummaryByDate[r.date]) regionalSummaryByDate[r.date] = { date: r.date, order_revenue: 0, total_revenue: 0, total_spend: 0, mer: null };
+      regionalSummaryByDate[r.date].order_revenue += Number(r.revenue_actual || r.revenue) || 0;
+      regionalSummaryByDate[r.date].total_revenue += Number(r.revenue_actual || r.revenue) || 0;
+      regionalSummaryByDate[r.date].total_spend += Number(r.spend_actual || r.spend) || 0;
     }
     const prSet = new Set(), productByDatePr = {}, productRev = {};
     for (const r of (data.products || [])) {
@@ -160,8 +164,13 @@ export default function FloToplinePage() {
     const allDates = mergeToplineDates(data.summary, channelsData, geoData, data.products);
     const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
 
+    const effectiveSummaryByDate = isAllRegions ? summaryByDate : regionalSummaryByDate;
+    for (const r of Object.values(effectiveSummaryByDate)) {
+      r.mer = Number(r.total_spend) > 0 ? Number(r.order_revenue || r.total_revenue || 0) / Number(r.total_spend) : null;
+    }
+
     const chartData = allDates.map((d) => {
-      const r = summaryByDate[d] || {};
+      const r = effectiveSummaryByDate[d] || {};
       const rev = Number(r.order_revenue || r.total_revenue) || 0;
       const spend = Number(r.total_spend) || 0;
       return {
@@ -205,7 +214,7 @@ export default function FloToplinePage() {
 
     return {
       dates: allDates,
-      summaryByDate,
+      summaryByDate: effectiveSummaryByDate,
       channelNames: sortByRevenueDesc(chSet, channelRev),
       channelByDateCh,
       regionNames: sortByRevenueDesc(rgSet, regionRev),
@@ -221,9 +230,9 @@ export default function FloToplinePage() {
     };
   }, [data, filterByChannels, filterByRegions, isAllRegions]);
 
-  useEffect(() => { if (channelNames.length && !activeChannel) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
-  useEffect(() => { if (regionNames.length && !activeRegion) setActiveRegion(regionNames[0]); }, [regionNames, activeRegion]);
-  useEffect(() => { if (productNames.length && !activeProduct) setActiveProduct(productNames[0]); }, [productNames, activeProduct]);
+  useEffect(() => { if (channelNames.length && (!activeChannel || !channelNames.includes(activeChannel))) setActiveChannel(channelNames[0]); }, [channelNames, activeChannel]);
+  useEffect(() => { if (regionNames.length && (!activeRegion || !regionNames.includes(activeRegion))) setActiveRegion(regionNames[0]); }, [regionNames, activeRegion]);
+  useEffect(() => { if (productNames.length && (!activeProduct || !productNames.includes(activeProduct))) setActiveProduct(productNames[0]); }, [productNames, activeProduct]);
 
   // Daily forecast (brand-level) → red/green vs each day's order revenue.
   const fc = useDailyForecast('FLO', range.start, range.end);

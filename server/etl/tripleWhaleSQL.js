@@ -264,7 +264,7 @@ async function fetchOrderCounts(brand, startYmd, endYmd) {
 }
 
 async function fetchRegionRevenue(brand, startYmd, endYmd) {
-  // Returns { ymd: { US, CA, AUS, DUBAI, EU, TOTAL } } using shipping country
+  // Returns { ymd: { US, CA, AUS, DUBAI, UK, EU, TOTAL } } using shipping country
   const rows = await twSqlQuery(brand,
     `SELECT ot.event_date AS event_date,
             CASE
@@ -272,6 +272,7 @@ async function fetchRegionRevenue(brand, startYmd, endYmd) {
               WHEN ot.customer_from_country_code = 'CA' THEN 'CA'
               WHEN ot.customer_from_country_code = 'AU' THEN 'AUS'
               WHEN ot.customer_from_country_code = 'AE' THEN 'DUBAI'
+              WHEN ot.customer_from_country_code IN ('GB','UK') THEN 'UK'
               WHEN ot.customer_from_country_code IN ('AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','CH','MC','NO') THEN 'EU'
               ELSE 'OTHER'
             END AS region,
@@ -285,7 +286,7 @@ async function fetchRegionRevenue(brand, startYmd, endYmd) {
   (rows || []).forEach(r => {
     const ymd = String(r?.event_date || '').slice(0, 10);
     if (!ymd) return;
-    if (!out[ymd]) out[ymd] = { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
+    if (!out[ymd]) out[ymd] = { US: 0, CA: 0, AUS: 0, DUBAI: 0, UK: 0, EU: 0, OTHER: 0 };
     out[ymd][r.region] = Number(r.revenue || 0);
   });
   return out;
@@ -327,7 +328,7 @@ async function fetchRegionSpend(brand, startYmd, endYmd) {
   (rows || []).forEach(r => {
     const ymd = String(r?.event_date || '').slice(0, 10);
     if (!ymd) return;
-    if (!out[ymd]) out[ymd] = { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
+    if (!out[ymd]) out[ymd] = { US: 0, CA: 0, AUS: 0, DUBAI: 0, UK: 0, EU: 0, OTHER: 0 };
     const region = mapCountryToSpendRegion(r.country);
     out[ymd][region] = (out[ymd][region] || 0) + Number(r.spend || 0);
   });
@@ -631,8 +632,8 @@ async function refreshBrand(brand, startYmd, endYmd) {
     const totalRev = orderRev;
     const totalSp  = Number(spend[date] || 0) + Number(euSpend[date] || 0);
     const ord      = orders[date] || { total_orders: 0, new_customer_orders: 0 };
-    const reg      = regionRev[date] || { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
-    const regSp    = regionSp[date] || { US: 0, CA: 0, AUS: 0, DUBAI: 0, EU: 0, OTHER: 0 };
+    const reg      = regionRev[date] || { US: 0, CA: 0, AUS: 0, DUBAI: 0, UK: 0, EU: 0, OTHER: 0 };
+    const regSp    = regionSp[date] || { US: 0, CA: 0, AUS: 0, DUBAI: 0, UK: 0, EU: 0, OTHER: 0 };
 
     // EU shop ad spend rolls into EU region bucket when NOBL_EU is configured.
     const euSpendVal = Number(euSpend[date] || 0);
@@ -640,7 +641,7 @@ async function refreshBrand(brand, startYmd, endYmd) {
 
     // Spend with no country breakout (TW "No country breakout" row).
     const breakdownSum = (regSp.US || 0) + (regSp.CA || 0) + (regSp.AUS || 0)
-      + (regSp.DUBAI || 0) + (regSp.EU || 0) + (regSp.OTHER || 0);
+      + (regSp.DUBAI || 0) + (regSp.UK || 0) + (regSp.EU || 0) + (regSp.OTHER || 0);
     const unallocated = Math.max(0, totalSp - breakdownSum);
     if (unallocated > 0) regSp.OTHER = (regSp.OTHER || 0) + unallocated;
 
@@ -694,6 +695,7 @@ async function refreshBrand(brand, startYmd, endYmd) {
       CA:    { revenue: reg.CA,    spend: regSp.CA },
       AUS:   { revenue: reg.AUS,   spend: regSp.AUS },
       DUBAI: { revenue: reg.DUBAI, spend: regSp.DUBAI },
+      UK:    { revenue: reg.UK || 0, spend: regSp.UK || 0 },
       EU:    { revenue: regionEUForGeo, spend: regSp.EU },
       OTHER: { revenue: reg.OTHER || 0, spend: regSp.OTHER || 0 },
       TOTAL: { revenue: totalRev,  spend: totalSp },

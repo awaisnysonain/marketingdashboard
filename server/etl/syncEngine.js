@@ -764,7 +764,7 @@ async function runSync(options = {}) {
   const duration = Date.now() - t0;
   const totalRows = results.reduce((s, r) => s + (r.rows || 0), 0);
   const KPI_PULSE_TASKS = new Set([
-    'tw_refresh', 'tw_geo', 'tw_ads', 'tw_order_revenue', 'tw_refunds', 'tw_email_sms',
+    'tw_refresh', 'tw_geo', 'tw_ads', 'tw_sessions', 'tw_order_revenue', 'tw_refunds', 'tw_email_sms',
     'meta_ads', 'shopify_orders', 'nobl_air_aggregate', 'product_daily', 'ops_metrics',
     'cs_tickets', 'shopify_disputes', 'iap', 'appstle_contracts',
   ]);
