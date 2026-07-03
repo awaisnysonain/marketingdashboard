@@ -3334,8 +3334,11 @@ router.get('/kpi-pulse', async (req, res) => {
             au_activation: regionActivation(airReg.AUS),
             ca_activation: regionActivation(airReg.CA),
             uk_activation: regionActivation(airReg.UK),
-            dau_mau_stickiness: sessNseen ? nDauMau : null,
-            sessions_per_mau: sessNseen ? div(sessNsessions, nMau) : null,
+            // App engagement Sheet KPIs are app analytics metrics, not web/TW
+            // Pixel sessions. Do not fill them from tw_sessions_daily; live app
+            // API overlay or explicit verified overrides can supply them.
+            dau_mau_stickiness: null,
+            sessions_per_mau: null,
             // Phase 2/3 additions
             avg_shipping_cost: avgOf(opsNcost),
             avg_fulfillment_days: avgOf(opsNfulfillDays),
@@ -3378,11 +3381,14 @@ router.get('/kpi-pulse', async (req, res) => {
             ca_refund_rate: twRefundNseen ? div(twRefundNreg.CA, nGeoVals.CA.rev) : null,
             au_refund_rate: twRefundNseen ? div(twRefundNreg.AU, nGeoVals.AU.rev) : null,
             uk_refund_rate: twRefundNseen ? div(twRefundNreg.UK, nGeoVals.UK.rev) : null,
-            retention_rev_pct: twEmailNseen ? div(twEmailNrev, nSalesBase) : null,
-            sms_sales_pct: twEmailNseen ? div(twSmsNrev, nSalesBase) : null,
-            email_sales_pct: twEmailNseen ? div(twEmailOnlyNrev, nSalesBase) : null,
-            email_flow_campaign_split: twEmailNseen ? pctSplit(twFlowNrev, twCampaignNrev) : null,
-            unsubscribe_rate: twEmailNseen ? div(twUnsubN, twDeliveredN) : null,
+            // TW email_sms revenue does not match the KPI Sheet's retention
+            // source. Avoid fabricating future values from the wrong feed; use
+            // verified overrides or add the exact source when available.
+            retention_rev_pct: null,
+            sms_sales_pct: null,
+            email_sales_pct: null,
+            email_flow_campaign_split: null,
+            unsubscribe_rate: null,
             new_customer_cac: div(a.n.spend, a.n.orders),
             bundle_rev_pct: div(noblBundleRev, nSalesBase || noblProductRev),
             net_sub_adds: airNew - airCanc,
@@ -3405,8 +3411,11 @@ router.get('/kpi-pulse', async (req, res) => {
             site_cvr: sessFseen ? div(fOrderDenom, sessFsessions) : null,
             discounts_pct: div(shop.f.discounts, fSalesBase),
             returning_new_customer_split: pctSplit(floRetReturning, Math.max(0, floRetTotal - floRetReturning)),
-            dau_mau_stickiness: sessFseen ? fDauMau : null,
-            sessions_per_dau: sessFseen ? div(sessFsessions, sessFdau) : null,
+            // App engagement Sheet KPIs are app analytics metrics, not web/TW
+            // Pixel sessions. Do not fill them from tw_sessions_daily; live app
+            // API overlay or explicit verified overrides can supply them.
+            dau_mau_stickiness: null,
+            sessions_per_dau: null,
             avg_shipping_cost: avgOf(opsFcost),
             avg_fulfillment_days: avgOf(opsFfulfillDays),
             avg_ship_to_door_days: avgOf(opsFshipDays),
@@ -3448,11 +3457,14 @@ router.get('/kpi-pulse', async (req, res) => {
             ca_refund_rate: twRefundFseen ? div(twRefundFreg.CA, fGeoVals.CA.rev) : null,
             au_refund_rate: twRefundFseen ? div(twRefundFreg.AU, fGeoVals.AU.rev) : null,
             uk_refund_rate: twRefundFseen ? div(twRefundFreg.UK, fGeoVals.UK.rev) : null,
-            retention_rev_pct: twEmailFseen ? div(twEmailFrev, fSalesBase) : null,
-            sms_sales_pct: twEmailFseen ? div(twSmsFrev, fSalesBase) : null,
-            email_sales_pct: twEmailFseen ? div(twEmailOnlyFrev, fSalesBase) : null,
-            email_flow_campaign_split: twEmailFseen ? pctSplit(twFlowFrev, twCampaignFrev) : null,
-            unsubscribe_rate: twEmailFseen ? div(twUnsubF, twDeliveredF) : null,
+            // TW email_sms revenue does not match the KPI Sheet's retention
+            // source. Avoid fabricating future values from the wrong feed; use
+            // verified overrides or add the exact source when available.
+            retention_rev_pct: null,
+            sms_sales_pct: null,
+            email_sales_pct: null,
+            email_flow_campaign_split: null,
+            unsubscribe_rate: null,
             app_rev_pct: div(floIapRevenue, fSalesBase),
             app_attach_pct: floAppAttach,
             app_ttp: floAppTtp,
