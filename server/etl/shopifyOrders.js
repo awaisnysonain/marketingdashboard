@@ -16,6 +16,10 @@ const STORE_CONFIG = {
     brand: 'NOBL', store_key: 'NOBL_MAIN',
     shop_id: process.env.NOBL_SHOPIFY_SHOP, token: process.env.NOBL_SHOPIFY_TOKEN,
   },
+  NOBL_UK: {
+    brand: 'NOBL', store_key: 'NOBL_UK',
+    shop_id: process.env.NOBL_UK_SHOPIFY_SHOP, token: process.env.NOBL_UK_SHOPIFY_TOKEN,
+  },
   FLO_MAIN: {
     brand: 'FLO',  store_key: 'FLO_MAIN',
     shop_id: process.env.FLO_SHOPIFY_SHOP, token: process.env.FLO_SHOPIFY_TOKEN,
@@ -308,10 +312,11 @@ async function fetchOrdersForRange(storeKey, startDate, endDate) {
 
 /**
  * Sync orders for a brand (NOBL or FLO) over [startDate, endDate].
- * For NOBL → just NOBL_MAIN. For FLO → both FLO_MAIN and FLO_EU.
+ * For NOBL → NOBL_MAIN + optional NOBL_UK. For FLO → FLO_MAIN + FLO_EU.
  */
 async function syncShopifyOrders(brand, startDate, endDate) {
-  const stores = brand === 'NOBL' ? ['NOBL_MAIN'] : ['FLO_MAIN', 'FLO_EU'];
+  const stores = (brand === 'NOBL' ? ['NOBL_MAIN', 'NOBL_UK'] : ['FLO_MAIN', 'FLO_EU'])
+    .filter((storeKey) => STORE_CONFIG[storeKey]?.shop_id && STORE_CONFIG[storeKey]?.token);
   const out = { rows: 0, errors: [], byStore: {} };
   for (const storeKey of stores) {
     try {

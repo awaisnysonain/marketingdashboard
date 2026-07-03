@@ -86,6 +86,20 @@ async function syncNoblUk({ start, end, commit = false, includeSpend = false } =
 
   let totalRev = 0;
   let written = 0;
+  let deleted = 0;
+  if (commit) {
+    // tw_refresh pulls the main NOBL workspace first and may create UK rows with
+    // shared/global ad-account spend and no UK-store revenue. Replace the entire
+    // UK slice for this range from the UK TW workspace so stale/bogus rows do not
+    // survive on zero-revenue days.
+    const del = await pgRun(
+      `DELETE FROM tw_geo_daily
+       WHERE brand = $1 AND UPPER(region) = $2
+         AND date BETWEEN $3::date AND $4::date`,
+      [UK_BRAND, UK_REGION, startYmd, endYmd],
+    );
+    deleted = del?.rowCount || 0;
+  }
   for (const r of rows) {
     totalRev += r.revenue;
     console.log(`  ${r.date}  rev=${r.revenue.toFixed(2)}  spend=${r.spend == null ? 'NULL' : r.spend.toFixed(2)}  mer=${r.mer == null ? 'NULL' : r.mer.toFixed(2)}`);
@@ -105,9 +119,9 @@ async function syncNoblUk({ start, end, commit = false, includeSpend = false } =
   }
 
   console.log(
-    `[NOBL UK] ${commit ? `wrote ${written}` : `${rows.length} would-write`} region=UK rows · total revenue $${totalRev.toFixed(2)}${commit ? '' : '  (DRY-RUN — nothing written)'}`,
+    `[NOBL UK] ${commit ? `deleted ${deleted}, wrote ${written}` : `${rows.length} would-write`} region=UK rows · total revenue $${totalRev.toFixed(2)}${commit ? '' : '  (DRY-RUN — nothing written)'}`,
   );
-  return { start: startYmd, end: endYmd, rows: rows.length, written, totalRevenue: totalRev, commit, includeSpend };
+  return { start: startYmd, end: endYmd, rows: rows.length, written, deleted, totalRevenue: totalRev, commit, includeSpend };
 }
 
 if (require.main === module) {

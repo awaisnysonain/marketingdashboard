@@ -16,6 +16,12 @@ const TASK_CATALOG = {
     populates: ['tw_summary_daily', 'tw_geo_daily', 'tw_channel_daily'],
     impact: 'Core revenue, ad spend, MER, regional (incl. UK) and channel breakdowns will be STALE or MISSING on Overview, NOBL/FLO Topline, Channels, and Live. This is the most important task.',
   },
+  nobl_uk_tw: {
+    label: 'NOBL UK dedicated Triple Whale revenue override',
+    script: 'server/etl/syncNoblUk.js',
+    populates: ['tw_geo_daily region=UK for brand=NOBL'],
+    impact: 'NOBL UK regional revenue will be stale or overwritten by the main/shared NOBL TW workspace. UK MER intentionally stays blank unless a true UK-attributed spend source is provided.',
+  },
   tw_sessions: {
     label: 'Triple Pixel traffic sessions',
     script: 'server/etl/twFullSync.js → syncTWSessions()',

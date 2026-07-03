@@ -1402,6 +1402,7 @@ app.use('/api/store', requireAppAuth, storeRouter);
 const ALL_DAILY_TASKS = [
   'klaviyo',
   'tw_refresh',          // brand-level summary (TW Summary API)
+  'nobl_uk_tw',          // dedicated NOBL UK TW workspace → NOBL region='UK' revenue
   'tw_sessions',         // Triple Pixel sessions_table → DAU/MAU/sessions KPI rows
   'tw_order_revenue',    // canonical revenue split (Shopify + Amazon)
   'tw_refunds',          // TW refunds_table → tw_refunds_daily (KPI Pulse refund rate)

@@ -28,6 +28,7 @@ const {
   syncTWOrderRevenue,
 } = require('./twFullSync');
 const { runShopifyDisputes } = require('./syncShopifyDisputes');
+const { syncNoblUk } = require('./syncNoblUk');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -739,6 +740,27 @@ async function runSync(options = {}) {
     }
   }
 
+  // ── NOBL UK regional revenue override ─────────────────────────────────────
+  // The main NOBL TW workspace can expose UK as shared/global spend with no UK
+  // store revenue. After tw_refresh, replace NOBL region='UK' rows from the
+  // dedicated NOBL UK TW workspace (revenue only; spend intentionally blank).
+  if (tasks.includes('nobl_uk_tw') && brands.includes('NOBL')) {
+    const chunks = weeklyChunks(startDate, endDate);
+    for (const chunk of chunks) {
+      const logId = await logStart(runId, 'NOBL', 'nobl_uk_tw', chunk.start, chunk.end);
+      try {
+        const r = await syncNoblUk({ start: chunk.start, end: chunk.end, commit: true, includeSpend: false });
+        await logFinish(logId, 'success', r.written);
+        results.push({ task: 'nobl_uk_tw', brand: 'NOBL', chunk, rows: r.written, deleted: r.deleted });
+      } catch (e) {
+        const msg = `nobl_uk_tw ${chunk.start}-${chunk.end}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
+      }
+    }
+  }
+
   // ── IAP sync (Apple App Store + Google Play → iap_daily) ────────────
   if (tasks.includes('iap')) {
     // Google earnings reports publish ~1 month late, so always re-sync a wider
@@ -764,7 +786,7 @@ async function runSync(options = {}) {
   const duration = Date.now() - t0;
   const totalRows = results.reduce((s, r) => s + (r.rows || 0), 0);
   const KPI_PULSE_TASKS = new Set([
-    'tw_refresh', 'tw_geo', 'tw_ads', 'tw_sessions', 'tw_order_revenue', 'tw_refunds', 'tw_email_sms',
+    'tw_refresh', 'tw_geo', 'nobl_uk_tw', 'tw_ads', 'tw_sessions', 'tw_order_revenue', 'tw_refunds', 'tw_email_sms',
     'meta_ads', 'shopify_orders', 'nobl_air_aggregate', 'product_daily', 'ops_metrics',
     'cs_tickets', 'shopify_disputes', 'iap', 'appstle_contracts',
   ]);
