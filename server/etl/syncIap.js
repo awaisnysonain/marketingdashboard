@@ -25,6 +25,24 @@ const { fetchPlayEarningsDaily, fetchPlaySubsDaily } = require('./iap/googlePlay
 
 const BRANDS = ['NOBL', 'FLO'];
 
+// Skip brand/platform combos that don't have credentials configured. Prevents
+// the nightly cron from logging 45 warnings-per-day for a brand that was never
+// set up (e.g. NOBL has no Apple/Google IAP account) and lets the alerting
+// layer surface a single "no creds" line instead.
+function brandHasAppleCreds(brand) {
+  const B = String(brand).toUpperCase();
+  return !!(process.env[`${B}_APPLE_ISSUER_ID`]
+    && process.env[`${B}_APPLE_KEY_ID`]
+    && process.env[`${B}_APPLE_PRIVATE_KEY_PATH`]
+    && process.env[`${B}_APPLE_VENDOR_NUMBER`]);
+}
+function brandHasGoogleCreds(brand) {
+  const B = String(brand).toUpperCase();
+  return !!(process.env[`${B}_GOOGLE_DEVELOPER_ACCOUNT_ID`]
+    && process.env[`${B}_GOOGLE_PACKAGE_NAME`]
+    && process.env[`${B}_GOOGLE_SERVICE_ACCOUNT_PATH`]);
+}
+
 function eachDate(start, end) {
   const out = [];
   for (let d = new Date(`${start}T00:00:00Z`); d.toISOString().slice(0, 10) <= end; d.setUTCDate(d.getUTCDate() + 1)) {
@@ -83,11 +101,20 @@ async function syncIap({ start, end, commit = false, brands = BRANDS, platforms 
   const dates = eachDate(startYmd, endYmd);
   const summary = { apple: { units: 0, revenueUsd: 0, daysWithData: 0 }, google: { units: 0, revenueUsd: 0, daysWithData: 0 }, subsRows: 0, written: 0 };
 
+  const skipped = [];
   for (const brand of brands) {
+    const hasApple = doApple && brandHasAppleCreds(brand);
+    const hasGoogle = doGoogle && brandHasGoogleCreds(brand);
+    if (doApple && !hasApple) { skipped.push(`${brand}/apple (no creds)`); }
+    if (doGoogle && !hasGoogle) { skipped.push(`${brand}/google (no creds)`); }
+    if (!hasApple && !hasGoogle) {
+      console.log(`  ${brand}: no IAP credentials configured — skipping entire brand`);
+      continue;
+    }
     // ── Google Play earnings — monthly zips, loaded once for the whole range ──
     let googleByDate = {};
     let googleSubsByDate = {};
-    if (doGoogle) {
+    if (hasGoogle) {
       try {
         const g = await fetchPlayEarningsDaily(brand, startYmd, endYmd);
         googleByDate = g.byDate;
@@ -108,7 +135,7 @@ async function syncIap({ start, end, commit = false, brands = BRANDS, platforms 
 
     for (const date of dates) {
       // ── Apple (Sales reports, per day) ──
-      if (doApple) try {
+      if (hasApple) try {
         const agg = await fetchAppleIapDaily(brand, date);
         if (agg.units !== 0 || agg.proceeds_raw !== 0) {
           summary.apple.units += agg.units;
@@ -121,7 +148,7 @@ async function syncIap({ start, end, commit = false, brands = BRANDS, platforms 
         console.warn(`  ${brand} apple  ${date}  ERR ${e.message}`);
       }
       // ── Apple subscription state (snapshot + events) ──
-      if (subs && doApple) try {
+      if (subs && hasApple) try {
         const s = await fetchAppleSubsDaily(brand, date);
         if (s.active || s.new || s.cancelled) {
           summary.subsRows++;
@@ -148,8 +175,9 @@ async function syncIap({ start, end, commit = false, brands = BRANDS, platforms 
     }
   }
 
-  console.log(`[IAP] Apple: ${summary.apple.units} units · $${summary.apple.revenueUsd.toFixed(2)} USD (${summary.apple.daysWithData}d). Google: ${summary.google.units} units · $${summary.google.revenueUsd.toFixed(2)} USD (${summary.google.daysWithData}d). Subs: ${summary.subsRows} day(s). ${commit ? `Wrote ${summary.written} revenue + ${summary.subsRows} subs rows.` : 'DRY-RUN — nothing written.'}`);
-  return { start: startYmd, end: endYmd, commit, ...summary };
+  const skippedSuffix = skipped.length ? `  Skipped (no creds): ${skipped.join(', ')}.` : '';
+  console.log(`[IAP] Apple: ${summary.apple.units} units · $${summary.apple.revenueUsd.toFixed(2)} USD (${summary.apple.daysWithData}d). Google: ${summary.google.units} units · $${summary.google.revenueUsd.toFixed(2)} USD (${summary.google.daysWithData}d). Subs: ${summary.subsRows} day(s). ${commit ? `Wrote ${summary.written} revenue + ${summary.subsRows} subs rows.` : 'DRY-RUN — nothing written.'}${skippedSuffix}`);
+  return { start: startYmd, end: endYmd, commit, skipped, ...summary };
 }
 
 if (require.main === module) {
