@@ -480,6 +480,111 @@ async function getTicketsFromMongo(dbConfig, start, end) {
 }
 
 /**
+ * Extended per-day metrics from Mongo — FRT, Csat, recovery revenue, wrong-order
+ * counts, and top ticket themes. All aggregated for the given UTC day window.
+ * Any sub-query that errors leaves its field null; total_tickets/matching row
+ * behavior is preserved.
+ */
+async function getExtendedMetricsFromMongo(dbConfig, start, end) {
+  if (!dbConfig.uri) return {};
+  const client = new MongoClient(dbConfig.uri, { serverSelectionTimeoutMS: 8000 });
+  try {
+    await client.connect();
+    const db = client.db();
+    const out = {};
+
+    // First Response Time — hourly rollup gives sum + count directly.
+    try {
+      const [frt] = await db.collection('hourly_brand_response_resolution_stats').aggregate([
+        { $addFields: { hourStartDate: {
+            $switch: { branches: [
+              { case: { $eq: [{ $type: '$hourStartUTC' }, 'date'] }, then: '$hourStartUTC' },
+              { case: { $eq: [{ $type: '$hourStartUTC' }, 'string'] },
+                then: { $dateFromString: { dateString: '$hourStartUTC', onError: null, onNull: null } } },
+            ], default: null } } } },
+        { $match: { hourStartDate: { $gte: start, $lt: end } } },
+        { $group: { _id: null,
+            frCount: { $sum: { $ifNull: ['$firstResponseCount', 0] } },
+            frSum:   { $sum: { $ifNull: ['$firstResponseSecondsSum', 0] } },
+            frRCount:{ $sum: { $ifNull: ['$firstResolutionCount', 0] } },
+            frRSum:  { $sum: { $ifNull: ['$firstResolutionSecondsSum', 0] } },
+        } },
+      ]).toArray();
+      if (frt) {
+        out.first_response_count = Number(frt.frCount) || 0;
+        out.first_response_seconds_sum = Number(frt.frSum) || 0;
+        out.first_resolution_count = Number(frt.frRCount) || 0;
+        out.first_resolution_seconds_sum = Number(frt.frRSum) || 0;
+      }
+    } catch (e) { console.warn(`[CsTickets:${dbConfig.brand}] FRT agg failed: ${e.message}`); }
+
+    // Csat — mean of csats.score submitted in day. Filter to docs that actually
+    // carry a numeric score; ~96% of csats rows have score=null (rating not
+    // submitted by the customer) and averaging with those pulls avg toward 0.
+    try {
+      const [csat] = await db.collection('csats').aggregate([
+        { $match: {
+            submittedAt: { $gte: start, $lt: end },
+            isActive: { $ne: false },
+            score: { $type: 'number' },
+        } },
+        { $group: { _id: null, sumScore: { $sum: '$score' }, count: { $sum: 1 } } },
+      ]).toArray();
+      if (csat) {
+        out.csat_count = Number(csat.count) || 0;
+        out.csat_sum   = Number(csat.sumScore) || 0;
+      }
+    } catch (e) { console.warn(`[CsTickets:${dbConfig.brand}] Csat agg failed: ${e.message}`); }
+
+    // Recovery Revenue — refundrequests filed in day but NOT processed (rejected /
+    // pending / cancelled by customer). Sum totalOrderAmount as "saved" revenue.
+    try {
+      const rec = await db.collection('refundrequests').aggregate([
+        { $match: { createdAt: { $gte: start, $lt: end } } },
+        { $group: { _id: { $ifNull: ['$status', 'unknown'] }, amt: { $sum: '$totalOrderAmount' }, n: { $sum: 1 } } },
+      ]).toArray();
+      let recovered = 0, refundedApproved = 0;
+      for (const r of rec) {
+        const s = String(r._id || '').toLowerCase();
+        if (/reject|denied|declined|cancel/.test(s)) recovered += Number(r.amt) || 0;
+        else if (/approved|processed|completed|success/.test(s)) refundedApproved += Number(r.amt) || 0;
+      }
+      out.recovery_revenue = recovered;
+      out.refund_processed_amount = refundedApproved;
+    } catch (e) { console.warn(`[CsTickets:${dbConfig.brand}] Recovery agg failed: ${e.message}`); }
+
+    // Wrong-Order Count — conversations tagged with wrong-order / missing-part /
+    // shipment-error / defective / faulty (heuristic across tag names).
+    try {
+      const wrong = await db.collection('conversations').aggregate([
+        { $match: { createdAt: { $gte: start, $lt: end } } },
+        { $unwind: { path: '$tags', preserveNullAndEmptyArrays: false } },
+        { $match: { 'tags.name': { $regex: /wrong[- ]?order|missing[- ]?(part|package|item)|shipment[- ]?error|defective|faulty|incorrect|reshipment/i } } },
+        { $group: { _id: '$_id' } },
+        { $count: 'n' },
+      ]).toArray();
+      out.wrong_order_count = wrong[0]?.n || 0;
+    } catch (e) { console.warn(`[CsTickets:${dbConfig.brand}] WrongOrder agg failed: ${e.message}`); }
+
+    // Top ticket themes — top 3 tag names by conversation count in the day.
+    try {
+      const themes = await db.collection('conversations').aggregate([
+        { $match: { createdAt: { $gte: start, $lt: end }, 'tags.0': { $exists: true } } },
+        { $unwind: '$tags' },
+        { $group: { _id: { $toLower: '$tags.name' }, n: { $sum: 1 } } },
+        { $sort: { n: -1 } },
+        { $limit: 3 },
+      ]).toArray();
+      out.top_themes = themes.length ? themes.map(t => `${t._id} (${t.n})`).join('; ') : null;
+    } catch (e) { console.warn(`[CsTickets:${dbConfig.brand}] Themes agg failed: ${e.message}`); }
+
+    return out;
+  } finally {
+    await client.close();
+  }
+}
+
+/**
  * Effective + attempted closes for a UTC day window, from
  * hourly_agent_performance_conversations.
  */
@@ -610,7 +715,7 @@ async function matchUnmatchedToUk(tickets, storeKeys) {
 
 // ── Aggregation per (brand, date) ───────────────────────────────────────────
 
-function aggregateCounts(brand, date, tickets, closed) {
+function aggregateCounts(brand, date, tickets, closed, extended = {}) {
   const counts = {
     brand, date,
     total_tickets: 0,
@@ -625,6 +730,17 @@ function aggregateCounts(brand, date, tickets, closed) {
     other_tickets: 0, unmatched_tickets: 0,
     effective_closed_tickets: closed.effective,
     attempted_closed_tickets: closed.attempted,
+    // Extended metrics (may be null if Mongo aggregation failed).
+    first_response_count:         extended.first_response_count ?? null,
+    first_response_seconds_sum:   extended.first_response_seconds_sum ?? null,
+    first_resolution_count:       extended.first_resolution_count ?? null,
+    first_resolution_seconds_sum: extended.first_resolution_seconds_sum ?? null,
+    csat_count:                   extended.csat_count ?? null,
+    csat_sum:                     extended.csat_sum ?? null,
+    recovery_revenue:             extended.recovery_revenue ?? null,
+    refund_processed_amount:      extended.refund_processed_amount ?? null,
+    wrong_order_count:            extended.wrong_order_count ?? null,
+    top_themes:                   extended.top_themes ?? null,
   };
   for (const t of tickets) {
     counts.total_tickets += 1;
@@ -651,6 +767,27 @@ function aggregateCounts(brand, date, tickets, closed) {
 
 // ── Upsert ───────────────────────────────────────────────────────────────────
 
+async function ensureExtendedColumns() {
+  const cols = [
+    'first_response_count INT',
+    'first_response_seconds_sum BIGINT',
+    'first_resolution_count INT',
+    'first_resolution_seconds_sum BIGINT',
+    'csat_count INT',
+    'csat_sum NUMERIC(14,4)',
+    'recovery_revenue NUMERIC(14,4)',
+    'refund_processed_amount NUMERIC(14,4)',
+    'wrong_order_count INT',
+    'top_themes TEXT',
+  ];
+  for (const c of cols) {
+    const [name] = c.split(' ');
+    await pgQuery(`ALTER TABLE cs_tickets_daily ADD COLUMN IF NOT EXISTS ${c}`).catch(() => {});
+    // Silent — column may already exist.
+    void name;
+  }
+}
+
 async function upsertRow(row, sourceError) {
   await pgQuery(
     `INSERT INTO cs_tickets_daily
@@ -660,8 +797,14 @@ async function upsertRow(row, sourceError) {
        phone_order_matched, phone_order_low_confidence, phone_customer_matched,
        us_tickets, ca_tickets, au_tickets, uk_tickets, other_tickets, unmatched_tickets,
        effective_closed_tickets, attempted_closed_tickets,
+       first_response_count, first_response_seconds_sum,
+       first_resolution_count, first_resolution_seconds_sum,
+       csat_count, csat_sum,
+       recovery_revenue, refund_processed_amount,
+       wrong_order_count, top_themes,
        source, source_error, computed_at, updated_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW())
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,
+             $19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,NOW(),NOW())
      ON CONFLICT (brand, date) DO UPDATE SET
        total_tickets              = EXCLUDED.total_tickets,
        shopify_matched            = EXCLUDED.shopify_matched,
@@ -679,6 +822,16 @@ async function upsertRow(row, sourceError) {
        unmatched_tickets          = EXCLUDED.unmatched_tickets,
        effective_closed_tickets   = EXCLUDED.effective_closed_tickets,
        attempted_closed_tickets   = EXCLUDED.attempted_closed_tickets,
+       first_response_count         = EXCLUDED.first_response_count,
+       first_response_seconds_sum   = EXCLUDED.first_response_seconds_sum,
+       first_resolution_count       = EXCLUDED.first_resolution_count,
+       first_resolution_seconds_sum = EXCLUDED.first_resolution_seconds_sum,
+       csat_count                   = EXCLUDED.csat_count,
+       csat_sum                     = EXCLUDED.csat_sum,
+       recovery_revenue             = EXCLUDED.recovery_revenue,
+       refund_processed_amount      = EXCLUDED.refund_processed_amount,
+       wrong_order_count            = EXCLUDED.wrong_order_count,
+       top_themes                   = EXCLUDED.top_themes,
        source                     = EXCLUDED.source,
        source_error               = EXCLUDED.source_error,
        updated_at                 = NOW()`,
@@ -689,6 +842,11 @@ async function upsertRow(row, sourceError) {
       row.phone_order_matched, row.phone_order_low_confidence, row.phone_customer_matched,
       row.us_tickets, row.ca_tickets, row.au_tickets, row.uk_tickets, row.other_tickets, row.unmatched_tickets,
       row.effective_closed_tickets, row.attempted_closed_tickets,
+      row.first_response_count, row.first_response_seconds_sum,
+      row.first_resolution_count, row.first_resolution_seconds_sum,
+      row.csat_count, row.csat_sum,
+      row.recovery_revenue, row.refund_processed_amount,
+      row.wrong_order_count, row.top_themes,
       'mongo:crmdb+flodb', sourceError || null,
     ]
   );
@@ -724,6 +882,8 @@ async function runCsTickets(opts = {}) {
   let totalWritten = 0;
   const summary = [];
 
+  if (commit) await ensureExtendedColumns();
+
   for (const dbConfig of dbConfigs) {
     console.log(`[CsTickets] ▷ ${dbConfig.label} (${dbConfig.brand}) ${dbConfig.uri.replace(/:[^:@]+@/, ':***@')}`);
     let sourceError = null;
@@ -731,9 +891,11 @@ async function runCsTickets(opts = {}) {
       const { start: dayStart, end: dayEnd } = utcDayWindow(day);
       let tickets = [];
       let closed = { effective: 0, attempted: 0 };
+      let extended = {};
       try {
         tickets = await getTicketsFromMongo(dbConfig, dayStart, dayEnd);
         closed  = await getClosedCountsFromMongo(dbConfig, dayStart, dayEnd);
+        extended = await getExtendedMetricsFromMongo(dbConfig, dayStart, dayEnd);
       } catch (e) {
         sourceError = `${dbConfig.label} ${day}: ${e.message}`;
         console.error(`[CsTickets] ${sourceError}`);
@@ -750,7 +912,7 @@ async function runCsTickets(opts = {}) {
         }
       }
 
-      const row = aggregateCounts(dbConfig.brand, day, tickets, closed);
+      const row = aggregateCounts(dbConfig.brand, day, tickets, closed, extended);
       summary.push(row);
       if (commit) {
         // If Mongo is temporarily unreachable, do not replace a previously good

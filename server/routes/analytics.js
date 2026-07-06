@@ -2781,8 +2781,14 @@ router.get('/kpi-pulse', async (req, res) => {
                   COALESCE(us_orders_unfulfilled_over_24h, 0) us_ouf24, COALESCE(uk_orders_unfulfilled_over_24h, 0) uk_ouf24,
                   avg_fulfillment_hours afh, avg_ship_to_door_hours asdh, ca_avg_ttf_days ca_ttf, au_avg_ttf_days au_ttf, uk_avg_ttf_days uk_ttf
                 FROM ops_metrics_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
-        // CS tickets per brand × date.
-        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, total_tickets tt, shopify_matched sm, us_tickets us, ca_tickets ca, au_tickets au, uk_tickets uk, effective_closed_tickets closed FROM cs_tickets_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
+        // CS tickets per brand × date. Extended columns are optional — the
+        // column-list `COALESCE`s handle DBs where the ETL hasn't been redeployed yet.
+        { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d, total_tickets tt, shopify_matched sm, us_tickets us, ca_tickets ca, au_tickets au, uk_tickets uk, effective_closed_tickets closed,
+                  COALESCE(first_response_count, 0) fr_count, COALESCE(first_response_seconds_sum, 0) fr_sum,
+                  COALESCE(first_resolution_count, 0) frr_count, COALESCE(first_resolution_seconds_sum, 0) frr_sum,
+                  COALESCE(csat_count, 0) csat_count, COALESCE(csat_sum, 0) csat_sum,
+                  COALESCE(recovery_revenue, 0) recovery_rev, COALESCE(wrong_order_count, 0) wrong_order, top_themes
+                FROM cs_tickets_daily WHERE date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
         // Shopify Payments disputes/chargebacks per brand × date for CB Rate KPIs.
         { sql: `SELECT brand, TO_CHAR(date,'YYYY-MM-DD') d,
                   SUM(chargeback_count) cb,
@@ -2994,7 +3000,14 @@ router.get('/kpi-pulse', async (req, res) => {
       }
       for (const r of cs.rows) {
         const dest = r.brand === 'NOBL' ? csN : (r.brand === 'FLO' ? csF : null);
-        if (dest) dest[r.d] = { tt: num(r.tt), sm: num(r.sm), us: num(r.us), ca: num(r.ca), au: num(r.au), uk: num(r.uk), closed: num(r.closed) };
+        if (dest) dest[r.d] = {
+          tt: num(r.tt), sm: num(r.sm), us: num(r.us), ca: num(r.ca), au: num(r.au), uk: num(r.uk), closed: num(r.closed),
+          frCount: num(r.fr_count), frSum: num(r.fr_sum),
+          frrCount: num(r.frr_count), frrSum: num(r.frr_sum),
+          csatCount: num(r.csat_count), csatSum: num(r.csat_sum),
+          recoveryRev: num(r.recovery_rev), wrongOrder: num(r.wrong_order),
+          themes: r.top_themes || null,
+        };
       }
       for (const r of disputes.rows) {
         const dest = r.brand === 'NOBL' ? cbN : (r.brand === 'FLO' ? cbF : null);
@@ -3145,6 +3158,12 @@ router.get('/kpi-pulse', async (req, res) => {
         let csNtotal = 0, csFtotal = 0, csNseen = false, csFseen = false;
         let csNus = 0, csNca = 0, csNau = 0, csNuk = 0, csNclosed = 0;
         let csFus = 0, csFca = 0, csFau = 0, csFuk = 0, csFclosed = 0;
+        // Extended CS aggregates — FRT, Csat, recovery, wrong-order, themes.
+        let csNfrCount = 0, csNfrSum = 0, csNfrrCount = 0, csNfrrSum = 0;
+        let csNcsatCount = 0, csNcsatSum = 0, csNrecoveryRev = 0, csNwrongOrder = 0;
+        let csFfrCount = 0, csFfrSum = 0, csFfrrCount = 0, csFfrrSum = 0;
+        let csFcsatCount = 0, csFcsatSum = 0, csFrecoveryRev = 0, csFwrongOrder = 0;
+        const csNthemes = [], csFthemes = [];
         let cbNtotal = 0, cbFtotal = 0, cbNseen = false, cbFseen = false;
         let cbNus = 0, cbNca = 0, cbNau = 0, cbNuk = 0;
         let cbFus = 0, cbFca = 0, cbFau = 0, cbFuk = 0;
@@ -3209,8 +3228,24 @@ router.get('/kpi-pulse', async (req, res) => {
           const on = opsN[d]; if (on) { opsNcost.push(on.asc); opsNuf.push(on.ouf); opsNuf24.push(on.ouf24); opsNusUf.push(on.us_ouf); opsNcaUf.push(on.ca_ouf); opsNauUf.push(on.au_ouf); opsNukUf.push(on.uk_ouf); opsNusUf24.push(on.us_ouf24); opsNukUf24.push(on.uk_ouf24); opsNfulfillDays.push(on.afh == null ? null : on.afh / 24); opsNshipDays.push(on.asdh == null ? null : on.asdh / 24); opsNcaTtf.push(on.ca_ttf); opsNauTtf.push(on.au_ttf); opsNukTtf.push(on.uk_ttf); }
           const of_ = opsF[d]; if (of_) { opsFcost.push(of_.asc); opsFuf.push(of_.ouf); opsFuf24.push(of_.ouf24); opsFusUf.push(of_.us_ouf); opsFcaUf.push(of_.ca_ouf); opsFauUf.push(of_.au_ouf); opsFukUf.push(of_.uk_ouf); opsFusUf24.push(of_.us_ouf24); opsFukUf24.push(of_.uk_ouf24); opsFfulfillDays.push(of_.afh == null ? null : of_.afh / 24); opsFshipDays.push(of_.asdh == null ? null : of_.asdh / 24); opsFcaTtf.push(of_.ca_ttf); opsFauTtf.push(of_.au_ttf); opsFukTtf.push(of_.uk_ttf); }
 
-          const cn = csN[d]; if (cn) { csNtotal += cn.tt; csNus += cn.us; csNca += cn.ca; csNau += cn.au; csNuk += cn.uk; csNclosed += cn.closed; csNseen = true; if (srd?.NOBL) { for (const k of Object.keys(shopRegion.n)) shopRegion.n[k] += srd.NOBL[k] || 0; } }
-          const cf_ = csF[d]; if (cf_) { csFtotal += cf_.tt; csFus += cf_.us; csFca += cf_.ca; csFau += cf_.au; csFuk += cf_.uk; csFclosed += cf_.closed; csFseen = true; if (srd?.FLO) { for (const k of Object.keys(shopRegion.f)) shopRegion.f[k] += srd.FLO[k] || 0; } }
+          const cn = csN[d]; if (cn) {
+            csNtotal += cn.tt; csNus += cn.us; csNca += cn.ca; csNau += cn.au; csNuk += cn.uk; csNclosed += cn.closed; csNseen = true;
+            csNfrCount += cn.frCount; csNfrSum += cn.frSum;
+            csNfrrCount += cn.frrCount; csNfrrSum += cn.frrSum;
+            csNcsatCount += cn.csatCount; csNcsatSum += cn.csatSum;
+            csNrecoveryRev += cn.recoveryRev; csNwrongOrder += cn.wrongOrder;
+            if (cn.themes) csNthemes.push(cn.themes);
+            if (srd?.NOBL) { for (const k of Object.keys(shopRegion.n)) shopRegion.n[k] += srd.NOBL[k] || 0; }
+          }
+          const cf_ = csF[d]; if (cf_) {
+            csFtotal += cf_.tt; csFus += cf_.us; csFca += cf_.ca; csFau += cf_.au; csFuk += cf_.uk; csFclosed += cf_.closed; csFseen = true;
+            csFfrCount += cf_.frCount; csFfrSum += cf_.frSum;
+            csFfrrCount += cf_.frrCount; csFfrrSum += cf_.frrSum;
+            csFcsatCount += cf_.csatCount; csFcsatSum += cf_.csatSum;
+            csFrecoveryRev += cf_.recoveryRev; csFwrongOrder += cf_.wrongOrder;
+            if (cf_.themes) csFthemes.push(cf_.themes);
+            if (srd?.FLO) { for (const k of Object.keys(shopRegion.f)) shopRegion.f[k] += srd.FLO[k] || 0; }
+          }
           const cbn = cbN[d]; if (cbn) { cbNtotal += cbn.cb; cbNus += cbn.us; cbNca += cbn.ca; cbNau += cbn.au; cbNuk += cbn.uk; cbNseen = true; }
           const cbf = cbF[d]; if (cbf) { cbFtotal += cbf.cb; cbFus += cbf.us; cbFca += cbf.ca; cbFau += cbf.au; cbFuk += cbf.uk; cbFseen = true; }
 
@@ -3299,14 +3334,33 @@ router.get('/kpi-pulse', async (req, res) => {
 
         // FLO IAP "active" is a snapshot → take last non-null day in window.
         const floIapAct = lastNonNull(floIapActs);
-        // Churn = cancellations in period / active at end of period.
+        // Churn = cancellations in period / active at end of period (raw, per-window).
         const floChurn = (floIapAct && floIapAct > 0) ? floIapCs / floIapAct : null;
-        // The KPI Sheet's "App Lifetime Value (months)" is not inverse churn
-        // and not app age. It is a separate app/subscription lifetime metric
-        // (~2.5–3.1 months historically). We do not currently receive that
-        // metric from Apple/Google reports, so leave it null unless an explicit
-        // verified source/override provides it. Never fabricate it from churn.
-        const floAppLifetimeMonths = null;
+
+        // App Lifetime Value (months) — standard SaaS inverse-churn proxy,
+        // normalized to a monthly rate. Bounded to 60 months so daily windows
+        // with zero cancellations don't render ∞. Override via kpi_pulse_overrides
+        // if Apple/Google reports provide a stricter figure.
+        const monthsInWindow = Math.max(1, dates.length) / 30.44;
+        const monthlyChurnRate = (floIapAct > 0 && floIapCs > 0)
+          ? (floIapCs / floIapAct) / monthsInWindow
+          : null;
+        const floAppLifetimeMonths = (monthlyChurnRate && monthlyChurnRate > 0)
+          ? Math.min(60, 1 / monthlyChurnRate)
+          : null;
+        // Monthly ARPU (subscriber-months in denominator).
+        const floAppArpuMonthly = (floIapAct > 0 && monthsInWindow > 0)
+          ? floIapRevenue / (floIapAct * monthsInWindow)
+          : null;
+        const floAppLtv = (floAppArpuMonthly != null && floAppLifetimeMonths != null)
+          ? floAppArpuMonthly * floAppLifetimeMonths
+          : null;
+        // CAC = FLO Meta spend / new paid subs in window. Proxy — assumes Meta
+        // is the dominant paid acquisition channel for FLO app subs.
+        const floAppCac = (floIapNs > 0 && m.f.s > 0) ? m.f.s / floIapNs : null;
+        const floAppLtvCacRatio = (floAppLtv != null && floAppCac && floAppCac > 0)
+          ? floAppLtv / floAppCac
+          : null;
         const nSalesBase = a.n.rev;
         const fSalesBase = a.f.rev;
         const nOrderDenom = a.n.orders || shop.n.orders;
@@ -3366,6 +3420,17 @@ router.get('/kpi-pulse', async (req, res) => {
             uk_cs_tickets_pct: (csNseen && shopRegion.n.UK > 0) ? csNuk / shopRegion.n.UK : null,
             cs_closed_count: csNseen ? csNclosed : null,
             cs_closed_pct: (csNseen && nOrderDenom > 0) ? csNclosed / nOrderDenom : null,
+            // Extended CS metrics — FRT (hours), Csat (avg 1–5), Recovery Rev ($),
+            // Wrong Order Rate (% of tickets), and top ticket themes (string).
+            // hourly_brand_response_resolution_stats stores durations in ms
+            // despite the "SecondsSum" field name; divide by 3.6M for hours.
+            first_response_hours: (csNseen && csNfrCount > 0) ? (csNfrSum / csNfrCount) / 3_600_000 : null,
+            first_resolution_hours: (csNseen && csNfrrCount > 0) ? (csNfrrSum / csNfrrCount) / 3_600_000 : null,
+            csat_avg: (csNseen && csNcsatCount > 0) ? csNcsatSum / csNcsatCount : null,
+            recovery_revenue: csNseen ? csNrecoveryRev : null,
+            wrong_order_rate: (csNseen && csNtotal > 0) ? csNwrongOrder / csNtotal : null,
+            wrong_order_count: csNseen ? csNwrongOrder : null,
+            top_ticket_themes: csNthemes[csNthemes.length - 1] || null,
             cb_rate: (cbNseen && nOrderDenom > 0) ? cbNtotal / nOrderDenom : null,
             us_cb_rate: (cbNseen && cbShopRegion.n.US > 0) ? cbNus / cbShopRegion.n.US : null,
             ca_cb_rate: (cbNseen && cbShopRegion.n.CA > 0) ? cbNca / cbShopRegion.n.CA : null,
@@ -3442,6 +3507,13 @@ router.get('/kpi-pulse', async (req, res) => {
             uk_cs_tickets_pct: (csFseen && shopRegion.f.UK > 0) ? csFuk / shopRegion.f.UK : null,
             cs_closed_count: csFseen ? csFclosed : null,
             cs_closed_pct: (csFseen && fOrderDenom > 0) ? csFclosed / fOrderDenom : null,
+            first_response_hours: (csFseen && csFfrCount > 0) ? (csFfrSum / csFfrCount) / 3_600_000 : null,
+            first_resolution_hours: (csFseen && csFfrrCount > 0) ? (csFfrrSum / csFfrrCount) / 3_600_000 : null,
+            csat_avg: (csFseen && csFcsatCount > 0) ? csFcsatSum / csFcsatCount : null,
+            recovery_revenue: csFseen ? csFrecoveryRev : null,
+            wrong_order_rate: (csFseen && csFtotal > 0) ? csFwrongOrder / csFtotal : null,
+            wrong_order_count: csFseen ? csFwrongOrder : null,
+            top_ticket_themes: csFthemes[csFthemes.length - 1] || null,
             cb_rate: (cbFseen && fOrderDenom > 0) ? cbFtotal / fOrderDenom : null,
             us_cb_rate: (cbFseen && cbShopRegion.f.US > 0) ? cbFus / cbShopRegion.f.US : null,
             ca_cb_rate: (cbFseen && cbShopRegion.f.CA > 0) ? cbFca / cbShopRegion.f.CA : null,
@@ -3472,6 +3544,9 @@ router.get('/kpi-pulse', async (req, res) => {
             app_net_sub_adds: floIapNs - floIapCs,
             monthly_churn: floChurn,
             app_lifetime_months: floAppLifetimeMonths,
+            app_ltv: floAppLtv,
+            app_cac: floAppCac,
+            app_ltv_cac: floAppLtvCacRatio,
             flo_sub_hardware_split: pctSplit(floAppSubRev, floPortableRev + floHomeStudioRev),
             hardware_mix_sales: pctSplit(floPortableRev, floHomeStudioRev),
             returning_cust_rev_pct: floRetTotal > 0 ? floRetReturning / floRetTotal : null,
@@ -3490,15 +3565,15 @@ router.get('/kpi-pulse', async (req, res) => {
         'mer','sales','aov','amazon_pct','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','site_cvr','discounts_pct','returning_new_customer_split',
         'air_rev_pct','attach','ttp','activation','intl_activation','au_activation','ca_activation','uk_activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','uk_ttf_days','orders_unfulfilled','us_orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','uk_orders_unfulfilled','orders_unfulfilled_24h','us_orders_unfulfilled_24h','uk_orders_unfulfilled_24h',
-        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
+        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','first_response_hours','first_resolution_hours','csat_avg','recovery_revenue','wrong_order_rate','wrong_order_count','top_ticket_themes','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
         'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','new_customer_cac','bundle_rev_pct','net_sub_adds','returning_cust_rev_pct',
         'sos_taylor','sos_franz','sos_luke','sos_chris','test_video_roas_taylor','test_video_roas_franz','test_video_roas_luke','test_video_roas_chris',
       ];
       const KF = [
         'mer','sales','aov','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','site_cvr','discounts_pct','returning_new_customer_split','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_dau',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','uk_ttf_days','orders_unfulfilled','us_orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','uk_orders_unfulfilled','orders_unfulfilled_24h','us_orders_unfulfilled_24h','uk_orders_unfulfilled_24h',
-        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
-        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','app_lifetime_months','flo_sub_hardware_split','hardware_mix_sales','returning_cust_rev_pct',
+        'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','first_response_hours','first_resolution_hours','csat_avg','recovery_revenue','wrong_order_rate','wrong_order_count','top_ticket_themes','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
+        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','app_lifetime_months','app_ltv','app_cac','app_ltv_cac','flo_sub_hardware_split','hardware_mix_sales','returning_cust_rev_pct',
         'sos_chris','portable_cac','studio_cac','home_cac','home_studio_cac',
       ];
       function buildCadence(defs) {
