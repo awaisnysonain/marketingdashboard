@@ -237,16 +237,20 @@ const PCT_KEYS = new Set([
   'site_cvr', 'discounts_pct', 'intl_activation', 'au_activation', 'ca_activation', 'uk_activation',
   'wrong_order_rate',
 ]);
-const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer', 'test_video_roas_taylor', 'test_video_roas_franz', 'test_video_roas_luke', 'test_video_roas_chris']);
+const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer', 'test_video_roas_taylor', 'test_video_roas_franz', 'test_video_roas_luke', 'test_video_roas_chris', 'app_ltv_cac']);
 const MONEY_KEYS = new Set([
   'sales', 'aov', 'avg_shipping_cost', 'new_customer_cac',
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
+  'app_ltv', 'app_cac', 'recovery_revenue',
 ]);
-const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'us_orders_unfulfilled', 'uk_orders_unfulfilled', 'us_orders_unfulfilled_24h', 'uk_orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio']);
+const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'us_orders_unfulfilled', 'uk_orders_unfulfilled', 'us_orders_unfulfilled_24h', 'uk_orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio', 'wrong_order_count']);
 const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days', 'uk_ttf_days']);
-const DECIMAL_KEYS = new Set(['sessions_per_mau', 'sessions_per_dau']);
+// Keys where a plain 2dp decimal is the right rendering (no unit suffix).
+const DECIMAL_KEYS = new Set(['sessions_per_mau', 'sessions_per_dau', 'csat_avg']);
+// Keys measured in hours; display "3.6h" instead of raw number.
+const HOUR_KEYS = new Set(['first_response_hours', 'first_resolution_hours']);
 const MONTH_KEYS = new Set(['app_lifetime_months']);
-const STRING_KEYS = new Set(['tof_bof_spend_split', 'flo_sub_hardware_split', 'hardware_mix_sales', 'email_flow_campaign_split', 'returning_new_customer_split']);
+const STRING_KEYS = new Set(['tof_bof_spend_split', 'flo_sub_hardware_split', 'hardware_mix_sales', 'email_flow_campaign_split', 'returning_new_customer_split', 'top_ticket_themes']);
 
 // Keys only available for NOBL. (US MER works for both; Canada MER + Air metrics +
 // blended MER + Amazon + AOV are NOBL-only at the data layer. The strategist Share
@@ -280,9 +284,13 @@ function fmtMetricValue(key, v) {
   if (MONEY_KEYS.has(key)) return `$${(Math.round(n * 100) / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (INT_KEYS.has(key))   return Math.round(n).toLocaleString();
   if (DAY_KEYS.has(key))   return `${n.toFixed(2)}d`;
+  if (HOUR_KEYS.has(key))  return `${n.toFixed(2)}h`;
   if (DECIMAL_KEYS.has(key)) return n.toFixed(2);
   if (MONTH_KEYS.has(key)) return `${n.toFixed(2)} months`;
-  return String(v);
+  // Unknown key with a numeric value — cap at 2 decimals so a stray large-decimal
+  // float never bleeds into the UI. Any KPI that needs a specific unit should be
+  // added to one of the sets above.
+  return Number.isInteger(n) ? n.toLocaleString() : n.toFixed(2);
 }
 
 function parseTarget(t) {
