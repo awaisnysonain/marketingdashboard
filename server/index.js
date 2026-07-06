@@ -1475,6 +1475,8 @@ if (!CRON_ENABLED) {
 
   async function validateRunCompleteness(yStr) {
     // After a cron run, verify yesterday's data actually landed for both brands.
+    // `sparse: true` = the ETL only writes a row when there's non-zero activity,
+    // so a missing row is legitimate (e.g. FLO had 0 disputes) — skip the alert.
     const checks = [
       { table: 'tw_summary_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_summary_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
       { table: 'tw_geo_daily', sql: `SELECT brand, COUNT(*)::int n FROM tw_geo_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
@@ -1487,13 +1489,19 @@ if (!CRON_ENABLED) {
       { table: 'nobl_air_daily', sql: `SELECT 'na' AS brand, COUNT(*)::int n FROM nobl_air_daily WHERE date = $1::date`, expect: 1 },
       { table: 'ops_metrics_daily', sql: `SELECT brand, COUNT(*)::int n FROM ops_metrics_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
       { table: 'cs_tickets_daily', sql: `SELECT brand, COUNT(*)::int n FROM cs_tickets_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
-      { table: 'shopify_disputes_daily', sql: `SELECT brand, COUNT(*)::int n FROM shopify_disputes_daily WHERE date = $1::date GROUP BY brand`, expect: 2 },
+      // shopify_disputes_daily is legitimately sparse — FLO commonly has 0 disputes
+      // on a random day and the ETL doesn't write a zero-row for that brand.
+      { table: 'shopify_disputes_daily', sql: `SELECT brand, COUNT(*)::int n FROM shopify_disputes_daily WHERE date = $1::date GROUP BY brand`, expect: 2, sparse: true },
     ];
     const issues = [];
     for (const c of checks) {
       try {
         const r = await pgQuery(c.sql, [yStr]);
-        if (r.rows.length < c.expect || r.rows.some(x => !x.n)) {
+        if (c.sparse) {
+          // For sparse tables, only alert when NOTHING landed — some brands with
+          // zero activity are legitimate.
+          if (r.rows.length === 0) issues.push(`${c.table}: 0 rows for ${yStr} (possibly no ETL run)`);
+        } else if (r.rows.length < c.expect || r.rows.some(x => !x.n)) {
           issues.push(`${c.table}: only ${r.rows.length} brand row(s), expected ≥${c.expect}`);
         }
       } catch (e) {
