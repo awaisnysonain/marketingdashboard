@@ -379,24 +379,32 @@ function categoryFor(row) {
 function rowOverrideKey(row) { return `row:${row.cadence}:${row.brand}:${row.department || ''}:${row.baseMetric || row.metric}`; }
 function cellOverrideKey(row, period) { return `cell:${row.cadence}:${row.brand}:${row.department || ''}:${row.baseMetric || row.metric}:${period.key}`; }
 
-function applyOverrides(row, periods, overrides = {}) {
+function applyOverrides(row, periods, overrides = {}, key = null) {
   const baseMetric = row.baseMetric || row.metric;
   const rowPatch = overrides[rowOverrideKey({ ...row, baseMetric })] || {};
   const next = { ...row, ...rowPatch, baseMetric };
   next.category = rowPatch.category || row.category || categoryFor(next);
+  // Cell-override values are stored as raw numbers in kpi_pulse_overrides —
+  // route them through fmtMetricValue (matching the key) so quarterly/weekly
+  // don't leak raw 15-decimal floats. `row.values` (from the DB series path)
+  // is already formatted; leave it alone.
   next.values = (row.values || []).map((v, idx) => {
     const period = periods[idx];
     const cellPatch = period ? overrides[cellOverrideKey({ ...next, baseMetric }, period)] : null;
-    return cellPatch?.value ?? v;
+    if (!cellPatch || cellPatch.value == null || cellPatch.value === '' || cellPatch.value === 'N/A') return v;
+    // If already a formatted string with a unit prefix/suffix, keep it.
+    const raw = cellPatch.value;
+    if (typeof raw === 'string' && /[$%hxdA-Za-z]/.test(raw)) return raw;
+    return (key ? fmtMetricValue(key, raw) : null) ?? String(raw);
   });
-  next.latest = next.values.find(v => v && v !== '—') || next.latest;
+  next.latest = next.values.find(v => v && v !== 'N/A') || next.latest;
   return next;
 }
 
 function hasDisplayValue(v) {
-  if (v == null || v === '' || v === '—') return false;
+  if (v == null || v === '' || v === 'N/A') return false;
   const text = String(v).trim();
-  if (!text || text === '—') return false;
+  if (!text || text === 'N/A') return false;
   // Rows that only contain explicit zeros and have no target are usually source
   // coverage artifacts (for example regional CB rows with no events/denominator),
   // not meaningful KPI data. Keep non-zero values and text/split values.
@@ -750,7 +758,7 @@ function catalogRows(cadence, csv) {
       metric,
       target: normalizeCatalogTarget(metric, target),
       variance: '',
-      latest: '—',
+      latest: 'N/A',
       values: [],
     };
   });
@@ -778,7 +786,7 @@ function statusFor(row) {
 }
 
 function seriesFor(row, periods) {
-  return (periods || []).map((p, i) => ({ period: p.label, value: parseNum(row.values?.[i]) ?? 0, raw: row.values?.[i] || '—' })).reverse();
+  return (periods || []).map((p, i) => ({ period: p.label, value: parseNum(row.values?.[i]) ?? 0, raw: row.values?.[i] || 'N/A' })).reverse();
 }
 
 function fmtTrendValue(v, row) {
@@ -854,21 +862,21 @@ function KpiRowLabel({ row, onSelect, editMode, onEdit }) {
         {editMode ? <EditableMiniField value={row.metric} onSave={(v) => onEdit?.(row, { metric: v })} style={{ fontSize: 13 }} /> : row.metric}
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, fontSize: 11 }}>
-        <div title={`Target: ${row.target || '—'}`}>
+        <div title={`Target: ${row.target || 'N/A'}`}>
           <div style={{ fontSize: 9.5, color: 'var(--text4)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.06em' }}>Target</div>
           <div style={{ marginTop: 4, color: 'var(--text2)', fontWeight: 850, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {editMode ? <EditableMiniField value={row.target} onSave={(v) => onEdit?.(row, { target: v })} /> : (row.target || '—')}
+            {editMode ? <EditableMiniField value={row.target} onSave={(v) => onEdit?.(row, { target: v })} /> : (row.target || 'N/A')}
           </div>
         </div>
-        <div title={`Owner: ${row.owner || '—'}`}>
+        <div title={`Owner: ${row.owner || 'N/A'}`}>
           <div style={{ fontSize: 9.5, color: 'var(--text4)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.06em' }}>Owner</div>
           <div style={{ marginTop: 4, color: 'var(--text2)', fontWeight: 850, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-            {editMode ? <EditableMiniField value={row.owner} onSave={(v) => onEdit?.(row, { owner: v })} /> : (row.owner || '—')}
+            {editMode ? <EditableMiniField value={row.owner} onSave={(v) => onEdit?.(row, { owner: v })} /> : (row.owner || 'N/A')}
           </div>
         </div>
-        <div title={`Latest: ${row.latest || '—'}`}>
+        <div title={`Latest: ${row.latest || 'N/A'}`}>
           <div style={{ fontSize: 9.5, color: 'var(--text4)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.06em' }}>Latest</div>
-          <div style={{ marginTop: 4, color: st.color, fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.latest || '—'}</div>
+          <div style={{ marginTop: 4, color: st.color, fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{row.latest || 'N/A'}</div>
         </div>
       </div>
     </div>
@@ -1083,7 +1091,7 @@ function RawKpiTable({ rows, cadence, periods = [], onSelect, editMode, onRowEdi
                         />
                       ) : (
                         <span style={{ color: periodIndex === 0 ? st.color : undefined }}>
-                          {row.values?.[periodIndex] || '—'}
+                          {row.values?.[periodIndex] || 'N/A'}
                         </span>
                       )}
                     </td>
@@ -1137,7 +1145,7 @@ function PriorityList({ rows, selected, onSelect }) {
               <div style={{ fontSize: 13, fontWeight: 900, color: 'var(--text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {row.metric}
               </div>
-              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Owner: {row.owner || '—'} · Target: {row.target || '—'}</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>Owner: {row.owner || 'N/A'} · Target: {row.target || 'N/A'}</div>
             </div>
             <div style={{ textAlign: 'right' }}>
               <div style={{ fontSize: 15, fontWeight: 950, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>{row.latest}</div>
@@ -1178,8 +1186,8 @@ function HeroTrendCard({ selected, chartRows }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 9, marginBottom: 10 }}>
         {[
           ['Latest', selected.latest, 'var(--text)'],
-          ['Target', selected.target || '—', 'var(--text)'],
-          ['Var', selected.variance || '—', STATUS_META[selected.status].color],
+          ['Target', selected.target || 'N/A', 'var(--text)'],
+          ['Var', selected.variance || 'N/A', STATUS_META[selected.status].color],
         ].map(([label, value, color]) => (
           <div key={label} style={{ background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 11, padding: '9px 10px' }}>
             <div style={{ fontSize: 9.5, color: 'var(--text3)', fontWeight: 850, textTransform: 'uppercase', letterSpacing: '.05em' }}>{label}</div>
@@ -1242,9 +1250,9 @@ function HeroDepartmentHealth({ deptRows }) {
 
 function MtdPreview({ rows, periods }) {
   const visibleDays = (periods || []).filter(p => /^\d{4}-\d{2}-\d{2}$/.test(p.key)).length;
-  const rowsWithData = rows.filter(r => (r.values || []).some(v => v && v !== '—')).length;
+  const rowsWithData = rows.filter(r => (r.values || []).some(v => v && v !== 'N/A')).length;
   const needEyes = rows.filter(r => ['red', 'yellow'].includes(r.status)).length;
-  const latestDate = periods?.[0]?.label || '—';
+  const latestDate = periods?.[0]?.label || 'N/A';
   const keyRows = rows.filter(r => ['NOBL Blended MER', 'Gross Sales − Discounts', 'Meta CVR %', 'Avg Shipping Cost / Order', 'CS Tickets % of Orders'].includes(r.baseMetric || r.metric)).slice(0, 6);
   return (
     <ChartPanel title="Month preview" subtitle={`Selected month through ${latestDate} · ${visibleDays} populated day${visibleDays === 1 ? '' : 's'}`} style={{ padding: 18 }}>
@@ -1315,12 +1323,12 @@ function ExecutiveSnapshot({ rows }) {
         <div style={{ borderLeft: '3px solid var(--danger)', paddingLeft: 10, minWidth: 0 }}>
           <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.06em' }}>Biggest miss</div>
           <div style={{ marginTop: 5, fontSize: 13.5, color: 'var(--text)', fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{biggestMiss?.metric || 'No scored miss'}</div>
-          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--danger)', fontWeight: 900 }}>{biggestMiss?.variance || '—'} <span style={{ color: 'var(--text3)', fontWeight: 700 }}>{biggestMiss?.owner ? `· ${biggestMiss.owner}` : ''}</span></div>
+          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--danger)', fontWeight: 900 }}>{biggestMiss?.variance || 'N/A'} <span style={{ color: 'var(--text3)', fontWeight: 700 }}>{biggestMiss?.owner ? `· ${biggestMiss.owner}` : ''}</span></div>
         </div>
         <div style={{ borderLeft: '3px solid var(--success)', paddingLeft: 10, minWidth: 0 }}>
           <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '.06em' }}>Strongest win</div>
           <div style={{ marginTop: 5, fontSize: 13.5, color: 'var(--text)', fontWeight: 900, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{strongestWin?.metric || 'No scored win'}</div>
-          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--success)', fontWeight: 900 }}>{strongestWin?.variance || '—'} <span style={{ color: 'var(--text3)', fontWeight: 700 }}>{strongestWin?.owner ? `· ${strongestWin.owner}` : ''}</span></div>
+          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--success)', fontWeight: 900 }}>{strongestWin?.variance || 'N/A'} <span style={{ color: 'var(--text3)', fontWeight: 700 }}>{strongestWin?.owner ? `· ${strongestWin.owner}` : ''}</span></div>
         </div>
       </div>
     </div>
@@ -1384,27 +1392,27 @@ export default function KpiPulsePage() {
       const raw = key ? series?.[r.brand]?.[key] : null;
       const hasVisibleOverride = periods.some((period) => {
         const patch = localOverrides[cellOverrideKey({ ...r, baseMetric }, period)];
-        return patch && patch.value != null && patch.value !== '' && patch.value !== '—';
+        return patch && patch.value != null && patch.value !== '' && patch.value !== 'N/A';
       });
       let values; let latest; let variance; let dbBacked = false;
       if (Array.isArray(raw)) {
         const hasAnySourceValue = raw.some(v => v != null && v !== '' && Number.isFinite(Number(v)) || (typeof v === 'string' && v.trim() !== ''));
         if (!hasAnySourceValue && !hasVisibleOverride) return null;
         dbBacked = hasAnySourceValue;
-        values = raw.map(v => fmtMetricValue(key, v) ?? '—');
+        values = raw.map(v => fmtMetricValue(key, v) ?? 'N/A');
         const firstNonNull = raw.find(v => v != null);
-        latest = firstNonNull != null ? fmtMetricValue(key, firstNonNull) : '—';
+        latest = firstNonNull != null ? fmtMetricValue(key, firstNonNull) : 'N/A';
         variance = firstNonNull != null ? varianceFor(key, firstNonNull, r.target) : '';
       } else if (hasVisibleOverride) {
-        values = Array.from({ length: len }, () => '—');
-        latest = '—';
+        values = Array.from({ length: len }, () => 'N/A');
+        latest = 'N/A';
         variance = '';
       } else {
         return null;
       }
       const status = dbBacked && variance ? statusFor({ variance }) : 'gray';
       const base = { ...r, id: `${r.cadence}:${r.brand}:${r.metric}`, baseMetric: r.metric, category: categoryFor(r), values, latest, variance, status, dbBacked };
-      const withOverrides = applyOverrides(base, periods, localOverrides);
+      const withOverrides = applyOverrides(base, periods, localOverrides, key);
       if (!(withOverrides.values || []).some(hasDisplayValue)) return null;
       return withOverrides;
     }).filter(Boolean);
