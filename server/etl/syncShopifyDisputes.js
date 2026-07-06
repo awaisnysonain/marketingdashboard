@@ -18,6 +18,37 @@ const STORES = [
 
 function addDays(s, n) { const d = new Date(`${s}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 function normShop(shop) { return String(shop || '').replace(/^https?:\/\//, '').replace(/\/$/, ''); }
+
+// Retry wrapper — Shopify Admin API sees occasional TLS/DNS blips from EC2 that
+// surface as bare "fetch failed" TypeErrors. Retrying with backoff turns a
+// transient failure into a successful cron run instead of a nightly alert email.
+const DISPUTE_HTTP_MAX_RETRIES = 5;
+const DISPUTE_TRANSIENT_RE = /fetch failed|network|econnreset|etimedout|socket hang up|http 429|http 5\d\d|throttled/i;
+async function disputeFetch(url, init, storeKey) {
+  let lastErr;
+  for (let attempt = 0; attempt < DISPUTE_HTTP_MAX_RETRIES; attempt += 1) {
+    try {
+      const res = await fetch(url, { ...init, signal: AbortSignal.timeout(45_000) });
+      if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
+        const body = await res.text().catch(() => '');
+        lastErr = new Error(`${storeKey} HTTP ${res.status}: ${body.slice(0, 200)}`);
+        const waitMs = 5_000 * (attempt + 1);
+        console.warn(`[ShopifyDisputes] ${storeKey} HTTP ${res.status} — retry in ${waitMs / 1000}s (${attempt + 1}/${DISPUTE_HTTP_MAX_RETRIES})`);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      return res;
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e?.message || e);
+      if (!DISPUTE_TRANSIENT_RE.test(msg) || attempt === DISPUTE_HTTP_MAX_RETRIES - 1) throw e;
+      const waitMs = 5_000 * (attempt + 1);
+      console.warn(`[ShopifyDisputes] ${storeKey} transient (${msg}) — retry in ${waitMs / 1000}s (${attempt + 1}/${DISPUTE_HTTP_MAX_RETRIES})`);
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw lastErr || new Error(`${storeKey} exhausted retries`);
+}
 function regionFromCountry(cc, fallback = null) {
   const c = String(cc || '').toUpperCase().trim();
   if (['US', 'USA', 'UNITED STATES', 'UNITED STATES OF AMERICA'].includes(c)) return 'US';
@@ -56,7 +87,7 @@ async function fetchStoreDisputes(store, start, end) {
   let url = `https://${shop}/admin/api/2024-10/shopify_payments/disputes.json?initiated_at_min=${start}T00:00:00Z&initiated_at_max=${addDays(end, 1)}T00:00:00Z&limit=250`;
   const out = [];
   while (url) {
-    const res = await fetch(url, { headers: { 'X-Shopify-Access-Token': store.token, 'Content-Type': 'application/json' } });
+    const res = await disputeFetch(url, { headers: { 'X-Shopify-Access-Token': store.token, 'Content-Type': 'application/json' } }, store.key);
     const text = await res.text();
     if (!res.ok) throw new Error(`${store.key} Shopify disputes HTTP ${res.status}: ${text.slice(0, 300)}`);
     const body = JSON.parse(text);
@@ -85,11 +116,11 @@ async function fetchStoreDisputesGraphql(store, start, end) {
   const out = [];
   let after = null;
   for (;;) {
-    const res = await fetch(url, {
+    const res = await disputeFetch(url, {
       method: 'POST',
       headers: { 'X-Shopify-Access-Token': store.token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ query, variables: { q: search, after } }),
-    });
+    }, store.key);
     const text = await res.text();
     if (!res.ok) throw new Error(`${store.key} Shopify disputes GraphQL HTTP ${res.status}: ${text.slice(0, 300)}`);
     const body = JSON.parse(text);

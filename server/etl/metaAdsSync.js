@@ -64,15 +64,29 @@ function normalizeMetaAdRow(row, brand) {
   };
 }
 
+// Meta API returns a handful of transient error patterns intermittently for
+// high-volume accounts (NOBL). Retrying with backoff clears them >95% of the
+// time and prevents cron alert-email noise. See META error codes 1, 2, 4, 17,
+// 32, 613. Also retries on fetch-level network failures (DNS blips, TLS resets).
+const META_TRANSIENT_MSG_RE = /limit reached|rate limit|too many calls|an unknown error occurred|service temporarily unavailable|please reduce the amount|please try again|temporarily unavailable|econnreset|etimedout|socket hang up|fetch failed|network error/i;
+const META_MAX_RETRIES = 6;
+
 async function fetchMetaInsightsPage(url, timeoutMs = 120_000, attempt = 0) {
-  const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
-  const json = await res.json();
-  if (!res.ok) {
-    const msg = json?.error?.message || `Meta API HTTP ${res.status}`;
-    const rateLimited = /limit reached|rate limit|too many calls/i.test(msg);
-    if (rateLimited && attempt < 6) {
-      const waitMs = 20_000 * (attempt + 1);
-      console.warn(`[metaAdsSync] rate limited — retry in ${waitMs / 1000}s (attempt ${attempt + 1})`);
+  let res, json, networkErr;
+  try {
+    res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) });
+    json = await res.json();
+  } catch (e) {
+    networkErr = e;
+  }
+  if (networkErr || !res.ok) {
+    const msg = networkErr
+      ? (networkErr.message || String(networkErr))
+      : (json?.error?.message || `Meta API HTTP ${res.status}`);
+    const isTransient = META_TRANSIENT_MSG_RE.test(msg) || (res && res.status >= 500 && res.status < 600);
+    if (isTransient && attempt < META_MAX_RETRIES) {
+      const waitMs = 15_000 * (attempt + 1);
+      console.warn(`[metaAdsSync] transient error — retry in ${waitMs / 1000}s (attempt ${attempt + 1}/${META_MAX_RETRIES}): ${msg}`);
       await new Promise((r) => setTimeout(r, waitMs));
       return fetchMetaInsightsPage(url, timeoutMs, attempt + 1);
     }
@@ -217,7 +231,7 @@ async function fetchAndUpsertMetaRange(brand, actId, token, startDate, endDate, 
   try {
     rawRows = await fetchMetaInsightsRange(actId, token, startDate, endDate, apiVersion);
   } catch (e) {
-    if (startDate !== endDate && /reduce the amount|timeout|timed out|try again/i.test(e.message)) {
+    if (startDate !== endDate && /reduce the amount|timeout|timed out|try again|unknown error/i.test(e.message)) {
       const span = daysBetween(startDate, endDate);
       const midOffset = Math.floor(span / 2);
       const midDate = addDays(startDate, midOffset);
@@ -229,7 +243,19 @@ async function fetchAndUpsertMetaRange(brand, actId, token, startDate, endDate, 
         errors: [...left.errors, ...right.errors],
       };
     }
-    return { rows: 0, errors: [`Meta insights ${startDate}..${endDate}: ${e.message}`] };
+    // Single-day request still failing after retries — wait longer, try once more.
+    // This is the last defense against Meta returning "unknown error" on a lone day.
+    if (startDate === endDate && /reduce the amount|unknown error|temporarily unavailable|fetch failed/i.test(e.message)) {
+      console.warn(`[metaAdsSync] single-day final retry ${brand} ${startDate} after 60s: ${e.message}`);
+      await new Promise((r) => setTimeout(r, 60_000));
+      try {
+        rawRows = await fetchMetaInsightsRange(actId, token, startDate, endDate, apiVersion);
+      } catch (e2) {
+        return { rows: 0, errors: [`Meta insights ${startDate}..${endDate}: ${e2.message}`] };
+      }
+    } else {
+      return { rows: 0, errors: [`Meta insights ${startDate}..${endDate}: ${e.message}`] };
+    }
   }
 
   const normalized = [];
