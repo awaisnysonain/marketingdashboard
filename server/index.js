@@ -1420,6 +1420,7 @@ const ALL_DAILY_TASKS = [
   'ops_metrics',         // ERP shipments + UPS + unfulfilled → ops_metrics_daily (KPI Pulse Ops rows)
   'cs_tickets',          // crmdb + flodb Mongo → cs_tickets_daily (KPI Pulse CS rows)
   'shopify_disputes',    // Shopify Payments disputes GraphQL/REST → chargeback KPI rows
+  'tw_bundle_cm1',       // NOBL bundle SKU revenue + COGS → CM1 % (Bundle CM1 % KPI)
 ];
 
 // Live/Snapshot page — lightweight hourly refresh (summary + channel + geo via tw_refresh)

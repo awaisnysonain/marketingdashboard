@@ -2813,7 +2813,7 @@ router.get('/kpi-pulse', async (req, res) => {
       const bofCampaignAdsetRegex = `retarget|remarket|(^|[^a-z])bof[0-9]?([^a-z]|$)|bottom|warm|existing|past[ -]?purchaser|winback`;
 
       const emptyRows = () => ({ rows: [] });
-      const [noblSum, floSum, noblGeo, floGeo, air, airRegion, ops, cs, disputes, meta, twAds, twFunnel, metaStrat, metaTestRoas, klav, twEmailSms, twSessions, twRefunds, airSubs, floIapSubs, floIapRev, returning, shopifyStats, shopifyRegionStats, products, floAppstle, floAppstleTtp, noblBundle, floProductSales] = await pgQueryBatch([
+      const [noblSum, floSum, noblGeo, floGeo, air, airRegion, ops, cs, disputes, meta, twAds, twFunnel, metaStrat, metaTestRoas, klav, twEmailSms, twSessions, twRefunds, airSubs, floIapSubs, floIapRev, returning, shopifyStats, shopifyRegionStats, products, floAppstle, floAppstleTtp, noblBundle, noblBundleCm1, floProductSales] = await pgQueryBatch([
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, COALESCE(order_revenue,total_revenue) gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales, refund_amount refund FROM nobl_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, COALESCE(order_revenue,total_revenue) rev, COALESCE(order_revenue,total_revenue) gmd, total_spend spend, total_orders orders, amazon_revenue amazon, total_sales tsales, refund_amount refund FROM flo_brand_tw_summary_daily WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
         { sql: `SELECT TO_CHAR(date AT TIME ZONE 'UTC','YYYY-MM-DD') d, region, revenue_actual rev, spend_actual spend FROM nobl_brand_tw_geo_daily WHERE region != 'TOTAL' AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date`, params: [start, end] },
@@ -3010,6 +3010,11 @@ router.get('/kpi-pulse', async (req, res) => {
                 FROM shopify_product_daily
                 WHERE brand='NOBL' AND date BETWEEN $1::date AND $2::date
                 GROUP BY date`, params: [start, end], fallback: emptyRows },
+        // NOBL Bundle CM1 % — pre-computed per-day from TW orders_table (see syncTWBundleCm1).
+        { sql: `SELECT TO_CHAR(date,'YYYY-MM-DD') d,
+                  bundle_revenue, bundle_cogs, cm1_pct
+                FROM tw_bundle_cm1_daily
+                WHERE brand='NOBL' AND date BETWEEN $1::date AND $2::date`, params: [start, end], fallback: emptyRows },
         { sql: `SELECT TO_CHAR(date,'YYYY-MM-DD') d, sku_prefix, product_title, SUM(net_revenue) net_revenue
                 FROM shopify_product_daily
                 WHERE brand='FLO' AND date BETWEEN $1::date AND $2::date
@@ -3144,6 +3149,8 @@ router.get('/kpi-pulse', async (req, res) => {
         bucket.converted += num(r.converted);
       }
       for (const r of noblBundle.rows) noblBundleByDay[r.d] = { bundle_rev: num(r.bundle_rev), total_product_rev: num(r.total_product_rev) };
+      const noblBundleCm1ByDay = {};
+      for (const r of noblBundleCm1.rows) noblBundleCm1ByDay[r.d] = { rev: num(r.bundle_revenue), cogs: num(r.bundle_cogs), cm1: r.cm1_pct == null ? null : num(r.cm1_pct) };
       const floProductBucket = (sku, title) => {
         const s = `${sku || ''} ${title || ''}`.toLowerCase();
         if (/app|subscription|unlimited flo access/.test(s)) return 'app';
@@ -3254,6 +3261,8 @@ router.get('/kpi-pulse', async (req, res) => {
           UK: { to: 0, ao: 0, conv: 0, mat: 0 },
         };
         let noblBundleRev = 0, noblProductRev = 0;
+        // Bundle CM1 %: aggregate revenue + COGS across the period then compute ratio.
+        let bundleCm1Rev = 0, bundleCm1Cogs = 0, bundleCm1Seen = false;
         let floAppSubRev = 0, floPortableRev = 0, floHomeStudioRev = 0;
         const shop = { n: { orders: 0, revenue: 0, discounts: 0 }, f: { orders: 0, revenue: 0, discounts: 0 } };
         const shopRegion = { n: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 }, f: { US: 0, CA: 0, AU: 0, UK: 0, EU: 0 } };
@@ -3344,6 +3353,7 @@ router.get('/kpi-pulse', async (req, res) => {
           const ar = airRegionByDay[d];
           if (ar) for (const k of Object.keys(airReg)) if (ar[k]) { airReg[k].to += ar[k].to; airReg[k].ao += ar[k].ao; airReg[k].conv += ar[k].conv; airReg[k].mat += ar[k].mat; }
           const nb = noblBundleByDay[d]; if (nb) { noblBundleRev += nb.bundle_rev; noblProductRev += nb.total_product_rev; }
+          const bc = noblBundleCm1ByDay[d]; if (bc) { bundleCm1Rev += bc.rev; bundleCm1Cogs += bc.cogs; bundleCm1Seen = true; }
           const fh = floHardwareByDay[d]; if (fh) { floAppSubRev += fh.appSubRev; floPortableRev += fh.portableRev; floHomeStudioRev += fh.homeStudioRev; }
           const fp = productByDay[d]?.FLO;
           if (fp) {
@@ -3503,6 +3513,7 @@ router.get('/kpi-pulse', async (req, res) => {
             unsubscribe_rate: (twEmailNseen && twDeliveredN > 0) ? twUnsubN / twDeliveredN : null,
             new_customer_cac: div(a.n.spend, a.n.orders),
             bundle_rev_pct: div(noblBundleRev, nSalesBase || noblProductRev),
+            bundle_cm1_pct: (bundleCm1Seen && bundleCm1Rev > 0) ? (bundleCm1Rev - bundleCm1Cogs) / bundleCm1Rev : null,
             net_sub_adds: airNew - airCanc,
             returning_cust_rev_pct: noblRetTotal > 0 ? noblRetReturning / noblRetTotal : null,
             // Strategist Share of Spend — ad-level spend tagged with the
@@ -3596,6 +3607,9 @@ router.get('/kpi-pulse', async (req, res) => {
             app_ltv_cac: floAppLtvCacRatio,
             flo_sub_hardware_split: pctSplit(floAppSubRev, floPortableRev + floHomeStudioRev),
             hardware_mix_sales: pctSplit(floPortableRev, floHomeStudioRev),
+            // FLO Hardware Revenue (actual, $) — sum of Portable + Home + Studio.
+            // "vs Plan" reads variance against the catalog target in the row.
+            flo_hardware_rev: floPortableRev + floHomeStudioRev,
             returning_cust_rev_pct: floRetTotal > 0 ? floRetReturning / floRetTotal : null,
             // FLO Chris Share of Spend — Chris-tagged spend / FLO total spend.
             sos_chris: hasMetaF ? div(stratFlo.chris, m.f.s) : null,
@@ -3613,14 +3627,14 @@ router.get('/kpi-pulse', async (req, res) => {
         'air_rev_pct','attach','ttp','activation','intl_activation','au_activation','ca_activation','uk_activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau','air_paid_churn_rate','air_paid_churn_count','airplus_popup_shown','airplus_popup_dismissed','airplus_popup_cta_tapped','airplus_popup_purchases',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','uk_ttf_days','orders_unfulfilled','us_orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','uk_orders_unfulfilled','orders_unfulfilled_24h','us_orders_unfulfilled_24h','uk_orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','first_response_hours','first_resolution_hours','csat_avg','recovery_revenue','wrong_order_rate','wrong_order_count','top_ticket_themes','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
-        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','new_customer_cac','bundle_rev_pct','net_sub_adds','returning_cust_rev_pct',
+        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','new_customer_cac','bundle_rev_pct','bundle_cm1_pct','net_sub_adds','returning_cust_rev_pct',
         'sos_taylor','sos_franz','sos_luke','sos_chris','test_video_roas_taylor','test_video_roas_franz','test_video_roas_luke','test_video_roas_chris',
       ];
       const KF = [
         'mer','sales','aov','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','site_cvr','discounts_pct','returning_new_customer_split','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_dau',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','uk_ttf_days','orders_unfulfilled','us_orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','uk_orders_unfulfilled','orders_unfulfilled_24h','us_orders_unfulfilled_24h','uk_orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','first_response_hours','first_resolution_hours','csat_avg','recovery_revenue','wrong_order_rate','wrong_order_count','top_ticket_themes','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
-        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','app_lifetime_months','app_ltv','app_cac','app_ltv_cac','flo_sub_hardware_split','hardware_mix_sales','returning_cust_rev_pct',
+        'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','app_rev_pct','app_attach_pct','app_ttp','app_activation','app_net_sub_adds','monthly_churn','app_lifetime_months','app_ltv','app_cac','app_ltv_cac','flo_sub_hardware_split','hardware_mix_sales','flo_hardware_rev','returning_cust_rev_pct',
         'sos_chris','portable_cac','studio_cac','home_cac','home_studio_cac',
       ];
       function buildCadence(defs) {

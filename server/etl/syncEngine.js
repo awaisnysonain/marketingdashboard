@@ -24,6 +24,7 @@ const {
   syncTWSegments,
   syncTWRefunds,
   syncTWEmailSms,
+  syncTWBundleCm1,
   syncTWBenchmarks,
   syncTWOrderRevenue,
 } = require('./twFullSync');
@@ -512,6 +513,25 @@ async function runSync(options = {}) {
           errors.push(msg);
           await logFinish(logId, 'error', 0, e.message);
         }
+      }
+    }
+  }
+
+  // ── Bundle CM1 % (NOBL only — bundle-SKU revenue / COGS from TW orders_table) ─
+  if (tasks.includes('tw_bundle_cm1') && brands.includes('NOBL')) {
+    const chunks = weeklyChunks(startDate, endDate);
+    for (const chunk of chunks) {
+      const logId = await logStart(runId, 'NOBL', 'tw_bundle_cm1', chunk.start, chunk.end);
+      try {
+        const r = await syncTWBundleCm1('NOBL', chunk.start, chunk.end);
+        await logTaskResult(logId, r);
+        results.push({ task: 'tw_bundle_cm1', brand: 'NOBL', chunk, rows: r.rows });
+        if (r.errors.length) errors.push(...r.errors);
+      } catch (e) {
+        const msg = `tw_bundle_cm1 NOBL ${chunk.start}-${chunk.end}: ${e.message}`;
+        console.error('[SyncEngine]', msg);
+        errors.push(msg);
+        await logFinish(logId, 'error', 0, e.message);
       }
     }
   }

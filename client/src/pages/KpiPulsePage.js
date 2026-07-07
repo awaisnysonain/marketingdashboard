@@ -235,6 +235,10 @@ const DB_KEY = {
   'NOBL — AIR+ Purchases':        'airplus_popup_purchases',
   // FLO Daily Churn — derive from monthly churn for display purposes.
   'Daily Churn': 'monthly_churn',
+  // NOBL Bundle CM1 % — (bundle_revenue − bundle_cogs) / bundle_revenue, computed from TW orders_table.
+  'Bundle CM1 %': 'bundle_cm1_pct',
+  // FLO Hardware Revenue (actual, $) — variance vs the row's catalog target = "vs Plan".
+  'Flo Hardware Revenue vs Plan': 'flo_hardware_rev',
 };
 
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -250,12 +254,14 @@ const PCT_KEYS = new Set([
   'site_cvr', 'discounts_pct', 'intl_activation', 'au_activation', 'ca_activation', 'uk_activation',
   'wrong_order_rate',
   'air_paid_churn_rate',
+  'bundle_cm1_pct',
 ]);
 const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer', 'test_video_roas_taylor', 'test_video_roas_franz', 'test_video_roas_luke', 'test_video_roas_chris', 'app_ltv_cac']);
 const MONEY_KEYS = new Set([
   'sales', 'aov', 'avg_shipping_cost', 'new_customer_cac',
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
   'app_ltv', 'app_cac', 'recovery_revenue',
+  'flo_hardware_rev',
 ]);
 const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'us_orders_unfulfilled', 'uk_orders_unfulfilled', 'us_orders_unfulfilled_24h', 'uk_orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio', 'wrong_order_count',
   'air_paid_churn_count', 'airplus_popup_shown', 'airplus_popup_dismissed', 'airplus_popup_cta_tapped', 'airplus_popup_purchases']);

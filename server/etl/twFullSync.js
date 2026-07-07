@@ -1171,6 +1171,75 @@ async function syncTWOrderRevenue(brand, startDate, endDate) {
   return { rows: written, errors };
 }
 
+/**
+ * NOBL Bundle CM1 % — Contribution Margin 1 for bundle SKUs.
+ *
+ *   CM1 = (bundle_revenue − bundle_cogs) / bundle_revenue
+ *
+ * Bundle SKU prefixes match what shopify_product_daily uses to compute
+ * `bundle_rev_pct` — ALLB1/2/3, EPB1/3. Aggregation is per-day from
+ * TW's orders_table with products_info ARRAY JOIN so we get per-line-item
+ * `product_name_price × qty − discount` for bundle revenue and
+ * `single_product_cost × qty` for bundle cost.
+ *
+ * Writes to tw_bundle_cm1_daily (brand, date, bundle_revenue, bundle_cogs,
+ * cm1_pct). Idempotent — DELETE + INSERT per day range.
+ */
+async function syncTWBundleCm1(brand, startDate, endDate) {
+  const errors = [];
+  await pgRun(`
+    CREATE TABLE IF NOT EXISTS tw_bundle_cm1_daily (
+      brand TEXT NOT NULL,
+      date DATE NOT NULL,
+      bundle_revenue NUMERIC(14,4) DEFAULT 0,
+      bundle_cogs NUMERIC(14,4) DEFAULT 0,
+      cm1_pct NUMERIC(8,6),
+      source TEXT DEFAULT 'tw_orders_table',
+      computed_at TIMESTAMPTZ DEFAULT NOW(),
+      updated_at TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (brand, date)
+    )
+  `);
+  const sql = `
+    SELECT event_date AS date,
+      SUM(if(pi.product_sku LIKE 'ALLB%' OR pi.product_sku LIKE 'EPB%',
+             pi.product_name_price * pi.product_name_quantity_sold - pi.discount_amount_for_product, 0)
+      ) AS bundle_revenue,
+      SUM(if(pi.product_sku LIKE 'ALLB%' OR pi.product_sku LIKE 'EPB%',
+             pi.single_product_cost * pi.product_name_quantity_sold, 0)
+      ) AS bundle_cogs
+    FROM orders_table ARRAY JOIN products_info AS pi
+    WHERE event_date BETWEEN toDate('${startDate}') AND toDate('${endDate}')
+      AND platform = 'shopify'
+    GROUP BY event_date
+    ORDER BY event_date
+  `;
+  const rows = await twSqlQuery(brand, sql, { period: { startDate, endDate } });
+  if (!rows.length) {
+    console.log(`[twFullSync] syncTWBundleCm1 ${brand}: no rows`);
+    return { rows: 0, errors };
+  }
+  let written = 0;
+  for (const r of rows) {
+    const date = toDateStr(r.date || r.event_date);
+    const rev = Number(r.bundle_revenue) || 0;
+    const cogs = Number(r.bundle_cogs) || 0;
+    const cm1 = rev > 0 ? (rev - cogs) / rev : null;
+    await pgRun(`
+      INSERT INTO tw_bundle_cm1_daily (brand, date, bundle_revenue, bundle_cogs, cm1_pct, updated_at)
+      VALUES ($1, $2, $3, $4, $5, NOW())
+      ON CONFLICT (brand, date) DO UPDATE SET
+        bundle_revenue = EXCLUDED.bundle_revenue,
+        bundle_cogs = EXCLUDED.bundle_cogs,
+        cm1_pct = EXCLUDED.cm1_pct,
+        updated_at = NOW()
+    `, [brand, date, rev, cogs, cm1]);
+    written += 1;
+  }
+  console.log(`[twFullSync] syncTWBundleCm1 ${brand}: ${written} rows upserted`);
+  return { rows: written, errors };
+}
+
 module.exports = {
   syncTWChannels,
   syncTWGeo,
@@ -1184,4 +1253,5 @@ module.exports = {
   syncTWEmailSms,
   syncTWBenchmarks,
   syncTWOrderRevenue,
+  syncTWBundleCm1,
 };
