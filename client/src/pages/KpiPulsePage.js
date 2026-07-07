@@ -103,8 +103,12 @@ const DB_KEY = {
   'PageSpeed PDP AIO Avg': 'pagespeed_pdp_aio',
   'DAU / MAU (stickiness)': 'dau_mau_stickiness',
   'DAU / MAU Stickiness': 'dau_mau_stickiness',
-  'Nobl MAU / Active Subscribers': 'dau_mau_stickiness',
-  'MAU / Active Subs (opened in 30d)': 'dau_mau_stickiness',
+  // MAU headcount (NOT the stickiness ratio) — from tw_sessions_daily.mau,
+  // last non-null value across the period. Distinct from DAU/MAU ratio.
+  'Nobl MAU / Active Subscribers': 'nobl_mau_count',
+  'MAU / Active Subs (opened in 30d)': 'nobl_mau_count',
+  'NOBL MAU': 'nobl_mau_count',
+  'MAU / Active Subscribers': 'nobl_mau_count',
   'Sessions per MAU': 'sessions_per_mau',
   'Sessions per DAU': 'sessions_per_dau',
   // CS (cs_tickets_daily, via Mongo)
@@ -222,10 +226,18 @@ const DB_KEY = {
   'nCPA — Studio Reformer':      'studio_cac',
   'Home Ad CAC — Chris':         'home_cac',
   'nCPA — Home Reformer':        'home_cac',
-  // Aliases for Sheet typos with double-spaces in metric names
+  // Aliases for Sheet typos with double-spaces in metric names (kept for
+  // safety in case a raw source ever bypasses the whitespace-collapsing extractor)
   'UK  orders partially unfulfilled': 'uk_orders_unfulfilled',
   'UK  Time to Fulfillment':      'uk_ttf_days',
   'CA  Time to Fulfillment':      'ca_ttf_days',
+  // Single-space canonical names (the extractor collapses double→single space)
+  'UK orders partially unfulfilled': 'uk_orders_unfulfilled',
+  'UK Time to Fulfillment':      'uk_ttf_days',
+  'CA Time to Fulfillment':      'ca_ttf_days',
+  'AUS Time to Fulfillment':     'au_ttf_days',
+  'US Time to Fulfillment':      'avg_fulfillment_days',
+  'Time to Fulfillment':         'avg_fulfillment_days',
   // NOBL Airplus API (live) — Air Paid churn + AIR+ popup events.
   'NOBL — Air Paid Churn Rate (daily)':  'air_paid_churn_rate',
   'NOBL — Air Paid Churn Count (daily)': 'air_paid_churn_count',
@@ -264,7 +276,8 @@ const MONEY_KEYS = new Set([
   'flo_hardware_rev',
 ]);
 const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'us_orders_unfulfilled', 'uk_orders_unfulfilled', 'us_orders_unfulfilled_24h', 'uk_orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio', 'wrong_order_count',
-  'air_paid_churn_count', 'airplus_popup_shown', 'airplus_popup_dismissed', 'airplus_popup_cta_tapped', 'airplus_popup_purchases']);
+  'air_paid_churn_count', 'airplus_popup_shown', 'airplus_popup_dismissed', 'airplus_popup_cta_tapped', 'airplus_popup_purchases',
+  'nobl_mau_count']);
 const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days', 'uk_ttf_days']);
 // Keys where a plain 2dp decimal is the right rendering (no unit suffix).
 const DECIMAL_KEYS = new Set(['sessions_per_mau', 'sessions_per_dau', 'csat_avg']);

@@ -3450,6 +3450,8 @@ router.get('/kpi-pulse', async (req, res) => {
             // API overlay or explicit verified overrides can supply them.
             dau_mau_stickiness: null,
             sessions_per_mau: null,
+            // MAU count — last non-null value across the period from tw_sessions_daily.
+            nobl_mau_count: nMau,
             // Phase 2/3 additions
             avg_shipping_cost: avgOf(opsNcost),
             avg_fulfillment_days: avgOf(opsNfulfillDays),
@@ -3624,7 +3626,7 @@ router.get('/kpi-pulse', async (req, res) => {
 
       const KN = [
         'mer','sales','aov','amazon_pct','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','site_cvr','discounts_pct','returning_new_customer_split',
-        'air_rev_pct','attach','ttp','activation','intl_activation','au_activation','ca_activation','uk_activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau','air_paid_churn_rate','air_paid_churn_count','airplus_popup_shown','airplus_popup_dismissed','airplus_popup_cta_tapped','airplus_popup_purchases',
+        'air_rev_pct','attach','ttp','activation','intl_activation','au_activation','ca_activation','uk_activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau','nobl_mau_count','air_paid_churn_rate','air_paid_churn_count','airplus_popup_shown','airplus_popup_dismissed','airplus_popup_cta_tapped','airplus_popup_purchases',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','uk_ttf_days','orders_unfulfilled','us_orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','uk_orders_unfulfilled','orders_unfulfilled_24h','us_orders_unfulfilled_24h','uk_orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','first_response_hours','first_resolution_hours','csat_avg','recovery_revenue','wrong_order_rate','wrong_order_count','top_ticket_themes','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
         'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','new_customer_cac','bundle_rev_pct','bundle_cm1_pct','net_sub_adds','returning_cust_rev_pct',
