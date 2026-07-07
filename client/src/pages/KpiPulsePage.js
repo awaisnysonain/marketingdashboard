@@ -226,6 +226,15 @@ const DB_KEY = {
   'UK  orders partially unfulfilled': 'uk_orders_unfulfilled',
   'UK  Time to Fulfillment':      'uk_ttf_days',
   'CA  Time to Fulfillment':      'ca_ttf_days',
+  // NOBL Airplus API (live) — Air Paid churn + AIR+ popup events.
+  'NOBL — Air Paid Churn Rate (daily)':  'air_paid_churn_rate',
+  'NOBL — Air Paid Churn Count (daily)': 'air_paid_churn_count',
+  'NOBL — AIR+ Popup Shown':      'airplus_popup_shown',
+  'NOBL — AIR+ Popup Dismissed':  'airplus_popup_dismissed',
+  'NOBL — AIR+ Popup CTA Tapped': 'airplus_popup_cta_tapped',
+  'NOBL — AIR+ Purchases':        'airplus_popup_purchases',
+  // FLO Daily Churn — derive from monthly churn for display purposes.
+  'Daily Churn': 'monthly_churn',
 };
 
 const MONTHS_SHORT = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -240,6 +249,7 @@ const PCT_KEYS = new Set([
   'refund_rate', 'us_refund_rate', 'uk_refund_rate', 'au_refund_rate', 'ca_refund_rate', 'cs_closed_pct', 'app_rev_pct', 'app_activation', 'sms_sales_pct', 'email_sales_pct', 'unsubscribe_rate', 'dau_mau_stickiness',
   'site_cvr', 'discounts_pct', 'intl_activation', 'au_activation', 'ca_activation', 'uk_activation',
   'wrong_order_rate',
+  'air_paid_churn_rate',
 ]);
 const RATIO_KEYS = new Set(['mer', 'us_mer', 'ca_mer', 'au_mer', 'eu_mer', 'uk_mer', 'test_video_roas_taylor', 'test_video_roas_franz', 'test_video_roas_luke', 'test_video_roas_chris', 'app_ltv_cac']);
 const MONEY_KEYS = new Set([
@@ -247,7 +257,8 @@ const MONEY_KEYS = new Set([
   'portable_cac', 'studio_cac', 'home_cac', 'home_studio_cac',
   'app_ltv', 'app_cac', 'recovery_revenue',
 ]);
-const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'us_orders_unfulfilled', 'uk_orders_unfulfilled', 'us_orders_unfulfilled_24h', 'uk_orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio', 'wrong_order_count']);
+const INT_KEYS   = new Set(['orders_unfulfilled', 'orders_unfulfilled_24h', 'us_orders_unfulfilled', 'uk_orders_unfulfilled', 'us_orders_unfulfilled_24h', 'uk_orders_unfulfilled_24h', 'ca_orders_unfulfilled', 'au_orders_unfulfilled', 'net_sub_adds', 'cs_tickets_count', 'us_cs_tickets_count', 'uk_cs_tickets_count', 'au_cs_tickets_count', 'ca_cs_tickets_count', 'cs_closed_count', 'app_net_sub_adds', 'pagespeed_pdp_aio', 'wrong_order_count',
+  'air_paid_churn_count', 'airplus_popup_shown', 'airplus_popup_dismissed', 'airplus_popup_cta_tapped', 'airplus_popup_purchases']);
 const DAY_KEYS = new Set(['avg_fulfillment_days', 'avg_ship_to_door_days', 'ca_ttf_days', 'au_ttf_days', 'uk_ttf_days']);
 // Keys where a plain 2dp decimal is the right rendering (no unit suffix).
 const DECIMAL_KEYS = new Set(['sessions_per_mau', 'sessions_per_dau', 'csat_avg']);
@@ -481,14 +492,14 @@ NOBL|Paid Media|Brad|NOBL Blended MER|3
 NOBL|Paid Media|Brad|Gross Sales − Discounts|n/a
 NOBL|Paid Media|Brad|NOBL Air Rev as % of Total Sales|5%
 NOBL|Paid Media|Brad|Amazon Rev as % of Gross Sales|1.50%
-NOBL|Paid Media||NOBL BUNDLES POD (Alex)|
-NOBL|Paid Media|Alex|Bundle % of Total NOBL Revenue|55%
-NOBL|Paid Media|Alex|AOV|$553
-NOBL|Paid Media|Alex|Bundle CM1 %|60 %
-NOBL|Paid Media||NOBL AIR POD (Simon)|
-NOBL|Paid Media|Simon|Activation Rate (Attach × TTP)|12%
-NOBL|Paid Media|Simon|Attach Rate|20%
-NOBL|Paid Media|Simon|Trial-to-Paid (TTP)|n/a
+NOBL|NOBL Bundles Pod|Alex|Bundle % of Total NOBL Revenue|55%
+NOBL|NOBL Bundles Pod|Alex|AOV|$553
+NOBL|NOBL Bundles Pod|Alex|Bundle CM1 %|60 %
+NOBL|NOBL Air Pod|Simon|Activation Rate (Attach × TTP)|12%
+NOBL|NOBL Air Pod|Simon|Attach Rate|20%
+NOBL|NOBL Air Pod|Simon|Trial-to-Paid (TTP)|n/a
+NOBL|NOBL Air Pod||NOBL — Air Paid Churn Rate (daily)|
+NOBL|NOBL Air Pod||NOBL — Air Paid Churn Count (daily)|
 NOBL|Creative|Brad|TOF vs BOF Spend Split|n/a
 NOBL|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|30%
 NOBL|Retention|Daniel|SMS % of Gross Sales − Discounts|10%
@@ -496,11 +507,11 @@ NOBL|Retention|Daniel|Email % of Gross Sales − Discounts|20%
 NOBL|Partnerships|Shaleem|% Total Meta Spend on Whitelist|50%
 NOBL|Ops|Shumail|Total orders partially unfulfilled|<4000
 NOBL|Ops||US Orders partially unfulfilled|
-NOBL|Ops||UK  orders partially unfulfilled|
-NOBL|Ops||UK  Time to Fulfillment|
+NOBL|Ops||UK orders partially unfulfilled|
+NOBL|Ops||UK Time to Fulfillment|
 NOBL|Ops|Shumail|US Time to Fulfillment|2 Days
 NOBL|Ops||AUS Time to Fulfillment|
-NOBL|Ops||CA  Time to Fulfillment|
+NOBL|Ops||CA Time to Fulfillment|
 NOBL|Ops|Shumail|Avg Shipping Cost per Order|$20
 NOBL|Ops|Shumail|Avg shipping time length (from shipped to customer door)|4 Days
 NOBL|Ops|Shumail|CANADA Partially Unfulfilled Orders #|<200
@@ -551,7 +562,7 @@ FLO|Retention|Daniel|Email % of Gross Sales − Discounts|20%
 FLO|Ops|Shumail|Orders partially unfulfilled|100
 FLO|Ops|Shumail|US Time to Fulfillment|1.5 days
 FLO|Ops||AUS Time to Fulfillment|
-FLO|Ops||CA  Time to Fulfillment|
+FLO|Ops||CA Time to Fulfillment|
 FLO|Ops|Shumail|Avg Shipping Cost per Order|$13
 FLO|Ops|Shumail|Avg shipping time length (from shipped to customer door)|4 days
 FLO|Ops|Shumail|CANADA Partially Unfulfilled Orders #|
@@ -583,8 +594,8 @@ FLO|App||Daily Churn|
 `;
 
 const WEEKLY_KPI_CATALOG = `
-NOBL|Paid Media|Brad|NOBL Blended MER|
-NOBL|Paid Media|Brad|Gross Sales − Discounts|
+NOBL|Paid Media|Brad|NOBL Blended MER|3.2x
+NOBL|Paid Media|Brad|Gross Sales − Discounts|On plan
 NOBL|Paid Media|Simon|NOBL Air Rev as % of Total Sales|5%
 NOBL|Paid Media|Brad|Amazon Rev as % of Gross Sales − Discounts|1.50%
 NOBL|Paid Media|Brad|Blended nCPA|$197
@@ -601,23 +612,21 @@ NOBL|Paid Media|Brad|Canada Sales as % of Total Sales|5%
 NOBL|Paid Media|Brad|Australia Sales as % of Total Sales|2.00%
 NOBL|Paid Media|Brad|EU Sales as % of Total Sales|0.75%
 NOBL|Paid Media||Uk Sales as % of Total Sales|
-NOBL|Paid Media||NOBL BUNDLES POD (Alex)|
-NOBL|Paid Media|Alex|Bundle % of Total NOBL Revenue|65%
-NOBL|Paid Media|Alex|AOV|$560
-NOBL|Paid Media|Alex|Bundle CM1 %|60%
+NOBL|NOBL Bundles Pod|Alex|Bundle % of Total NOBL Revenue|65%
+NOBL|NOBL Bundles Pod|Alex|AOV|$560
+NOBL|NOBL Bundles Pod|Alex|Bundle CM1 %|60%
 NOBL|CRO|Alex|Site Conversion Rate|1.20%
-NOBL|CRO|Alex|Returning vs New Customer Split (as visitors)|
+NOBL|CRO|Alex|Returning vs New Customer Split (as visitors)|35% / 65%
 NOBL|CRO|Alex|Discounts as % of Gross Sales − Discounts|10%
-NOBL|CRO||NOBL AIR POD (Simon)|
-NOBL|CRO|Simon|Activation Rate (Attach × TTP)|
-NOBL|CRO|Simon|Attach Rate|
-NOBL|CRO|Simon|Trial-to-Paid (TTP)|
-NOBL|CRO|Simon|Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week|
-NOBL|CRO|Simon|International Activation Rate|
-NOBL|CRO||AUS Activation Rate %|
-NOBL|CRO||CA Activation Rate %|
-NOBL|CRO||UK Activation Rate%|
-NOBL|Creative|Luke|TOF vs BOF Spend Split|
+NOBL|NOBL Air Pod|Simon|Activation Rate (Attach × TTP)|12% by Apr 30
+NOBL|NOBL Air Pod|Simon|Attach Rate|≥50%
+NOBL|NOBL Air Pod|Simon|Trial-to-Paid (TTP)|≥70%
+NOBL|NOBL Air Pod|Simon|Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week|Set target
+NOBL|NOBL Air Pod|Simon|International Activation Rate|Set baseline
+NOBL|NOBL Air Pod||AUS Activation Rate %|
+NOBL|NOBL Air Pod||CA Activation Rate %|
+NOBL|NOBL Air Pod||UK Activation Rate%|
+NOBL|Creative|Luke|TOF vs BOF Spend Split|Set target
 NOBL|Creative|Luke|Share of Spend TOF — Taylor|33%
 NOBL|Creative|Luke|Share of Spend TOF — Franz|33%
 NOBL|Creative|Luke|Share of Spend TOF — Luke|33%
@@ -625,29 +634,29 @@ NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Ta
 NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Franz|0.95
 NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Luke|0.95
 NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Chris|0.95
-NOBL|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|
-NOBL|Retention|Daniel|SMS % of Gross Sales − Discounts|
-NOBL|Retention|Daniel|Email — Flow vs Campaign Split|
-NOBL|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|
-NOBL|Retention|Daniel|Unsubscribe Rate|
-NOBL|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|
-NOBL|Partnerships|Shaleem|New Partners Onboarded / Week|
-NOBL|Social|Fatima|Engagement Rate (Insta)|
-NOBL|Social|Fatima|Engagement Rate (TikTok)|
+NOBL|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|≥30%
+NOBL|Retention|Daniel|SMS % of Gross Sales − Discounts|Set baseline
+NOBL|Retention|Daniel|Email — Flow vs Campaign Split|≥60% flows
+NOBL|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|Set baseline
+NOBL|Retention|Daniel|Unsubscribe Rate|<0.3%
+NOBL|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|Net positive
+NOBL|Partnerships|Shaleem|New Partners Onboarded / Week|Set target
+NOBL|Social|Fatima|Engagement Rate (Insta)|<2.5%
+NOBL|Social|Fatima|Engagement Rate (TikTok)|<3%
 NOBL|Social|Fatima|Instagram Total Posts (feed + stories + reels)|77
 NOBL|Social|Fatima|TikTok Total Posts (all formats)|21
-NOBL|Social|Fatima|Follower Growth — Instagram|
-NOBL|Social|Fatima|Follower Growth — TikTok|
+NOBL|Social|Fatima|Follower Growth — Instagram|Set target
+NOBL|Social|Fatima|Follower Growth — TikTok|Set target
 NOBL|Ops||Orders Unfulfilled >24hrs|0
 NOBL|Ops||US Orders Unfulfilled >24hrs|
 NOBL|Ops||UK Orders Unfulfilled >24hrs|
-NOBL|Ops|Shumail|unfulfilled orders|
+NOBL|Ops|Shumail|unfulfilled orders|<4000
 NOBL|Ops||US unfulfilled orders|
 NOBL|Ops||UK unfulfilled orders|
 NOBL|Ops||UK Time to Fulfillment|
-NOBL|Ops|Shumail|Time to Fulfillment|
+NOBL|Ops|Shumail|Time to Fulfillment|<2
 NOBL|Ops|Shumail|Avg Shipping Cost per Order|$20
-NOBL|CS|Hassan|CS Tickets as % of orders|
+NOBL|CS|Hassan|CS Tickets as % of orders|<2%
 NOBL|CS||Total CS Tickets # amount|
 NOBL|CS||US CS Tickets as % of US orders|
 NOBL|CS||US CS Tickets # amount|
@@ -670,18 +679,18 @@ NOBL|CS||Canada Refund Rate|
 NOBL|CS||# of tickets closed effective|
 NOBL|CS|Hassan|B2B Revenue ($)|12000
 NOBL|CS|Hassan|B2C Revenue ($)|85000
-NOBL|CS|Hassan|Wrong Order Rate % ( wrong order tickets as % of total orders)|
-NOBL|CS|Hassan|First Response Time|
+NOBL|CS|Hassan|Wrong Order Rate % ( wrong order tickets as % of total orders)|<0.5%
+NOBL|CS|Hassan|First Response Time|<2 hours
 NOBL|CS|Hassan|Recovery Revenue (saved cancellations)|300,000
-NOBL|CS|Hassan|Top 3 Ticket Themes + AI Summary|
+NOBL|CS|Hassan|Top 3 Ticket Themes + AI Summary|Declining themes
 NOBL|CS||Csat|
 NOBL|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
-NOBL|App|Kolachi|Activation Rate (Attach Rate × TTP)|
+NOBL|App|Kolachi|Activation Rate (Attach Rate × TTP)|12% by Apr 30
 NOBL|App|Ali Hashim|Nobl MAU / Active Subscribers|5
 NOBL|App|Ali Hashim|Sessions per MAU|10
 FLO|Paid Media|Brad|Portable Reformer CAC|$125
 FLO|Paid Media|Brad|Home + Studio Reformer Blended CAC|$1,047
-FLO|Paid Media|Brad|Gross Sales − Discounts (Flo)|
+FLO|Paid Media|Brad|Gross Sales − Discounts (Flo)|On plan
 FLO|Paid Media|Brad|App Rev as % of Gross Sales − Discounts|29.40%
 FLO|Paid Media|Brad|nCPA — Portable Reformer|$125
 FLO|Paid Media|Brad|nCPA — Home Reformer|$1,148
@@ -692,65 +701,65 @@ FLO|Paid Media|Anthony|Whitelisting Spend as % of Weekly Meta Spend|50%
 FLO|Paid Media|Brad|US — MER|1.82
 FLO|Paid Media|Brad|Canada — MER|1.06
 FLO|Paid Media|Brad|Australia — MER|1.65
-FLO|Paid Media|Brad|EU — MER|
+FLO|Paid Media|Brad|EU — MER|Set target
 FLO|Paid Media|Brad|USA Sales as % of Total Sales|94.20%
 FLO|Paid Media|Brad|Canada Sales as % of Total Sales|3.00%
 FLO|Paid Media|Brad|Australia Sales as % of Total Sales|2.80%
-FLO|Paid Media|Brad|EU Sales as % of Total Sales|
-FLO|App|Kolachi|Flo Hardware Revenue vs Plan|
-FLO|App|Kolachi|Hardware Mix Sales (Portable vs Home/Studio %)|
-FLO|App|Kolachi|App Attach %|
-FLO|App|Kolachi|App Lifetime Value (months)|
-FLO|App|Kolachi|LTV / CAC|
-FLO|App|Kolachi|App Net New Subs / Week — new paid subs minus cancellations same week|
-FLO|App|Kolachi|Trial-to-Paid % (annual)|
-FLO|App|Kolachi|Monthly Churn Rate — cancelled this month / active subs at month start|
-FLO|CRO|Alex|Site Conversion Rate|
-FLO|CRO|Alex|Returning vs New Customer Split (as visitors)|
-FLO|CRO|Alex|Discounts as % of Gross Sales − Discounts|
-FLO|Creative|Brad|TOF vs BOF Spend Split|
+FLO|Paid Media|Brad|EU Sales as % of Total Sales|Set baseline
+FLO|App|Kolachi|Flo Hardware Revenue vs Plan|Tracking $34M FY
+FLO|App|Kolachi|Hardware Mix Sales (Portable vs Home/Studio %)|Portable ≥65%
+FLO|App|Kolachi|App Attach %|→70%
+FLO|App|Kolachi|App Lifetime Value (months)|Set baseline
+FLO|App|Kolachi|LTV / CAC|>3.0x
+FLO|App|Kolachi|App Net New Subs / Week — new paid subs minus cancellations same week|≥1,000
+FLO|App|Kolachi|Trial-to-Paid % (annual)|≥60%
+FLO|App|Kolachi|Monthly Churn Rate — cancelled this month / active subs at month start|<8%
+FLO|CRO|Alex|Site Conversion Rate|Set baseline
+FLO|CRO|Alex|Returning vs New Customer Split (as visitors)|Track
+FLO|CRO|Alex|Discounts as % of Gross Sales − Discounts|Set target
+FLO|Creative|Brad|TOF vs BOF Spend Split|Set target
 FLO|Creative|Luke|Share of Spend — Chris|100%
 FLO|Creative|Luke|Portable Ad CAC — Chris|$94
 FLO|Creative|Luke|Sutido Ad CAC — Chris|$486
 FLO|Creative|Luke|Home Ad CAC — Chris|$861
-FLO|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|
-FLO|Retention|Daniel|SMS % of Gross Sales − Discounts|
-FLO|Retention|Daniel|Email — Flow vs Campaign Split|
-FLO|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|
-FLO|Retention|Daniel|Unsubscribe Rate|
-FLO|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|
+FLO|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|≥30%
+FLO|Retention|Daniel|SMS % of Gross Sales − Discounts|Set baseline
+FLO|Retention|Daniel|Email — Flow vs Campaign Split|≥60% flows
+FLO|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|Set baseline
+FLO|Retention|Daniel|Unsubscribe Rate|<0.3%
+FLO|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|Net positive
 FLO|Partnerships|Olivia|Flo Instructors Onboarded|3
 FLO|Partnerships|Olivia|USA Influencers Onboarded|11
 FLO|Partnerships|Olivia|Canada Influencers Onboarded|11
 FLO|Partnerships|Olivia|Australia Influencers Onboarded|6
 FLO|Partnerships|Olivia|UK Influencers Onboarded|9
-FLO|Social|Fatima|Engagement Rate (Insta)|
-FLO|Social|Fatima|Engagement Rate (TikTok)|
+FLO|Social|Fatima|Engagement Rate (Insta)|<2%
+FLO|Social|Fatima|Engagement Rate (TikTok)|<4%
 FLO|Social|Fatima|Instagram Total Posts (feed + stories + reels)|50
 FLO|Social|Fatima|TikTok Total Posts (all formats)|21
-FLO|Social|Fatima|Follower Growth — Instagram|
-FLO|Social|Fatima|Follower Growth — TikTok|
+FLO|Social|Fatima|Follower Growth — Instagram|Set target
+FLO|Social|Fatima|Follower Growth — TikTok|Set target
 FLO|Ops|Shumail|Orders Unfulfilled >24hrs|0
 FLO|Ops|Shumail|Time to Fulfillment|1
 FLO|Ops|Shumail|Avg Shipping Cost per Order|$14
-FLO|CS|Hassan|CS Tickets as % of Orders|
+FLO|CS|Hassan|CS Tickets as % of Orders|<2%
 FLO|CS|Hassan|B2C Revenue ($)|12000
-FLO|CS|Hassan|Wrong Order Rate %|
-FLO|CS|Hassan|First Response Time|
+FLO|CS|Hassan|Wrong Order Rate %|<0.5%
+FLO|CS|Hassan|First Response Time|<2 hours
 FLO|CS|Hassan|Recovery Revenue (saved cancellations)|
 FLO|CS|Hassan|Top 3 Ticket Themes + AI Summary|
 FLO|CS||Csat|
 FLO|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
 FLO|App|Ali Hashim|Activation Rate (Attach Rate × TTP)|40%
 FLO|App|Ali Hashim|DAU / MAU (stickiness)|15%
-FLO|App|Ali Hashim|Sessions per DAU|
+FLO|App|Ali Hashim|Sessions per DAU|≥1.5
 `;
 
 // QTD_Weekly Sheet tab. Kept separate from Weekly so Quarterly can diverge
 // without accidentally inheriting non-QTD rows.
 const QUARTERLY_KPI_CATALOG = `
-NOBL|Paid Media|Brad|NOBL Blended MER|
-NOBL|Paid Media|Brad|Gross Sales − Discounts|
+NOBL|Paid Media|Brad|NOBL Blended MER|3.2x
+NOBL|Paid Media|Brad|Gross Sales − Discounts|On plan
 NOBL|Paid Media|Simon|NOBL Air Rev as % of Total Sales|5%
 NOBL|Paid Media|Brad|Amazon Rev as % of Gross Sales − Discounts|1.50%
 NOBL|Paid Media|Brad|Blended nCPA|$197
@@ -767,23 +776,21 @@ NOBL|Paid Media|Brad|Canada Sales as % of Total Sales|5%
 NOBL|Paid Media|Brad|Australia Sales as % of Total Sales|2.00%
 NOBL|Paid Media|Brad|EU Sales as % of Total Sales|0.75%
 NOBL|Paid Media||Uk Sales as % of Total Sales|
-NOBL|Paid Media||NOBL BUNDLES POD (Alex)|
-NOBL|Paid Media|Alex|Bundle % of Total NOBL Revenue|65%
-NOBL|Paid Media|Alex|AOV|$560
-NOBL|Paid Media|Alex|Bundle CM1 %|60%
+NOBL|NOBL Bundles Pod|Alex|Bundle % of Total NOBL Revenue|65%
+NOBL|NOBL Bundles Pod|Alex|AOV|$560
+NOBL|NOBL Bundles Pod|Alex|Bundle CM1 %|60%
 NOBL|CRO|Alex|Site Conversion Rate|1.20%
-NOBL|CRO|Alex|Returning vs New Customer Split (as visitors)|
+NOBL|CRO|Alex|Returning vs New Customer Split (as visitors)|35% / 65%
 NOBL|CRO|Alex|Discounts as % of Gross Sales − Discounts|10%
-NOBL|CRO||NOBL AIR POD (Simon)|
-NOBL|CRO|Simon|Activation Rate (Attach × TTP)|
-NOBL|CRO|Simon|Attach Rate|
-NOBL|CRO|Simon|Trial-to-Paid (TTP)|
-NOBL|CRO|Simon|Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week|
-NOBL|CRO|Simon|International Activation Rate|
-NOBL|CRO||AUS Activation Rate %|
-NOBL|CRO||CA Activation Rate %|
-NOBL|CRO||UK Activation Rate%|
-NOBL|Creative|Luke|TOF vs BOF Spend Split|
+NOBL|NOBL Air Pod|Simon|Activation Rate (Attach × TTP)|12% by Apr 30
+NOBL|NOBL Air Pod|Simon|Attach Rate|≥50%
+NOBL|NOBL Air Pod|Simon|Trial-to-Paid (TTP)|≥70%
+NOBL|NOBL Air Pod|Simon|Net Subscriber Adds (Air + Air+) — new paid subs minus cancellations same week|Set target
+NOBL|NOBL Air Pod|Simon|International Activation Rate|Set baseline
+NOBL|NOBL Air Pod||AUS Activation Rate %|
+NOBL|NOBL Air Pod||CA Activation Rate %|
+NOBL|NOBL Air Pod||UK Activation Rate%|
+NOBL|Creative|Luke|TOF vs BOF Spend Split|Set target
 NOBL|Creative|Luke|Share of Spend TOF — Taylor|33%
 NOBL|Creative|Luke|Share of Spend TOF — Franz|33%
 NOBL|Creative|Luke|Share of Spend TOF — Luke|33%
@@ -791,29 +798,29 @@ NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Ta
 NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Franz|0.95
 NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Luke|0.95
 NOBL|Creative|Luke|Ads launched in test-video-all combine for a 0.95 ROAS — Chris|0.95
-NOBL|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|
-NOBL|Retention|Daniel|SMS % of Gross Sales − Discounts|
-NOBL|Retention|Daniel|Email — Flow vs Campaign Split|
-NOBL|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|
-NOBL|Retention|Daniel|Unsubscribe Rate|
-NOBL|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|
-NOBL|Partnerships|Shaleem|New Partners Onboarded / Week|
-NOBL|Social|Fatima|Engagement Rate (Insta)|
-NOBL|Social|Fatima|Engagement Rate (TikTok)|
+NOBL|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|≥30%
+NOBL|Retention|Daniel|SMS % of Gross Sales − Discounts|Set baseline
+NOBL|Retention|Daniel|Email — Flow vs Campaign Split|≥60% flows
+NOBL|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|Set baseline
+NOBL|Retention|Daniel|Unsubscribe Rate|<0.3%
+NOBL|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|Net positive
+NOBL|Partnerships|Shaleem|New Partners Onboarded / Week|Set target
+NOBL|Social|Fatima|Engagement Rate (Insta)|<2.5%
+NOBL|Social|Fatima|Engagement Rate (TikTok)|<3%
 NOBL|Social|Fatima|Instagram Total Posts (feed + stories + reels)|77
 NOBL|Social|Fatima|TikTok Total Posts (all formats)|21
-NOBL|Social|Fatima|Follower Growth — Instagram|
-NOBL|Social|Fatima|Follower Growth — TikTok|
+NOBL|Social|Fatima|Follower Growth — Instagram|Set target
+NOBL|Social|Fatima|Follower Growth — TikTok|Set target
 NOBL|Ops||Orders Unfulfilled >24hrs|0
 NOBL|Ops||US Orders Unfulfilled >24hrs|
 NOBL|Ops||UK Orders Unfulfilled >24hrs|
-NOBL|Ops|Shumail|unfulfilled orders|
+NOBL|Ops|Shumail|unfulfilled orders|<4000
 NOBL|Ops||US unfulfilled orders|
 NOBL|Ops||UK unfulfilled orders|
 NOBL|Ops||UK Time to Fulfillment|
-NOBL|Ops|Shumail|Time to Fulfillment|
+NOBL|Ops|Shumail|Time to Fulfillment|<2
 NOBL|Ops|Shumail|Avg Shipping Cost per Order|$20
-NOBL|CS|Hassan|CS Tickets as % of orders|
+NOBL|CS|Hassan|CS Tickets as % of orders|<2%
 NOBL|CS||Total CS Tickets # amount|
 NOBL|CS||US CS Tickets as % of US orders|
 NOBL|CS||US CS Tickets # amount|
@@ -836,18 +843,18 @@ NOBL|CS||Canada Refund Rate|
 NOBL|CS||# of tickets closed effective|
 NOBL|CS|Hassan|B2B Revenue ($)|12000
 NOBL|CS|Hassan|B2C Revenue ($)|85000
-NOBL|CS|Hassan|Wrong Order Rate % ( wrong order tickets as % of total orders)|
-NOBL|CS|Hassan|First Response Time|
+NOBL|CS|Hassan|Wrong Order Rate % ( wrong order tickets as % of total orders)|<0.5%
+NOBL|CS|Hassan|First Response Time|<2 hours
 NOBL|CS|Hassan|Recovery Revenue (saved cancellations)|300,000
-NOBL|CS|Hassan|Top 3 Ticket Themes + AI Summary|
+NOBL|CS|Hassan|Top 3 Ticket Themes + AI Summary|Declining themes
 NOBL|CS||Csat|
 NOBL|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
-NOBL|App|Kolachi|Activation Rate (Attach Rate × TTP)|
+NOBL|App|Kolachi|Activation Rate (Attach Rate × TTP)|12% by Apr 30
 NOBL|App|Ali Hashim|Nobl MAU / Active Subscribers|5
 NOBL|App|Ali Hashim|Sessions per MAU|10
 FLO|Paid Media|Brad|Portable Reformer CAC|$125
 FLO|Paid Media|Brad|Home + Studio Reformer Blended CAC|$1,047
-FLO|Paid Media|Brad|Gross Sales − Discounts (Flo)|
+FLO|Paid Media|Brad|Gross Sales − Discounts (Flo)|On plan
 FLO|Paid Media|Brad|App Rev as % of Gross Sales − Discounts|29.40%
 FLO|Paid Media|Brad|nCPA — Portable Reformer|$125
 FLO|Paid Media|Brad|nCPA — Home Reformer|$1,148
@@ -858,58 +865,58 @@ FLO|Paid Media|Anthony|Whitelisting Spend as % of Weekly Meta Spend|50%
 FLO|Paid Media|Brad|US — MER|1.82
 FLO|Paid Media|Brad|Canada — MER|1.06
 FLO|Paid Media|Brad|Australia — MER|1.65
-FLO|Paid Media|Brad|EU — MER|
+FLO|Paid Media|Brad|EU — MER|Set target
 FLO|Paid Media|Brad|USA Sales as % of Total Sales|94.20%
 FLO|Paid Media|Brad|Canada Sales as % of Total Sales|3.00%
 FLO|Paid Media|Brad|Australia Sales as % of Total Sales|2.80%
-FLO|Paid Media|Brad|EU Sales as % of Total Sales|
-FLO|App|Kolachi|Flo Hardware Revenue vs Plan|
-FLO|App|Kolachi|Hardware Mix Sales (Portable vs Home/Studio %)|
-FLO|App|Kolachi|App Attach %|
-FLO|App|Kolachi|App Lifetime Value (months)|
-FLO|App|Kolachi|LTV / CAC|
-FLO|App|Kolachi|App Net New Subs / Week — new paid subs minus cancellations same week|
-FLO|App|Kolachi|Trial-to-Paid % (annual)|
-FLO|App|Kolachi|Monthly Churn Rate — cancelled this month / active subs at month start|
-FLO|CRO|Alex|Site Conversion Rate|
-FLO|CRO|Alex|Returning vs New Customer Split (as visitors)|
-FLO|CRO|Alex|Discounts as % of Gross Sales − Discounts|
-FLO|Creative|Brad|TOF vs BOF Spend Split|
+FLO|Paid Media|Brad|EU Sales as % of Total Sales|Set baseline
+FLO|App|Kolachi|Flo Hardware Revenue vs Plan|Tracking $34M FY
+FLO|App|Kolachi|Hardware Mix Sales (Portable vs Home/Studio %)|Portable ≥65%
+FLO|App|Kolachi|App Attach %|→70%
+FLO|App|Kolachi|App Lifetime Value (months)|Set baseline
+FLO|App|Kolachi|LTV / CAC|>3.0x
+FLO|App|Kolachi|App Net New Subs / Week — new paid subs minus cancellations same week|≥1,000
+FLO|App|Kolachi|Trial-to-Paid % (annual)|≥60%
+FLO|App|Kolachi|Monthly Churn Rate — cancelled this month / active subs at month start|<8%
+FLO|CRO|Alex|Site Conversion Rate|Set baseline
+FLO|CRO|Alex|Returning vs New Customer Split (as visitors)|Track
+FLO|CRO|Alex|Discounts as % of Gross Sales − Discounts|Set target
+FLO|Creative|Brad|TOF vs BOF Spend Split|Set target
 FLO|Creative|Luke|Share of Spend — Chris|100%
 FLO|Creative|Luke|Portable Ad CAC — Chris|$94
 FLO|Creative|Luke|Sutido Ad CAC — Chris|$486
 FLO|Creative|Luke|Home Ad CAC — Chris|$861
-FLO|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|
-FLO|Retention|Daniel|SMS % of Gross Sales − Discounts|
-FLO|Retention|Daniel|Email — Flow vs Campaign Split|
-FLO|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|
-FLO|Retention|Daniel|Unsubscribe Rate|
-FLO|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|
+FLO|Retention|Daniel|Retention Rev as % of Gross Sales − Discounts|≥30%
+FLO|Retention|Daniel|SMS % of Gross Sales − Discounts|Set baseline
+FLO|Retention|Daniel|Email — Flow vs Campaign Split|≥60% flows
+FLO|Retention|Daniel|Returning Customer Revenue as % of Gross Sales − Discounts|Set baseline
+FLO|Retention|Daniel|Unsubscribe Rate|<0.3%
+FLO|Retention|Daniel|List Growth vs Churn — (new subs − unsubs) / list at start of week|Net positive
 FLO|Partnerships|Olivia|Flo Instructors Onboarded|3
 FLO|Partnerships|Olivia|USA Influencers Onboarded|11
 FLO|Partnerships|Olivia|Canada Influencers Onboarded|11
 FLO|Partnerships|Olivia|Australia Influencers Onboarded|6
 FLO|Partnerships|Olivia|UK Influencers Onboarded|9
-FLO|Social|Fatima|Engagement Rate (Insta)|
-FLO|Social|Fatima|Engagement Rate (TikTok)|
+FLO|Social|Fatima|Engagement Rate (Insta)|<2%
+FLO|Social|Fatima|Engagement Rate (TikTok)|<4%
 FLO|Social|Fatima|Instagram Total Posts (feed + stories + reels)|50
 FLO|Social|Fatima|TikTok Total Posts (all formats)|21
-FLO|Social|Fatima|Follower Growth — Instagram|
-FLO|Social|Fatima|Follower Growth — TikTok|
+FLO|Social|Fatima|Follower Growth — Instagram|Set target
+FLO|Social|Fatima|Follower Growth — TikTok|Set target
 FLO|Ops|Shumail|Orders Unfulfilled >24hrs|0
 FLO|Ops|Shumail|Time to Fulfillment|1
 FLO|Ops|Shumail|Avg Shipping Cost per Order|$14
-FLO|CS|Hassan|CS Tickets as % of Orders|
+FLO|CS|Hassan|CS Tickets as % of Orders|<2%
 FLO|CS|Hassan|B2C Revenue ($)|12000
-FLO|CS|Hassan|Wrong Order Rate %|
-FLO|CS|Hassan|First Response Time|
+FLO|CS|Hassan|Wrong Order Rate %|<0.5%
+FLO|CS|Hassan|First Response Time|<2 hours
 FLO|CS|Hassan|Recovery Revenue (saved cancellations)|
 FLO|CS|Hassan|Top 3 Ticket Themes + AI Summary|
 FLO|CS||Csat|
 FLO|Web Eng|Sobayyal|PageSpeed (PDP AIO avg)|70
 FLO|App|Ali Hashim|Activation Rate (Attach Rate × TTP)|40%
 FLO|App|Ali Hashim|DAU / MAU (stickiness)|15%
-FLO|App|Ali Hashim|Sessions per DAU|
+FLO|App|Ali Hashim|Sessions per DAU|≥1.5
 `;
 
 function normalizeCatalogTarget(metric, target) {

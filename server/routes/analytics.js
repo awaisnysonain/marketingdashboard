@@ -175,10 +175,14 @@ async function fetchDauMauMetrics(brand) {
   const token = isNobl ? process.env.NOBL_TAG_DAU_MAU_SECRET : process.env.FLO_DAU_MAU_API_KEY;
   if (!baseUrl || !token) return null;
   const url = isNobl ? appendQuery(baseUrl, { secret: token }) : baseUrl;
-  const headers = isNobl ? { 'x-secret': token } : { 'x-api-key': token };
+  // NOBL cloud function checks x-sprint-kpi-secret; FLO uses x-api-key. Provide
+  // both header variants so we work with either implementation.
+  const headers = isNobl
+    ? { 'x-sprint-kpi-secret': token, 'x-secret': token }
+    : { 'x-api-key': token };
   const payload = await fetchJsonWithTimeout(url, {
     headers,
-    timeoutMs: 12000,
+    timeoutMs: 20000,
     attempts: 1,
   });
   return {
@@ -186,6 +190,45 @@ async function fetchDauMauMetrics(brand) {
     sessions_per_mau: brand === 'NOBL' ? parseSessionDensity(payload, brand) : null,
     sessions_per_dau: brand === 'FLO' ? parseSessionDensity(payload, brand) : null,
   };
+}
+
+// NOBL Airplus API — provides Air Paid Churn Rate/Count + AIR+ popup metrics.
+async function fetchNoblAirplusMetrics() {
+  const url = process.env.NOBL_AIRPLUS_URL;
+  const secret = process.env.NOBL_AIRPLUS_SECRET;
+  if (!url || !secret) return null;
+  try {
+    const full = appendQuery(url, { secret });
+    const payload = await fetchJsonWithTimeout(full, {
+      headers: { 'x-sprint-kpi-secret': secret, 'x-secret': secret },
+      timeoutMs: 20000,
+      attempts: 1,
+    });
+    // The endpoint returns per-period metrics; extract the top-level ones.
+    const churnRate = firstFinite(
+      payload?.paidChurnRate, payload?.airPaidChurnRate,
+      payload?.churnRate, payload?.data?.paidChurnRate,
+    );
+    const churnCount = firstFinite(
+      payload?.paidChurnCount, payload?.airPaidChurnCount,
+      payload?.churnCount, payload?.data?.paidChurnCount,
+    );
+    const popupShown = firstFinite(payload?.popupShown, payload?.popup?.shown, payload?.data?.popupShown);
+    const popupDismissed = firstFinite(payload?.popupDismissed, payload?.popup?.dismissed, payload?.data?.popupDismissed);
+    const popupCta = firstFinite(payload?.popupCtaTapped, payload?.popup?.ctaTapped, payload?.data?.popupCtaTapped);
+    const popupPurchases = firstFinite(payload?.popupPurchases, payload?.popup?.purchases, payload?.data?.popupPurchases);
+    return {
+      air_paid_churn_rate: churnRate,
+      air_paid_churn_count: churnCount,
+      airplus_popup_shown: popupShown,
+      airplus_popup_dismissed: popupDismissed,
+      airplus_popup_cta_tapped: popupCta,
+      airplus_popup_purchases: popupPurchases,
+    };
+  } catch (e) {
+    console.warn('[KPI Pulse Airplus]', e.message);
+    return null;
+  }
 }
 
 function envList(name) {
@@ -235,12 +278,13 @@ async function fetchKpiPulseLiveMetrics() {
   // parallel (PageSpeed is the slow source).
   const floDau = await safe(fetchDauMauMetrics('FLO'));
   const noblDau = await safe(fetchDauMauMetrics('NOBL'));
+  const airplus = await safe(fetchNoblAirplusMetrics());
   const [noblPs, floPs] = await Promise.all([
     safe(fetchPageSpeedMetric('NOBL')),
     safe(fetchPageSpeedMetric('FLO')),
   ]);
   return {
-    NOBL: { ...(noblDau || {}), pagespeed_pdp_aio: noblPs },
+    NOBL: { ...(noblDau || {}), ...(airplus || {}), pagespeed_pdp_aio: noblPs },
     FLO:  { ...(floDau || {}),  pagespeed_pdp_aio: floPs },
   };
 }
@@ -279,9 +323,12 @@ function applyKpiPulseLiveMetrics(cadenceData, liveMetrics) {
   // onto the latest visible period (daily/latest week/current QTD), never onto
   // older periods.
   for (const brand of ['NOBL', 'FLO']) {
-    for (const key of ['pagespeed_pdp_aio', 'dau_mau_stickiness', 'sessions_per_mau', 'sessions_per_dau']) {
+    if (!cadenceData.series[brand]) cadenceData.series[brand] = {};
+    for (const key of ['pagespeed_pdp_aio', 'dau_mau_stickiness', 'sessions_per_mau', 'sessions_per_dau',
+      'air_paid_churn_rate', 'air_paid_churn_count',
+      'airplus_popup_shown', 'airplus_popup_dismissed', 'airplus_popup_cta_tapped', 'airplus_popup_purchases']) {
       const v = liveMetrics?.[brand]?.[key];
-      if (v == null || !Number.isFinite(Number(v)) || !cadenceData.series?.[brand]?.[key]) continue;
+      if (v == null || !Number.isFinite(Number(v))) continue;
       cadenceData.series[brand][key] = cadenceData.periods.map((_, idx) => (idx === 0 ? Number(v) : null));
     }
   }
@@ -3563,7 +3610,7 @@ router.get('/kpi-pulse', async (req, res) => {
 
       const KN = [
         'mer','sales','aov','amazon_pct','us_mer','ca_mer','au_mer','eu_mer','uk_mer','us_sales_pct','ca_sales_pct','au_sales_pct','eu_sales_pct','uk_sales_pct','site_cvr','discounts_pct','returning_new_customer_split',
-        'air_rev_pct','attach','ttp','activation','intl_activation','au_activation','ca_activation','uk_activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau',
+        'air_rev_pct','attach','ttp','activation','intl_activation','au_activation','ca_activation','uk_activation','pagespeed_pdp_aio','dau_mau_stickiness','sessions_per_mau','air_paid_churn_rate','air_paid_churn_count','airplus_popup_shown','airplus_popup_dismissed','airplus_popup_cta_tapped','airplus_popup_purchases',
         'avg_shipping_cost','avg_fulfillment_days','avg_ship_to_door_days','ca_ttf_days','au_ttf_days','uk_ttf_days','orders_unfulfilled','us_orders_unfulfilled','ca_orders_unfulfilled','au_orders_unfulfilled','uk_orders_unfulfilled','orders_unfulfilled_24h','us_orders_unfulfilled_24h','uk_orders_unfulfilled_24h',
         'cs_tickets_pct','cs_tickets_count','us_cs_tickets_count','us_cs_tickets_pct','ca_cs_tickets_count','ca_cs_tickets_pct','au_cs_tickets_count','au_cs_tickets_pct','uk_cs_tickets_count','uk_cs_tickets_pct','cs_closed_count','cs_closed_pct','first_response_hours','first_resolution_hours','csat_avg','recovery_revenue','wrong_order_rate','wrong_order_count','top_ticket_themes','cb_rate','us_cb_rate','ca_cb_rate','au_cb_rate','uk_cb_rate',
         'meta_cvr','whitelisting_spend_pct','test_spend_pct','tof_spend_pct','tof_bof_spend_split','refund_rate','us_refund_rate','ca_refund_rate','au_refund_rate','uk_refund_rate','retention_rev_pct','sms_sales_pct','email_sales_pct','email_flow_campaign_split','unsubscribe_rate','new_customer_cac','bundle_rev_pct','net_sub_adds','returning_cust_rev_pct',
