@@ -605,7 +605,6 @@ FLO|CS||Canada Refund Rate|
 FLO|CS|Hassan|# of tickets closed effective|
 FLO|CS|Hassan|Ratio= # of tickets closed effective / total orders for that day|n/a
 FLO|CS||Csat|
-FLO|CS||5|
 FLO|CS|Sobayyal|PageSpeed (PDP AIO avg)|70
 FLO|App|Ali Hashim|DAU / MAU (stickiness)|n/a
 FLO|App|Ali Hashim|Sessions per DAU|n/a
@@ -957,7 +956,13 @@ function normalizeCatalogTarget(metric, target) {
 const CATALOG_SECTION_HEADER_RE = /\bPOD\s*\(|^[A-Z][A-Z &\-]+ (POD|APP|MEDIA|CS|OPS|CREATIVE|RETENTION|PARTNERSHIPS|SOCIAL|CRO|AIR|BUNDLES)\b/;
 function isSectionHeaderMetric(metric) {
   if (!metric) return true;
-  return CATALOG_SECTION_HEADER_RE.test(metric.trim());
+  const m = metric.trim();
+  // Drop garbage extractions: pure numbers, single characters, or numbered
+  // instruction fragments ('5', '5.', '10', etc.) that leaked from the Sheet
+  // when a cell held a stray value or an instruction row split oddly.
+  if (/^\d+\.?$/.test(m)) return true;
+  if (m.length < 3) return true;
+  return CATALOG_SECTION_HEADER_RE.test(m);
 }
 function catalogRows(cadence, csv) {
   return csv.trim().split('\n').map((line) => {
