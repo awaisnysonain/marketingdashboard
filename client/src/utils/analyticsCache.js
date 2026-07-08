@@ -1,7 +1,7 @@
 /**
  * Session cache for analytics pages. Invalidates when server data version changes (after ETL).
  */
-const PREFIX = 'nobl-analytics-cache:';
+const PREFIX = 'nobl-analytics-cache:v2:';
 const VERSION_KEY = `${PREFIX}data-version`;
 
 let versionPromise = null;

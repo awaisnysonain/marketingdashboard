@@ -24,7 +24,7 @@ AVAILABLE DATABASE TABLES (PostgreSQL — use the EXACT names below):
    ▸ Do NOT sum revenue_1d across channels to get total revenue.
 
 3. tw_geo_daily — Geographic breakdown
-   Columns: date, brand, region ('US'|'CA'|'AUS'|'DUBAI'|'EU'|'OTHER'|'TOTAL'),
+   Columns: date, brand, region ('US'|'UK'|'CA'|'AUS'|'DUBAI'|'EU'|'HK'|'INTL'|'OTHER'|'TOTAL'),
             revenue_actual, spend_actual, mer
    ▸ spend_actual = ads_table country breakdown (US is actual US spend, not residual).
 
@@ -245,6 +245,7 @@ COMMON PATTERNS:
 const ALLOWED_TABLES = {
   tw_summary_daily:        ['date','brand','total_revenue','total_spend','mer','total_orders','new_customer_orders','returning_customer_orders','order_revenue','shopify_revenue','amazon_revenue','total_sales','refund_amount','refund_count'],
   tw_channel_daily:        ['date','brand','channel','spend_1d','revenue_1d','purchases_1d','roas_1d','spend_7d','new_cust_orders','cac','portable_cac','wooden_cac','metal_cac'],
+  tw_geo_daily:            ['date','brand','region','revenue_actual','spend_actual','mer'],
   tw_store_summary_daily:  ['date','store_key','brand','total_revenue','total_spend','mer','total_orders'],
   tw_product_daily:        ['date','brand','product_line','spend','new_cust_orders','revenue','meta_spend','google_spend','tiktok_spend','snap_spend','pinterest_spend','bing_spend','applovin_spend'],
   klaviyo_daily:           ['date','brand','emails_sent','emails_opened','emails_clicked','open_rate','click_rate','revenue'],

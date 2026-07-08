@@ -82,7 +82,8 @@ async function latestValidChannelDate(dbBrand) {
  */
 async function latestValidGeoDate(brandParam) {
   const brand    = getBrand(brandParam);
-  const geoTable = brand.geoTable || 'nobl_brand_tw_geo_daily';
+  const geoTable = brand.geoTable;
+  if (!geoTable) return null;
   try {
     const r = await pgQuery(
       `SELECT MAX(date)::text AS mx
@@ -105,7 +106,7 @@ router.get('/live', async (req, res) => {
   const brandParam = req.query.brand || 'nobl';
   const brand      = getBrand(brandParam);          // always use brandConfig — enforces NOBL+EU rule
   const dbBrand    = brand.dbBrand;
-  const geoTable   = brand.geoTable || 'nobl_brand_tw_geo_daily';
+  const geoTable   = brand.geoTable;
 
   try {
     // Determine dates
@@ -145,7 +146,7 @@ router.get('/live', async (req, res) => {
 
     // ── 3. Geo (use brand-specific table — has correct stored MER) ─────────────
     // For NOBL: always include ALL regions including EU, even if spend=$0 for that date
-    const geoR = await pgQuery(
+    const geoR = geoTable ? await pgQuery(
       brandParam === 'nobl'
         ? `SELECT region, revenue_actual, spend_actual, mer
            FROM ${geoTable}
@@ -156,7 +157,7 @@ router.get('/live', async (req, res) => {
            WHERE date = $1::date AND region != 'TOTAL' AND spend_actual > 0
            ORDER BY spend_actual DESC NULLS LAST`,
       [geoDate]
-    );
+    ) : { rows: [] };
 
     const sum = summaryR.rows[0] || {};
     const totalRevenue = parseFloat(sum.order_revenue || sum.total_revenue || 0);
@@ -366,7 +367,8 @@ router.get('/channels', async (req, res) => {
 // ── GET /api/tw/geo ───────────────────────────────────────────────────────────
 router.get('/geo', async (req, res) => {
   const brandParam = req.query.brand || 'nobl';
-  const geoTable   = getBrand(brandParam).geoTable || 'nobl_brand_tw_geo_daily';
+  const geoTable   = getBrand(brandParam).geoTable;
+  if (!geoTable) return res.json({ ok: true, brand: brandParam, geo_available: false, regions: [] });
   const geoLatest  = await latestValidGeoDate(brandParam);
   const endDate    = req.query.endDate   || geoLatest;
   const startDate  = req.query.startDate || (() => {

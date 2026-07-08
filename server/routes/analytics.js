@@ -50,12 +50,39 @@ function getDefaultDates(req) {
   return { start, end };
 }
 
-const ANALYTICS_REGION_ALLOWED = new Set(['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL']);
+const ANALYTICS_REGION_ORDER = ['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL'];
+const ANALYTICS_REGION_ALLOWED = new Set(ANALYTICS_REGION_ORDER);
+const ANALYTICS_REGION_ALIASES = {
+  US: 'US', USA: 'US', 'UNITED STATES': 'US', 'UNITED STATES OF AMERICA': 'US',
+  CA: 'CA', CAN: 'CA', CANADA: 'CA',
+  AUS: 'AUS', AU: 'AUS', AUSTRALIA: 'AUS',
+  UK: 'UK', GB: 'UK', GBR: 'UK', 'UNITED KINGDOM': 'UK', 'GREAT BRITAIN': 'UK',
+  EU: 'EU', EUROPE: 'EU',
+  DUBAI: 'DUBAI', UAE: 'DUBAI', AE: 'DUBAI', 'UNITED ARAB EMIRATES': 'DUBAI',
+  HK: 'HK', 'HONG KONG': 'HK',
+  INTL: 'INTL', INTERNATIONAL: 'INTL', OTHER: 'INTL', ROW: 'INTL', RESTOFWORLD: 'INTL',
+};
+
+function canonicalAnalyticsRegion(value) {
+  const key = String(value || '').toUpperCase().trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  const compact = key.replace(/\s+/g, '');
+  return ANALYTICS_REGION_ALIASES[key] || ANALYTICS_REGION_ALIASES[compact] || key;
+}
 
 function parseAnalyticsRegions(value) {
-  const raw = String(value || 'ALL').toUpperCase();
-  return Array.from(new Set(raw.split(',').map(s => s.trim()).filter(Boolean)))
+  const raw = String(value || 'ALL');
+  const picked = Array.from(new Set(raw.split(',').map(canonicalAnalyticsRegion).filter(Boolean)))
     .filter(r => r !== 'ALL' && ANALYTICS_REGION_ALLOWED.has(r));
+  return ANALYTICS_REGION_ORDER.filter(r => picked.includes(r));
+}
+
+function expandAnalyticsRegionsForDb(regions) {
+  const out = [];
+  for (const r of regions || []) {
+    if (r === 'INTL') out.push('INTL', 'OTHER', 'ROW', 'INTERNATIONAL');
+    else out.push(r);
+  }
+  return Array.from(new Set(out));
 }
 
 function regionSummarySql(tableName) {
@@ -2123,6 +2150,7 @@ router.get('/overview', async (req, res) => {
   const regionList = parseAnalyticsRegions(req.query.region || req.query.regions);
   const regionKey = regionList.length ? regionList.join(',') : 'ALL';
   const regionScoped = regionList.length > 0;
+  const dbRegionList = expandAnalyticsRegionsForDb(regionList);
   try {
     const version = await getDataVersion();
     const { body } = await withResponseCache('overview', `ov:${start}:${end}:${regionKey}`, version, async () => {
@@ -2137,7 +2165,7 @@ router.get('/overview', async (req, res) => {
          FROM nobl_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
          ORDER BY date`,
-        regionScoped ? [start, end, regionList] : [start, end]
+        regionScoped ? [start, end, dbRegionList] : [start, end]
       ),
       pgQuery(
         regionScoped ? regionSummarySql('flo_brand_tw_geo_daily') : `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -2149,7 +2177,7 @@ router.get('/overview', async (req, res) => {
          FROM flo_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
          ORDER BY date`,
-        regionScoped ? [start, end, regionList] : [start, end]
+        regionScoped ? [start, end, dbRegionList] : [start, end]
       ),
       pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
     ]);
@@ -2358,8 +2386,9 @@ router.get('/channels', async (req, res) => {
   // Region scoping: channel grain is not tracked per region, so when a specific
   // region (or set of regions) is selected we serve accurate region-level daily
   // totals from the geo table, surfaced as one series per region.
-  const regionRaw = String(req.query.region || req.query.regions || '').toUpperCase();
-  const regionList = regionRaw.split(',').map(s => s.trim()).filter(Boolean).filter(r => r !== 'ALL');
+  const regionList = parseAnalyticsRegions(req.query.region || req.query.regions);
+  const regionRaw = regionList.length ? regionList.join(',') : 'ALL';
+  const dbRegionList = expandAnalyticsRegionsForDb(regionList);
   const regionScoped = regionList.length > 0;
   const GEO_TABLE = { NOBL: 'nobl_brand_tw_geo_daily', FLO: 'flo_brand_tw_geo_daily' };
   try {
@@ -2374,7 +2403,7 @@ router.get('/channels', async (req, res) => {
          WHERE UPPER(region) = ANY($3::text[])
            AND DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date
          ORDER BY date, region`,
-        [start, end, regionList],
+        [start, end, dbRegionList],
         );
         return r.rows.map(row => ({ ...row, brand: brandKey }));
       };
@@ -3769,13 +3798,15 @@ router.get('/nobl/air-performance', async (req, res) => {
   const rollingDays = Math.max(7, Math.min(parseInt(req.query.rollingDays || '14', 10), 60));
   const forecastDays = Math.max(7, Math.min(parseInt(req.query.forecastDays || '14', 10), 60));
   const regionRaw = String(req.query.region || 'ALL').trim();
-  const region = regionRaw.toUpperCase();
-  const regionOrder = ['US', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL'];
+  const regionParts = parseAnalyticsRegions(regionRaw).filter(r => r !== 'EU');
+  const region = regionParts.length ? regionParts.join(',') : (regionRaw.toUpperCase() === 'ALL' ? 'ALL' : 'NONE');
+  const regionOrder = ['US', 'CA', 'AUS', 'UK', 'DUBAI', 'HK', 'INTL'];
   const regionCountries = {
     US: ['US'],
     CA: ['CA'],
-    AUS: ['AU'],
-    DUBAI: ['AE'],
+    AUS: ['AU', 'AUS'],
+    UK: ['GB', 'UK'],
+    DUBAI: ['AE', 'UAE'],
     HK: ['HK'],
     INTL: [],
   };
@@ -3794,18 +3825,19 @@ router.get('/nobl/air-performance', async (req, res) => {
     let countryCodes = null;
     let regionKey = null;
     if (region && region !== 'ALL') {
-      const parts = region.split(',').map(s => s.trim()).filter(Boolean);
+      const parts = region === 'NONE' ? [] : region.split(',').map(s => s.trim()).filter(Boolean);
       const codes = [];
       for (const p of parts) {
         const cs = regionCountries[p];
         if (cs !== undefined) codes.push(...cs);
       }
       const validParts = regionOrder.filter(p => parts.includes(p));
-      // If nothing matched, treat as ALL (no filter) rather than returning empty data.
       countryCodes = validParts.length ? Array.from(new Set(codes)) : null;
       if (validParts.length) {
         const keyParts = regionOrder.filter(p => parts.includes(p));
         regionKey = keyParts.join('_');
+      } else {
+        regionKey = '__EMPTY__';
       }
     }
     const activeSubsPromise = !regionKey
@@ -3819,7 +3851,9 @@ router.get('/nobl/air-performance', async (req, res) => {
       : Promise.resolve({ rows: [{}] });
 
     const [daily, ttpCohort, activeSubsRes] = await Promise.all([
-      regionKey
+      regionKey === '__EMPTY__'
+        ? []
+        : regionKey
         ? loadNoblAirRegionalCachedDaily(effectiveStart, effectiveEnd, regionKey)
         : pgQuery(
           `SELECT
@@ -3839,7 +3873,9 @@ router.get('/nobl/air-performance', async (req, res) => {
            ORDER BY date ASC`,
           [effectiveStart, effectiveEnd]
         ).then(r => fmtRows(r.rows)),
-      regionKey
+      regionKey === '__EMPTY__'
+        ? Promise.resolve({ mature: 0, converted: 0, cancelled_30d: 0, ttp_rate: null, cancel_rate_30d: null, paid_conversions_in_period: 0, mature_in_period: 0, ttp_rate_as_of: null, ttp_rate_in_period: null })
+        : regionKey
         ? loadNoblAirRegionalCachedTtp(effectiveStart, effectiveEnd, regionKey)
         : loadNoblAirTtpCohort(effectiveStart, effectiveEnd, countryCodes),
       activeSubsPromise,

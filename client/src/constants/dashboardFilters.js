@@ -36,7 +36,7 @@ const CHANNEL_ALLOWED = new Set(CHANNEL_OPTIONS.filter(o => o.value !== 'ALL').m
 const BRAND_ALLOWED = new Set(BRAND_OPTIONS.filter(o => o.value !== 'ALL').map(o => o.value));
 
 export function normalizeMultiFilter(next, allowedSet, canonicalOrder = null) {
-  const vals = Array.from(new Set((next || []).map(v => String(v).toUpperCase()))).filter(Boolean);
+  const vals = Array.from(new Set((next || []).map(v => String(v).toUpperCase().trim()))).filter(Boolean);
   if (vals.length === 0) return ['ALL'];
   if (vals.includes('ALL')) return ['ALL'];
   const cleaned = vals.filter(v => allowedSet.has(v));
@@ -48,7 +48,8 @@ export function normalizeMultiFilter(next, allowedSet, canonicalOrder = null) {
 }
 
 export function normalizeRegions(next) {
-  return normalizeMultiFilter(next, REGION_ALLOWED, ['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL']);
+  const canonical = (next || []).map(canonicalGeoRegion);
+  return normalizeMultiFilter(canonical, REGION_ALLOWED, ['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL']);
 }
 
 export function normalizeChannels(next) {

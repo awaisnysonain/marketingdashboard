@@ -36,9 +36,9 @@ const CHANNEL_META = {
   X:         { label: 'X',         color: CHANNEL_COL.X,         short: 'X'  },
 };
 
-const GEO_FLAG  = { US: '🇺🇸', CA: '🇨🇦', AUS: '🇦🇺', DUBAI: '🇦🇪', EU: '🇪🇺' };
-const GEO_LABEL = { US: 'United States', CA: 'Canada', AUS: 'Australia', DUBAI: 'Dubai / UAE', EU: 'Europe (EU)' };
-const NOBL_REGIONS_ORDER = ['US', 'EU', 'CA', 'AUS', 'DUBAI'];
+const GEO_FLAG  = { US: '🇺🇸', UK: '🇬🇧', CA: '🇨🇦', AUS: '🇦🇺', DUBAI: '🇦🇪', EU: '🇪🇺', HK: '🇭🇰', INTL: '🌍', OTHER: '🌍' };
+const GEO_LABEL = { US: 'United States', UK: 'United Kingdom', CA: 'Canada', AUS: 'Australia', DUBAI: 'Dubai / UAE', EU: 'Europe (EU)', HK: 'Hong Kong', INTL: 'International', OTHER: 'International' };
+const NOBL_REGIONS_ORDER = ['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL', 'OTHER'];
 
 const BRANDS = [
   { k: 'nobl',   l: 'NOBL Travel', sub: 'US + EU + all regions' },

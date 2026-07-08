@@ -49,7 +49,7 @@ const NOBL_BRAND = {
   storeSummary: 'nobl_main_tw_store_summary_daily', // same store = includes EU
 
   // Region order for UI display (EU always shown, always 2nd)
-  geoOrder: ['US', 'EU', 'CA', 'AUS', 'DUBAI'],
+  geoOrder: ['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL', 'OTHER'],
 
   // EU region identifier in geo table
   euRegion: 'EU',
@@ -71,7 +71,7 @@ const FLO_US_BRAND = {
   geoTable:     'flo_brand_tw_geo_daily',
   storeSummary: 'flo_main_tw_store_summary_daily',
 
-  geoOrder: ['US', 'CA', 'AUS', 'DUBAI', 'EU'],
+  geoOrder: ['US', 'UK', 'EU', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL', 'OTHER'],
   euRegion: null,
 };
 

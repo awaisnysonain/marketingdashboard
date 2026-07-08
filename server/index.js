@@ -1424,7 +1424,7 @@ const ALL_DAILY_TASKS = [
 ];
 
 // Live/Snapshot page — lightweight hourly refresh (summary + channel + geo via tw_refresh)
-const LIVE_SNAPSHOT_TASKS = ['tw_refresh', 'tw_order_revenue'];
+const LIVE_SNAPSHOT_TASKS = ['tw_refresh', 'nobl_uk_tw', 'tw_order_revenue'];
 
 const CRON_HARD_TIMEOUT_MS = 90 * 60 * 1000; // 90 min — TW API is serialized with retries
 
