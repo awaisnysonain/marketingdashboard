@@ -3964,7 +3964,7 @@ router.get('/nobl/air-performance', async (req, res) => {
   }
 });
 
-const AIR_BASE_REGION_KEYS = ['US', 'CA', 'AUS', 'DUBAI', 'HK', 'INTL'];
+const AIR_BASE_REGION_KEYS = ['US', 'CA', 'AUS', 'UK', 'DUBAI', 'HK', 'INTL'];
 
 // GET /nobl/air-performance-bundle — global + base region dailies in one round trip (client filters by region)
 router.get('/nobl/air-performance-bundle', async (req, res) => {
