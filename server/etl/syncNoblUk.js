@@ -32,7 +32,7 @@
 require('dotenv').config({ path: require('path').join(__dirname, '../../.env') });
 const { pgRun, pool } = require('../db/postgres');
 const { fetchShopifyRevenue, fetchAdSpend } = require('./tripleWhaleSQL');
-const { brandCreds } = require('./twSqlApi');
+const { brandCreds, twSqlQuery } = require('./twSqlApi');
 
 const UK_BRAND = 'NOBL';        // UK rows live under the NOBL brand
 const UK_REGION = 'UK';
@@ -124,6 +124,56 @@ async function syncNoblUk({ start, end, commit = false, includeSpend = false } =
   return { start: startYmd, end: endYmd, rows: rows.length, written, deleted, totalRevenue: totalRev, commit, includeSpend };
 }
 
+async function fetchUkRefunds(startYmd, endYmd) {
+  const rows = await twSqlQuery(UK_WORKSPACE, `
+    SELECT
+      r.event_date AS date,
+      COUNT(*) AS refund_transactions,
+      abs(SUM(r.total_refunded_price)) AS refund_amount
+    FROM refunds_table AS r
+    WHERE r.platform = 'shopify'
+      AND r.event_date BETWEEN toDate('${startYmd}') AND toDate('${endYmd}')
+    GROUP BY r.event_date
+    ORDER BY r.event_date
+  `, { period: { startDate: startYmd, endDate: endYmd } });
+  return (rows || [])
+    .map((r) => ({
+      date: String(r.date || r.event_date || '').slice(0, 10),
+      count: parseInt(r.refund_transactions || 0, 10) || 0,
+      amount: Number(r.refund_amount || 0),
+    }))
+    .filter((r) => r.date && r.amount > 0);
+}
+
+async function syncNoblUkRefunds({ start, end, commit = false } = {}) {
+  const startYmd = start || '2026-06-01';
+  const endYmd = end || yesterdayISO();
+  const rows = await fetchUkRefunds(startYmd, endYmd);
+  let written = 0;
+  let total = 0;
+  console.log(`[NOBL UK refunds] ${commit ? 'COMMIT' : 'DRY-RUN'} ${startYmd} → ${endYmd}`);
+  for (const r of rows) {
+    total += r.amount;
+    console.log(`  ${r.date} refunds=${r.count} amount=${r.amount.toFixed(2)}`);
+    if (!commit) continue;
+    await pgRun(`
+      INSERT INTO tw_refunds_daily
+        (brand, date, refund_count, refund_amount, avg_refund_amount, avg_days_to_refund, units_refunded,
+         us_refund_amount, ca_refund_amount, au_refund_amount, uk_refund_amount)
+      VALUES ($1, $2, $3, $4, NULL, 0, 0, 0, 0, 0, $4)
+      ON CONFLICT (brand, date) DO UPDATE SET
+        refund_amount = COALESCE(tw_refunds_daily.refund_amount, 0)
+          - COALESCE(tw_refunds_daily.uk_refund_amount, 0)
+          + EXCLUDED.uk_refund_amount,
+        uk_refund_amount = EXCLUDED.uk_refund_amount,
+        updated_at = NOW()
+    `, [UK_BRAND, r.date, r.count, r.amount]);
+    written++;
+  }
+  console.log(`[NOBL UK refunds] ${commit ? `wrote ${written}` : `${rows.length} would-write`} rows · total refunds $${total.toFixed(2)}${commit ? '' : '  (DRY-RUN — nothing written)'}`);
+  return { start: startYmd, end: endYmd, rows: rows.length, written, totalRefunds: total, commit };
+}
+
 if (require.main === module) {
   const args = process.argv.slice(2);
   const flags = args.filter((a) => a.startsWith('--'));
@@ -134,8 +184,12 @@ if (require.main === module) {
     commit: flags.includes('--commit'),
     includeSpend: flags.includes('--include-spend'),
   })
-    .then(async (s) => { console.log('[NOBL UK] done:', JSON.stringify(s)); await pool.end().catch(() => {}); })
+    .then(async (s) => {
+      const refunds = await syncNoblUkRefunds({ start: positional[0], end: positional[1], commit: flags.includes('--commit') });
+      console.log('[NOBL UK] done:', JSON.stringify({ ...s, refunds }));
+      await pool.end().catch(() => {});
+    })
     .catch(async (e) => { console.error('[NOBL UK] failed:', e.message); await pool.end().catch(() => {}); process.exitCode = 1; });
 }
 
-module.exports = { syncNoblUk };
+module.exports = { syncNoblUk, syncNoblUkRefunds };

@@ -29,7 +29,7 @@ const {
   syncTWOrderRevenue,
 } = require('./twFullSync');
 const { runShopifyDisputes } = require('./syncShopifyDisputes');
-const { syncNoblUk } = require('./syncNoblUk');
+const { syncNoblUk, syncNoblUkRefunds } = require('./syncNoblUk');
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -770,8 +770,9 @@ async function runSync(options = {}) {
       const logId = await logStart(runId, 'NOBL', 'nobl_uk_tw', chunk.start, chunk.end);
       try {
         const r = await syncNoblUk({ start: chunk.start, end: chunk.end, commit: true, includeSpend: false });
-        await logFinish(logId, 'success', r.written);
-        results.push({ task: 'nobl_uk_tw', brand: 'NOBL', chunk, rows: r.written, deleted: r.deleted });
+        const refunds = await syncNoblUkRefunds({ start: chunk.start, end: chunk.end, commit: true });
+        await logFinish(logId, 'success', r.written + refunds.written);
+        results.push({ task: 'nobl_uk_tw', brand: 'NOBL', chunk, rows: r.written, deleted: r.deleted, refundRows: refunds.written });
       } catch (e) {
         const msg = `nobl_uk_tw ${chunk.start}-${chunk.end}: ${e.message}`;
         console.error('[SyncEngine]', msg);
