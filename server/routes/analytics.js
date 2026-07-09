@@ -2321,19 +2321,24 @@ router.get('/overview', async (req, res) => {
 // GET /nobl/topline
 router.get('/nobl/topline', async (req, res) => {
   const { start, end } = getDefaultDates(req);
+  const regionList = parseAnalyticsRegions(req.query.region || req.query.regions);
+  const regionKey = regionList.length ? regionList.join(',') : 'ALL';
+  const regionScoped = regionList.length > 0;
+  const dbRegionList = expandAnalyticsRegionsForDb(regionList);
   try {
     const version = await getDataVersion();
-    const { body } = await withResponseCache('topline', `nt:${start}:${end}`, version, async () => {
-    const [summaryRes, channelsRes, geoRes, subsRes] = await Promise.all([
+    const { body } = await withResponseCache('topline', `nt:${start}:${end}:${regionKey}`, version, async () => {
+    const airRegionList = regionList.filter(r => ['US', 'CA', 'AUS', 'UK', 'DUBAI', 'HK', 'INTL'].includes(r));
+    const [summaryRes, channelsRes, geoRes, subsRes, orderRegionRes] = await Promise.all([
       pgQuery(
-        `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
+        regionScoped ? regionSummarySql('nobl_brand_tw_geo_daily') : `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
                 brand, total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
                 shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
          FROM nobl_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
-        [start, end]
+        regionScoped ? [start, end, dbRegionList] : [start, end]
       ),
       pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -2350,14 +2355,55 @@ router.get('/nobl/topline', async (req, res) => {
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date, region`,
         [start, end]
       ),
-      pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
+      regionScoped
+        ? (airRegionList.length ? pgQuery(`
+            SELECT TO_CHAR(date,'YYYY-MM-DD') AS date,
+                   SUM(sub_gross) AS shopify_sub_gross,
+                   SUM(sub_discounts) AS shopify_sub_disc,
+                   SUM(sub_refunds) AS shopify_sub_refunds,
+                   SUM(rebill_revenue) AS rebill_revenue,
+                   SUM(new_sub_revenue) AS new_sub_revenue,
+                   SUM(sub_net_sales + rebill_revenue) AS sub_revenue_actual
+            FROM nobl_air_region_daily
+            WHERE date BETWEEN $1::date AND $2::date
+              AND region_key = ANY($3::text[])
+            GROUP BY date
+            ORDER BY date`, [start, end, airRegionList]) : Promise.resolve({ rows: [] }))
+        : pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
+      regionScoped ? pgQuery(`
+        WITH tagged AS (
+          SELECT brand, date_key, total_price, ${shopifyRegionCaseSql()} AS region
+          FROM shopify_orders_raw
+          WHERE brand='NOBL' AND date_key BETWEEN $1::date AND $2::date
+        )
+        SELECT TO_CHAR(date_key,'YYYY-MM-DD') AS date,
+               COUNT(*)::int AS total_orders,
+               SUM(total_price) AS shopify_revenue
+        FROM tagged
+        WHERE region = ANY($3::text[])
+        GROUP BY date_key`, [start, end, dbRegionList]) : Promise.resolve({ rows: [] }),
     ]);
+    const orderByDate = {};
+    for (const r of orderRegionRes.rows || []) orderByDate[String(r.date).slice(0, 10)] = r;
+    const summaryRows = fmtRows(summaryRes.rows).map((r) => {
+      const o = orderByDate[r.date] || {};
+      const totalOrders = r.total_orders == null ? (o.total_orders ?? null) : r.total_orders;
+      return {
+        ...r,
+        total_orders: totalOrders,
+        new_customer_orders: r.new_customer_orders == null ? null : r.new_customer_orders,
+        returning_customer_orders: r.returning_customer_orders == null ? null : r.returning_customer_orders,
+        shopify_revenue: r.shopify_revenue == null ? Number(o.shopify_revenue || 0) : r.shopify_revenue,
+      };
+    });
     return {
-      summary: enrichSummaryRows(fmtRows(summaryRes.rows)),
+      summary: enrichSummaryRows(summaryRows),
       channels: enrichChannelRows(fmtRows(channelsRes.rows)),
       geo: enrichGeoRows(fmtRows(geoRes.rows)),
       subs: fmtRows(subsRes.rows),
       revenue_metrics: REVENUE_METRICS,
+      region_scoped: regionScoped,
+      regions: regionList,
     };
     });
     res.json(body);
@@ -2370,19 +2416,23 @@ router.get('/nobl/topline', async (req, res) => {
 // GET /flo/topline
 router.get('/flo/topline', async (req, res) => {
   const { start, end } = getDefaultDates(req);
+  const regionList = parseAnalyticsRegions(req.query.region || req.query.regions);
+  const regionKey = regionList.length ? regionList.join(',') : 'ALL';
+  const regionScoped = regionList.length > 0;
+  const dbRegionList = expandAnalyticsRegionsForDb(regionList);
   try {
     const version = await getDataVersion();
-    const { body } = await withResponseCache('topline', `ft:${start}:${end}`, version, async () => {
-    const [summaryRes, channelsRes, geoRes, productsRes] = await Promise.all([
+    const { body } = await withResponseCache('topline', `ft:${start}:${end}:${regionKey}`, version, async () => {
+    const [summaryRes, channelsRes, geoRes, productsRes, orderRegionRes] = await Promise.all([
       pgQuery(
-        `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
+        regionScoped ? regionSummarySql('flo_brand_tw_geo_daily') : `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
                 brand, total_revenue, total_spend, mer,
                 total_orders, new_customer_orders, returning_customer_orders,
                 COALESCE(order_revenue, total_revenue) AS order_revenue,
                 shopify_revenue, amazon_revenue, total_sales, refund_amount, refund_count
          FROM flo_brand_tw_summary_daily
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date`,
-        [start, end]
+        regionScoped ? [start, end, dbRegionList] : [start, end]
       ),
       pgQuery(
         `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
@@ -2407,13 +2457,39 @@ router.get('/flo/topline', async (req, res) => {
          WHERE DATE(date AT TIME ZONE 'UTC') BETWEEN $1::date AND $2::date ORDER BY date, product_line`,
         [start, end]
       ),
+      regionScoped ? pgQuery(`
+        WITH tagged AS (
+          SELECT brand, date_key, total_price, ${shopifyRegionCaseSql()} AS region
+          FROM shopify_orders_raw
+          WHERE brand='FLO' AND date_key BETWEEN $1::date AND $2::date
+        )
+        SELECT TO_CHAR(date_key,'YYYY-MM-DD') AS date,
+               COUNT(*)::int AS total_orders,
+               SUM(total_price) AS shopify_revenue
+        FROM tagged
+        WHERE region = ANY($3::text[])
+        GROUP BY date_key`, [start, end, dbRegionList]) : Promise.resolve({ rows: [] }),
     ]);
+    const orderByDate = {};
+    for (const r of orderRegionRes.rows || []) orderByDate[String(r.date).slice(0, 10)] = r;
+    const summaryRows = fmtRows(summaryRes.rows).map((r) => {
+      const o = orderByDate[r.date] || {};
+      return {
+        ...r,
+        total_orders: r.total_orders == null ? (o.total_orders ?? null) : r.total_orders,
+        new_customer_orders: r.new_customer_orders == null ? null : r.new_customer_orders,
+        returning_customer_orders: r.returning_customer_orders == null ? null : r.returning_customer_orders,
+        shopify_revenue: r.shopify_revenue == null ? Number(o.shopify_revenue || 0) : r.shopify_revenue,
+      };
+    });
     return {
-      summary: enrichSummaryRows(fmtRows(summaryRes.rows)),
+      summary: enrichSummaryRows(summaryRows),
       channels: enrichChannelRows(fmtRows(channelsRes.rows)),
       geo: enrichGeoRows(fmtRows(geoRes.rows)),
       products: fmtRows(productsRes.rows),
       revenue_metrics: REVENUE_METRICS,
+      region_scoped: regionScoped,
+      regions: regionList,
     };
     });
     res.json(body);

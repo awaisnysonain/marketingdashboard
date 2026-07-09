@@ -170,22 +170,26 @@ export const getOverview = (start, end, region = 'ALL') => {
     }),
   ).then(x => x.data);
 };
-export const getNoblTopline = (start, end) =>
-  cachedAnalyticsFetch(`nobl-topline:${start}:${end}`,
-    () => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}`).then(async r => {
+export const getNoblTopline = (start, end, region = 'ALL') => {
+  const regionParam = region || 'ALL';
+  return cachedAnalyticsFetch(`nobl-topline:${start}:${end}:${regionParam}`,
+    () => fetch(`${B}/api/analytics/nobl/topline?start=${start}&end=${end}&region=${encodeURIComponent(regionParam)}`).then(async r => {
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
       return data;
     }),
   ).then(x => x.data);
-export const getFloTopline = (start, end) =>
-  cachedAnalyticsFetch(`flo-topline:${start}:${end}`,
-    () => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}`).then(async r => {
+};
+export const getFloTopline = (start, end, region = 'ALL') => {
+  const regionParam = region || 'ALL';
+  return cachedAnalyticsFetch(`flo-topline:${start}:${end}:${regionParam}`,
+    () => fetch(`${B}/api/analytics/flo/topline?start=${start}&end=${end}&region=${encodeURIComponent(regionParam)}`).then(async r => {
       const data = await r.json();
       if (!r.ok) throw new Error(data?.error || `Request failed (${r.status})`);
       return data;
     }),
   ).then(x => x.data);
+};
 export const getChannels = (start, end, brand='', region='') =>
   cachedAnalyticsFetch(`channels:${start}:${end}:${brand}:${region}`,
     () => fetch(`${B}/api/analytics/channels?start=${start}&end=${end}&brand=${brand}${region ? `&region=${encodeURIComponent(region)}` : ''}`).then(async r => {

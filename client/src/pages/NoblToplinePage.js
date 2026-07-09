@@ -93,7 +93,7 @@ export default function NoblToplinePage() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const { dateRange, filterByChannels, filterByRegions, isAllRegions } = useDashboardFilters();
+  const { dateRange, filterByChannels, filterByRegions, isAllRegions, regionsParam } = useDashboardFilters();
   const range = dateRange;
   const [activeView, setActiveView] = useState('summary');
   const [activeChannel, setActiveChannel] = useState(null);
@@ -101,28 +101,29 @@ export default function NoblToplinePage() {
 
   const load = useCallback(() => {
     setLoading(true); setError(null);
-    getNoblTopline(range.start, range.end)
+    getNoblTopline(range.start, range.end, regionsParam)
       .then(d => { setData(d); setLoading(false); })
       .catch(e => { setError(e.message); setLoading(false); });
-  }, [range]);
+  }, [range, regionsParam]);
   useEffect(() => { load(); }, [load]);
 
   const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, subsByDate, kpi, chartData, chAgg, geoAgg, subChartData } = useMemo(() => {
     if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, subsByDate: {}, kpi: {}, chartData: [], chAgg: [], geoAgg: [], subChartData: [] };
+    const serverRegionScoped = Boolean(data.region_scoped);
     const channelsData = filterByChannels(data.channels || [], 'channel');
     const geoData = filterByRegions(data.geo || [], 'region');
     const summaryByDate = {};
-    let totalRev = 0, totalSpend = 0, totalOrders = 0, totalNew = 0;
+    let totalRev = 0, totalSpend = 0, totalOrders = 0, totalNew = 0, totalOrdersKnown = false, totalNewKnown = false;
     for (const r of (data.summary || [])) {
       summaryByDate[r.date] = r;
-      if (isAllRegions) {
+      if (isAllRegions || serverRegionScoped) {
         totalRev += Number(r.order_revenue || r.total_revenue) || 0;
         totalSpend += Number(r.total_spend) || 0;
-        totalOrders += Number(r.total_orders) || 0;
-        totalNew += Number(r.new_customer_orders) || 0;
+        if (r.total_orders != null) { totalOrders += Number(r.total_orders) || 0; totalOrdersKnown = true; }
+        if (r.new_customer_orders != null) { totalNew += Number(r.new_customer_orders) || 0; totalNewKnown = true; }
       }
     }
-    if (!isAllRegions) {
+    if (!isAllRegions && !serverRegionScoped) {
       for (const r of geoData) {
         totalRev += Number(r.revenue_actual || r.revenue) || 0;
         totalSpend += Number(r.spend_actual || r.spend) || 0;
@@ -150,7 +151,7 @@ export default function NoblToplinePage() {
     const allDates = mergeToplineDates(data.summary, channelsData, geoData, data.subs);
     const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
 
-    const effectiveSummaryByDate = isAllRegions ? summaryByDate : regionalSummaryByDate;
+    const effectiveSummaryByDate = (isAllRegions || serverRegionScoped) ? summaryByDate : regionalSummaryByDate;
     for (const r of Object.values(effectiveSummaryByDate)) {
       r.mer = Number(r.total_spend) > 0 ? Number(r.order_revenue || r.total_revenue || 0) / Number(r.total_spend) : null;
     }
@@ -207,9 +208,7 @@ export default function NoblToplinePage() {
       regionNames: sortByRevenueDesc(rgSet, regionRev),
       geoByDateRg,
       subsByDate,
-      // Orders / new-customers are not broken out by region in the geo table, so
-      // under a region filter they'd read as a misleading 0 — surface null → "—".
-      kpi: { totalRev, totalSpend, mer: periodMer, totalOrders: isAllRegions ? totalOrders : null, totalNew: isAllRegions ? totalNew : null, totalSubRev },
+      kpi: { totalRev, totalSpend, mer: periodMer, totalOrders: (isAllRegions || serverRegionScoped) && totalOrdersKnown ? totalOrders : null, totalNew: (isAllRegions || serverRegionScoped) && totalNewKnown ? totalNew : null, totalSubRev },
       chartData,
       chAgg,
       geoAgg,

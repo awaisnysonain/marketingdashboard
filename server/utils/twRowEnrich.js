@@ -27,9 +27,9 @@ function enrichSummaryRow(r) {
     shopify_revenue: parseFloat(r.shopify_revenue || 0),
     amazon_revenue: parseFloat(r.amazon_revenue || 0),
     refund_amount: parseFloat(r.refund_amount ?? 0),
-    total_orders: parseInt(r.total_orders || 0, 10),
-    new_customer_orders: parseInt(r.new_customer_orders || 0, 10),
-    returning_customer_orders: parseInt(r.returning_customer_orders || 0, 10),
+    total_orders: r.total_orders == null ? null : parseInt(r.total_orders || 0, 10),
+    new_customer_orders: r.new_customer_orders == null ? null : parseInt(r.new_customer_orders || 0, 10),
+    returning_customer_orders: r.returning_customer_orders == null ? null : parseInt(r.returning_customer_orders || 0, 10),
     mer: calcMer(rev, spend),
   };
 }
