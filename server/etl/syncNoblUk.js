@@ -15,10 +15,12 @@
  *     grand total (that would be a separate, explicit business decision).
  *   • DRY-RUN by default — it fetches and prints what it *would* write, but writes
  *     nothing. Pass --commit to actually upsert.
- *   • Spend is NOT written unless --include-spend is passed. The UK workspace's
- *     ads_table reports ~$320K/day — that is the shared/global NOBL ad account,
- *     not UK-attributed spend (UK store revenue is ~$7K/day). Writing it as UK
- *     spend would produce a nonsensical UK MER, so revenue-only is the default.
+ *   • Spend is NOT written unless --include-spend is passed. When enabled, spend
+ *     comes from the MAIN NOBL TW workspace country breakout for GB/UK. That is
+ *     the spend already included in NOBL total_spend, so writing it to region=UK
+ *     reconciles region totals without double-counting. Revenue still comes from
+ *     the dedicated UK store workspace because the main workspace does not carry
+ *     UK-store order revenue.
  *
  * Revenue metric matches how every other geo region is computed in
  * tripleWhaleSQL.js (raw orders_table.order_revenue, platform='shopify').
@@ -37,6 +39,7 @@ const { brandCreds, twSqlQuery } = require('./twSqlApi');
 const UK_BRAND = 'NOBL';        // UK rows live under the NOBL brand
 const UK_REGION = 'UK';
 const UK_WORKSPACE = 'NOBL_UK'; // brandCreds key for the UK TW workspace
+const MAIN_WORKSPACE = 'NOBL';
 
 function yesterdayISO() {
   const d = new Date();
@@ -62,7 +65,7 @@ async function syncNoblUk({ start, end, commit = false, includeSpend = false } =
   // Revenue: raw orders_table.order_revenue — identical metric to every other
   // geo region (see fetchRegionRevenue in tripleWhaleSQL.js).
   const revByDate = await fetchShopifyRevenue(UK_WORKSPACE, startYmd, endYmd);
-  const spendByDate = includeSpend ? await fetchAdSpend(UK_WORKSPACE, startYmd, endYmd) : {};
+  const spendByDate = includeSpend ? await fetchMainNoblUkSpend(startYmd, endYmd) : {};
 
   const allDates = new Set([...Object.keys(revByDate), ...Object.keys(spendByDate)]);
   const rows = [...allDates]
@@ -122,6 +125,25 @@ async function syncNoblUk({ start, end, commit = false, includeSpend = false } =
     `[NOBL UK] ${commit ? `deleted ${deleted}, wrote ${written}` : `${rows.length} would-write`} region=UK rows · total revenue $${totalRev.toFixed(2)}${commit ? '' : '  (DRY-RUN — nothing written)'}`,
   );
   return { start: startYmd, end: endYmd, rows: rows.length, written, deleted, totalRevenue: totalRev, commit, includeSpend };
+}
+
+async function fetchMainNoblUkSpend(startYmd, endYmd) {
+  const rows = await twSqlQuery(MAIN_WORKSPACE, `
+    SELECT adt.event_date AS date,
+           COALESCE(SUM(adt.spend), 0) AS spend
+    FROM ads_table AS adt
+    WHERE adt.event_date BETWEEN DATE '${startYmd}' AND DATE '${endYmd}'
+      AND adt.breakdown_dimension = 'country'
+      AND upper(adt.breakdown_value) IN ('GB','UK','UNITED KINGDOM')
+    GROUP BY adt.event_date
+    ORDER BY adt.event_date
+  `, { period: { startDate: startYmd, endDate: endYmd } });
+  const out = {};
+  for (const r of rows || []) {
+    const ymd = String(r.date || r.event_date || '').slice(0, 10);
+    if (ymd) out[ymd] = Number(r.spend || 0);
+  }
+  return out;
 }
 
 async function fetchUkRefunds(startYmd, endYmd) {
@@ -192,4 +214,4 @@ if (require.main === module) {
     .catch(async (e) => { console.error('[NOBL UK] failed:', e.message); await pool.end().catch(() => {}); process.exitCode = 1; });
 }
 
-module.exports = { syncNoblUk, syncNoblUkRefunds };
+module.exports = { syncNoblUk, syncNoblUkRefunds, fetchMainNoblUkSpend };

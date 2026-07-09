@@ -761,15 +761,16 @@ async function runSync(options = {}) {
   }
 
   // ── NOBL UK regional revenue override ─────────────────────────────────────
-  // The main NOBL TW workspace can expose UK as shared/global spend with no UK
-  // store revenue. After tw_refresh, replace NOBL region='UK' rows from the
-  // dedicated NOBL UK TW workspace (revenue only; spend intentionally blank).
+  // The main NOBL TW workspace carries UK ad spend in the GB/UK country breakout
+  // but does not carry UK-store order revenue. After tw_refresh, replace NOBL
+  // region='UK' revenue from the dedicated UK store workspace while preserving
+  // UK spend from the main NOBL country breakout so regional spend reconciles.
   if (tasks.includes('nobl_uk_tw') && brands.includes('NOBL')) {
     const chunks = weeklyChunks(startDate, endDate);
     for (const chunk of chunks) {
       const logId = await logStart(runId, 'NOBL', 'nobl_uk_tw', chunk.start, chunk.end);
       try {
-        const r = await syncNoblUk({ start: chunk.start, end: chunk.end, commit: true, includeSpend: false });
+        const r = await syncNoblUk({ start: chunk.start, end: chunk.end, commit: true, includeSpend: true });
         const refunds = await syncNoblUkRefunds({ start: chunk.start, end: chunk.end, commit: true });
         await logFinish(logId, 'success', r.written + refunds.written);
         results.push({ task: 'nobl_uk_tw', brand: 'NOBL', chunk, rows: r.written, deleted: r.deleted, refundRows: refunds.written });
