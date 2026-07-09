@@ -106,6 +106,21 @@ function regionSummarySql(tableName) {
           ORDER BY date`;
 }
 
+function shopifyRegionCaseSql() {
+  return `CASE
+    WHEN store_key = 'NOBL_UK' THEN 'UK'
+    WHEN store_key = 'FLO_EU' AND UPPER(COALESCE(shipping_country,'')) = '' THEN 'EU'
+    WHEN UPPER(COALESCE(shipping_country,'')) IN ('US','USA','UNITED STATES','UNITED STATES OF AMERICA') THEN 'US'
+    WHEN UPPER(COALESCE(shipping_country,'')) IN ('CA','CANADA') THEN 'CA'
+    WHEN UPPER(COALESCE(shipping_country,'')) IN ('AU','AUS','AUSTRALIA') THEN 'AUS'
+    WHEN UPPER(COALESCE(shipping_country,'')) IN ('GB','UK','UNITED KINGDOM','GREAT BRITAIN') THEN 'UK'
+    WHEN UPPER(COALESCE(shipping_country,'')) IN ('AE','UAE','UNITED ARAB EMIRATES') THEN 'DUBAI'
+    WHEN UPPER(COALESCE(shipping_country,'')) IN ('HK','HONG KONG') THEN 'HK'
+    WHEN UPPER(COALESCE(shipping_country,'')) IN ('AT','BE','BG','HR','CY','CZ','DK','EE','FI','FR','DE','GR','HU','IE','IT','LV','LT','LU','MT','NL','PL','PT','RO','SK','SI','ES','SE','CH','NO','MC') THEN 'EU'
+    ELSE 'OTHER'
+  END`;
+}
+
 function toNum(v) {
   const n = parseFloat(v);
   return Number.isFinite(n) ? n : 0;
@@ -2154,7 +2169,8 @@ router.get('/overview', async (req, res) => {
   try {
     const version = await getDataVersion();
     const { body } = await withResponseCache('overview', `ov:${start}:${end}:${regionKey}`, version, async () => {
-    const [noblRes, floRes, subsRes] = await Promise.all([
+    const airRegionList = regionList.filter(r => ['US', 'CA', 'AUS', 'UK', 'DUBAI', 'HK', 'INTL'].includes(r));
+    const [noblRes, floRes, subsRes, orderRegionRes] = await Promise.all([
       pgQuery(
         regionScoped ? regionSummarySql('nobl_brand_tw_geo_daily') : `SELECT TO_CHAR(date AT TIME ZONE 'UTC', 'YYYY-MM-DD') as date,
                 total_revenue, total_spend, mer,
@@ -2179,7 +2195,29 @@ router.get('/overview', async (req, res) => {
          ORDER BY date`,
         regionScoped ? [start, end, dbRegionList] : [start, end]
       ),
-      pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
+      regionScoped
+        ? (airRegionList.length ? pgQuery(`
+            SELECT TO_CHAR(date,'YYYY-MM-DD') AS date,
+                   SUM(sub_net_sales + rebill_revenue) AS sub_revenue_actual
+            FROM nobl_air_region_daily
+            WHERE date BETWEEN $1::date AND $2::date
+              AND region_key = ANY($3::text[])
+            GROUP BY date
+            ORDER BY date`, [start, end, airRegionList]) : Promise.resolve({ rows: [] }))
+        : pgQuery(NOBL_SUBS_DAILY_SQL, [start, end]),
+      regionScoped ? pgQuery(`
+        WITH tagged AS (
+          SELECT brand, date_key, total_price, ${shopifyRegionCaseSql()} AS region
+          FROM shopify_orders_raw
+          WHERE date_key BETWEEN $1::date AND $2::date
+            AND brand IN ('NOBL','FLO')
+        )
+        SELECT brand, TO_CHAR(date_key,'YYYY-MM-DD') AS date,
+               COUNT(*)::int AS total_orders,
+               SUM(total_price) AS shopify_revenue
+        FROM tagged
+        WHERE region = ANY($3::text[])
+        GROUP BY brand, date_key`, [start, end, dbRegionList]) : Promise.resolve({ rows: [] }),
     ]);
 
     // Build date-keyed maps
@@ -2190,6 +2228,12 @@ router.get('/overview', async (req, res) => {
     for (const r of floRes.rows) floMap[toDateStr(r.date)] = r;
     const subsMap = {};
     for (const r of subsRes.rows) subsMap[toDateStr(r.date)] = r;
+    const orderRegionMap = {};
+    for (const r of orderRegionRes.rows || []) {
+      const d = toDateStr(r.date);
+      const bucket = (orderRegionMap[d] = orderRegionMap[d] || {});
+      bucket[r.brand] = { orders: parseInt(r.total_orders || 0), shopify_revenue: parseFloat(r.shopify_revenue || 0) };
+    }
 
     // Merge all dates
     const allDates = new Set([...Object.keys(noblMap), ...Object.keys(floMap), ...Object.keys(subsMap)]);
@@ -2199,6 +2243,8 @@ router.get('/overview', async (req, res) => {
       const n = noblMap[d] || {};
       const f = floMap[d] || {};
       const s = subsMap[d] || {};
+      const nOrders = orderRegionMap[d]?.NOBL || {};
+      const fOrders = orderRegionMap[d]?.FLO || {};
       // order_revenue = actual Shopify+Amazon orders before refunds (canonical)
       // Falls back to total_revenue (TW attributed) if not yet synced
       const nRev   = parseFloat(n.order_revenue || n.total_revenue || 0);
@@ -2209,23 +2255,23 @@ router.get('/overview', async (req, res) => {
         date: d,
         nobl_revenue:        nRev,
         nobl_order_revenue:  parseFloat(n.order_revenue  || 0),
-        nobl_shopify_revenue:parseFloat(n.shopify_revenue || 0),
+        nobl_shopify_revenue: n.shopify_revenue == null ? (nOrders.shopify_revenue || 0) : parseFloat(n.shopify_revenue || 0),
         nobl_amazon_revenue: parseFloat(n.amazon_revenue  || 0),
         nobl_total_sales:    parseFloat(n.total_sales     || 0),
         nobl_refund_amount:  parseFloat(n.refund_amount   || 0),
         nobl_spend:          nSpend,
         nobl_mer:            nSpend > 0 ? parseFloat((nRev / nSpend).toFixed(4)) : null,
-        nobl_orders:         n.total_orders == null ? null : parseInt(n.total_orders || 0),
+        nobl_orders:         n.total_orders == null ? (nOrders.orders ?? null) : parseInt(n.total_orders || 0),
         nobl_nc_orders:      n.new_customer_orders == null ? null : parseInt(n.new_customer_orders || 0),
         flo_revenue:         fRev,
         flo_order_revenue:   parseFloat(f.order_revenue   || 0),
-        flo_shopify_revenue: parseFloat(f.shopify_revenue || 0),
+        flo_shopify_revenue: f.shopify_revenue == null ? (fOrders.shopify_revenue || 0) : parseFloat(f.shopify_revenue || 0),
         flo_amazon_revenue:  parseFloat(f.amazon_revenue  || 0),
         flo_total_sales:     parseFloat(f.total_sales     || 0),
         flo_refund_amount:   parseFloat(f.refund_amount   || 0),
         flo_spend:           fSpend,
         flo_mer:             fSpend > 0 ? parseFloat((fRev / fSpend).toFixed(4)) : null,
-        flo_orders:          f.total_orders == null ? null : parseInt(f.total_orders || 0),
+        flo_orders:          f.total_orders == null ? (fOrders.orders ?? null) : parseInt(f.total_orders || 0),
         flo_nc_orders:       f.new_customer_orders == null ? null : parseInt(f.new_customer_orders || 0),
         nobl_sub_revenue: parseFloat(s.sub_revenue_actual || 0),
         total_revenue:   nRev + fRev,
