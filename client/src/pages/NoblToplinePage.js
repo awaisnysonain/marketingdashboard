@@ -110,7 +110,10 @@ export default function NoblToplinePage() {
   const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, subsByDate, kpi, chartData, chAgg, geoAgg, subChartData } = useMemo(() => {
     if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, subsByDate: {}, kpi: {}, chartData: [], chAgg: [], geoAgg: [], subChartData: [] };
     const serverRegionScoped = Boolean(data.region_scoped);
-    const channelsData = filterByChannels(data.channels || [], 'channel');
+    // Channel rows are not available at region grain. When the backend has
+    // already scoped summary/geography/subscriptions to a region, do not let
+    // global channel rows pull all global dates back into region charts/tables.
+    const channelsData = serverRegionScoped ? [] : filterByChannels(data.channels || [], 'channel');
     const geoData = filterByRegions(data.geo || [], 'region');
     const summaryByDate = {};
     let totalRev = 0, totalSpend = 0, totalOrders = 0, totalNew = 0, totalOrdersKnown = false, totalNewKnown = false;
@@ -148,7 +151,9 @@ export default function NoblToplinePage() {
     const subsByDate = {};
     let totalSubRev = 0;
     for (const r of (data.subs || [])) { subsByDate[r.date] = r; totalSubRev += Number(r.sub_revenue_actual) || 0; }
-    const allDates = mergeToplineDates(data.summary, channelsData, geoData, data.subs);
+    const allDates = serverRegionScoped
+      ? mergeToplineDates(data.summary, geoData, data.subs)
+      : mergeToplineDates(data.summary, channelsData, geoData, data.subs);
     const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
 
     const effectiveSummaryByDate = (isAllRegions || serverRegionScoped) ? summaryByDate : regionalSummaryByDate;

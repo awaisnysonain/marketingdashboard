@@ -121,7 +121,10 @@ export default function FloToplinePage() {
   const { dates, summaryByDate, channelNames, channelByDateCh, regionNames, geoByDateRg, productNames, productByDatePr, kpi, chartData, chAgg, geoAgg, prodAgg } = useMemo(() => {
     if (!data) return { dates: [], summaryByDate: {}, channelNames: [], channelByDateCh: {}, regionNames: [], geoByDateRg: {}, productNames: [], productByDatePr: {}, kpi: {}, chartData: [], chAgg: [], geoAgg: [], prodAgg: [] };
     const serverRegionScoped = Boolean(data.region_scoped);
-    const channelsData = filterByChannels(data.channels || [], 'channel');
+    // Channel/product rows are not available at region grain. When the backend
+    // has already scoped summary/geography to a region, avoid mixing global
+    // channel/product dates and metrics into region-filtered views.
+    const channelsData = serverRegionScoped ? [] : filterByChannels(data.channels || [], 'channel');
     const geoData = filterByRegions(data.geo || [], 'region');
     const summaryByDate = {};
     let totalRev = 0, totalSpend = 0, totalOrders = 0, totalNew = 0, totalOrdersKnown = false, totalNewKnown = false;
@@ -157,12 +160,15 @@ export default function FloToplinePage() {
       regionalSummaryByDate[r.date].total_spend += Number(r.spend_actual || r.spend) || 0;
     }
     const prSet = new Set(), productByDatePr = {}, productRev = {};
-    for (const r of (data.products || [])) {
+    const productsData = serverRegionScoped ? [] : (data.products || []);
+    for (const r of productsData) {
       prSet.add(r.product_line);
       productByDatePr[`${r.date}|${r.product_line}`] = r;
       productRev[r.product_line] = (productRev[r.product_line] || 0) + (Number(r.revenue) || 0);
     }
-    const allDates = mergeToplineDates(data.summary, channelsData, geoData, data.products);
+    const allDates = serverRegionScoped
+      ? mergeToplineDates(data.summary, geoData)
+      : mergeToplineDates(data.summary, channelsData, geoData, productsData);
     const periodMer = totalSpend > 0 ? totalRev / totalSpend : 0;
 
     const effectiveSummaryByDate = (isAllRegions || serverRegionScoped) ? summaryByDate : regionalSummaryByDate;
@@ -203,7 +209,7 @@ export default function FloToplinePage() {
       .sort((a, b) => b.revenue - a.revenue);
 
     const prodMap = {};
-    for (const r of (data.products || [])) {
+    for (const r of productsData) {
       const pl = r.product_line;
       if (!prodMap[pl]) prodMap[pl] = { line: pl, spend: 0, revenue: 0 };
       prodMap[pl].spend += Number(r.spend) || 0;
